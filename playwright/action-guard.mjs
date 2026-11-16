@@ -11,7 +11,9 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
-export const DEFAULT_ACTION_ROOT=path.join(os.homedir(),'Library','Application Support','McpGo','browser-actions');
+export const DEFAULT_ACTION_ROOT=process.platform==='win32'
+  ? path.join(process.env.LOCALAPPDATA||path.join(os.homedir(),'AppData','Local'),'McpGo','browser-actions')
+  : path.join(os.homedir(),'Library','Application Support','McpGo','browser-actions');
 export const ACTION_ID_RE=/^[a-zA-Z0-9._:-]{8,128}$/;
 
 export function isMutatingTool(name,args={}){

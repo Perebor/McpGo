@@ -1,3 +1,5 @@
+import {sameChatGPTConversation} from '../playwright/chatgpt-url.mjs';
+import {streamBusy,streamReady} from './stream-monitor.mjs';
 /**
  * Conservative chat-state classifier. These are observable DOM states, never
  * proof of server-side ChatGPT execution or a license to replay Send.
@@ -7,7 +9,7 @@ export const STABLE_READY_INTERVAL_MS=650;
 
 export function classifyChatState(page,expectedUrl,now=Date.now()) {
  const detail={
-  urlMatched:page?.url===expectedUrl,
+  urlMatched:sameChatGPTConversation(page?.url,expectedUrl),
   stopVisible:!!page?.stop,
   streamingVisible:!!page?.busyText,
   interrupted:!!page?.connectionInterrupted,
@@ -18,11 +20,20 @@ export function classifyChatState(page,expectedUrl,now=Date.now()) {
  };
  const result=(kind,code,reason)=>({kind,code,reason,signals:detail});
  if(!detail.urlMatched)return result('deferred','WRONG_CONVERSATION','Нужный разговор не открыт или произошла переадресация');
- if(detail.interrupted)return result('interrupted','CONNECTION_INTERRUPTED','В интерфейсе явно показан обрыв ответа; требуется восстановление соединения');
+ if(detail.interrupted&&page.streamStatus!=='COMPLETE')
+  return result('interrupted','CONNECTION_INTERRUPTED','В интерфейсе явно показан обрыв ответа; требуется восстановление соединения');
  if(page.ready!=='complete'||page.login||detail.editorCount!==1||detail.sendCount>1||
     (page.mainLength<80&&page.turnCount<1)||page.genericTitle)
   return result('deferred','PAGE_NOT_READY','Страница разговора не готова или её состояние неоднозначно');
- if(detail.stopVisible||detail.streamingVisible){
+ // Server status outranks a stale Stop button. Unknown means never click.
+ // An actively arriving SSE stream briefly outranks an eventual COMPLETE.
+ if(page.streamStatus==='UNKNOWN')
+  return result('deferred','STREAM_STATUS_UNKNOWN','Сервер не подтвердил завершение генерации; Send запрещён');
+ if(streamBusy(page))
+  return result('busy','SERVER_STREAMING','Сервер или свежие сетевые события подтверждают работу агента');
+ if(detail.interrupted && !streamReady(page))
+  return result('interrupted','CONNECTION_INTERRUPTED','В интерфейсе явно показан обрыв ответа; требуется восстановление соединения');
+ if((detail.stopVisible||detail.streamingVisible)&&!streamReady(page)){
   const changedAt=Number(page.lastAssistantMutationAt);
   const stale=Number.isFinite(changedAt)&&changedAt>0&&now-changedAt>=STALE_GENERATION_MS;
   return stale
@@ -35,9 +46,16 @@ export function classifyChatState(page,expectedUrl,now=Date.now()) {
 }
 export function sameReadySnapshot(a,b) {
  if(!a||!b)return false;
- return a.url===b.url && a.userCount===b.userCount &&
+ // React may re-render an already completed answer without actually resuming
+ // generation. An assistant DOM revision is only a busy signal when the server
+ // has NOT confirmed two idle snapshots with an unchanged stream sequence.
+ const serverIdle=streamReady(a)&&streamReady(b);
+ return sameChatGPTConversation(a.url,b.url) && a.userCount===b.userCount &&
   String(a.lastUserId||'')===String(b.lastUserId||'') &&
-  Number(a.assistantRevision||0)===Number(b.assistantRevision||0) &&
+  String(a.lastUserText||'').trim()===String(b.lastUserText||'').trim() &&
+  (serverIdle||Number(a.assistantRevision||0)===Number(b.assistantRevision||0)) &&
+  (!a.streamStatus&&!b.streamStatus || serverIdle) &&
+  (a.streamSequence===undefined||a.streamSequence===b.streamSequence) &&
   !String(a.editorText||'').trim()&&!String(b.editorText||'').trim();
 }
 /** Structured diagnostics without message text, URL, screenshots or tokens. */
@@ -60,10 +78,25 @@ export function explainEvidence(e={}) {
   USER_BUBBLE_NOT_FOUND:'Новая пользовательская реплика ещё не найдена',
   USER_TEXT_MISMATCH:'Последняя пользовательская реплика не совпадает с заданием',
   TAB_UNAVAILABLE:'Нужная вкладка недоступна для проверки',
+  CHAT_TAB_MISSING:'Вкладка не выбрана в группе AutoSend',
+  AMBIGUOUS_CHAT_TABS:'В группе AutoSend несколько одинаковых вкладок',
   WRONG_CONVERSATION:'Проверка открыла другой разговор',
   OBSERVATION_FAILED:'Не удалось прочитать состояние чата',
+  TAB_IDENTITY_UNVERIFIED:'Chrome не подтвердил идентичность активной вкладки',
+  TAB_INDEX_UNSTABLE:'Вкладки Chrome изменились во время проверки',
+  TAB_OWNED_BY_ANOTHER_AGENT:'Вкладка принадлежит другому агенту',
+  BROWSER_OBSERVATION_TIMEOUT:'Chrome не успел сообщить состояние страницы',
+  BROWSER_OBSERVATION_UNAVAILABLE:'Соединение с браузером временно недоступно',
+  PAGE_RESULT_INVALID:'Невозможно разобрать ответ браузера',
   PRECLICK_BUSY:'До нажатия Send появились признаки занятости',
   PRECLICK_NOT_READY:'Страница изменилась до нажатия Send',
+  GENERATION_ACTIVE:'Ответ агента ещё генерируется',
+  STREAM_PROGRESS:'Обнаружены новые события генерации ответа',
+  USER_MESSAGES_CHANGED:'Изменились пользовательские сообщения',
+  EDITOR_TEXT_CHANGED:'Черновик изменился до отправки',
+  SEND_NOT_READY:'Кнопка отправки не готова',
+  EDITOR_NOT_READY:'Поле ввода временно недоступно',
+  ASSISTANT_CHANGED:'Ответ изменился без подтверждения завершённой генерации',
   CONNECTION_INTERRUPTED:'Ответ прерван — повторная отправка не выполнена',
   READY_NOT_STABLE:'Страница менялась во время проверки готовности',
   DELIVERY_UNCERTAIN:'Отправка могла произойти, но подтверждения нет',

@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
+import {nextAfterRun,recordSlot} from './schedule.mjs';
 /**
  * Crash-safe, read-only post-click verification.
  *
@@ -107,6 +108,7 @@ export function scheduleNextCheck(t,reason='',now=Date.now(),evidence=null){
 export function finishUnknown(t,reason='',evidence=null,now=Date.now()){
  t.enabled=false;
  t.manual_once=false;
+ if(t.active_slot_id)recordSlot(t,t.active_slot_id,t.active_scheduled_at||t.last_attempt_at,'unknown',now);
  t.status='unknown';
  t.next_at=null;
  t.delivery_stage='verification-expired';
@@ -137,21 +139,28 @@ export function recheckUnknown(t,now=Date.now()){
  t.last_error='Повторно проверяем уже нажатый Send. Новых сообщений McpGo НЕ отправляет.';
 }
 export function finishVerified(t,now=Date.now()){
+  if(t.active_slot_id)recordSlot(t,t.active_slot_id,t.active_scheduled_at||t.last_attempt_at,'verified',now);
   t.delivery_count=(t.delivery_count||0)+1;
   t.last_success_at=new Date(now).toISOString();
   t.last_error='';
   t.safe_retry_count=0;
   t.delivery_stage='verified';
-  const once=!t.enabled;
+  if(t.schedule_mode==='after_response')t.continuations_sent=(t.continuations_sent||0)+1;
+  const once=!t.enabled||t.schedule_mode==='once'||
+    (t.schedule_mode==='after_response'&&t.continuations_sent>=t.max_continuations);
+  const next=once?null:nextAfterRun(t,now);
   delete t.verification;
-  if(once){
-    t.manual_once=false;
+  t.last_slot_id=t.active_slot_id||t.last_slot_id||null;
+  t.last_scheduled_at=t.active_scheduled_at||t.last_scheduled_at||null;
+  t.active_slot_id=null;t.active_scheduled_at=null;
+  t.smart_seen_busy=false;t.smart_ready_since=null;t.smart_last_marker=null;
+  t.manual_once=false;
+  if(once || (!next&&t.schedule_mode!=='after_response')){
     t.enabled=false;
     t.next_at=null;
     t.status='paused';
   }else{
-    t.manual_once=false;
     t.status='scheduled';
-    t.next_at=new Date(now+t.interval_seconds*1000).toISOString();
+    t.next_at=next;
   }
 }

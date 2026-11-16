@@ -1,7 +1,9 @@
 import process from 'node:process';
+import {modernHeaders,modernParams,MODERN_PROTOCOL} from './mcp-modern-protocol.mjs';
 
 const base = process.env.PLAYWRIGHT_MCP_URL || 'http://127.0.0.1:8931/mcp';
 let sessionId = '';
+const external=new URL(base).port!=='8931';
 const accept = 'application/json, text/event-stream';
 const parse = text => {
   if (!text.trim()) return null;
@@ -16,24 +18,31 @@ const parse = text => {
 async function send(id, method, params) {
   const body = { jsonrpc: '2.0', method };
   if (id !== null) body.id = id;
-  if (params !== undefined) body.params = params;
-  const headers = { accept, 'content-type': 'application/json', 'mcp-protocol-version': '2025-03-26' };
-  if (sessionId) headers['mcp-session-id'] = sessionId;
+  if (params !== undefined) body.params = external?modernParams(params,'McpGo-Browser-Probe'):params;
+  else if(external)body.params=modernParams({},'McpGo-Browser-Probe');
+  const headers=external?modernHeaders(method,body.params):
+    { accept, 'content-type': 'application/json', 'mcp-protocol-version': '2025-03-26' };
+  if (!external&&sessionId) headers['mcp-session-id'] = sessionId;
   const response = await fetch(base, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(60000) });
   const newSessionId = response.headers.get('mcp-session-id');
-  if (newSessionId) sessionId = newSessionId;
+  if (!external&&newSessionId) sessionId = newSessionId;
   const raw = await response.text();
   if (!response.ok) throw Error(method + ': HTTP ' + response.status + ' ' + raw.slice(0, 350));
   return parse(raw);
 }
 try {
-  const init = await send(1, 'initialize', {
-    protocolVersion: '2025-03-26', capabilities: {},
-    clientInfo: { name: 'mcpgo-playwright-smoke', version: '1.0.0' }
-  });
-  if (!init?.result?.serverInfo) throw Error('MCP initialize response lacks serverInfo');
-  console.log('MCP_INITIALIZE=PASS');
-  await send(null, 'notifications/initialized');
+  if(external){
+    const discover=await send(1,'server/discover');
+    if(!discover?.result?.supportedVersions?.includes(MODERN_PROTOCOL))
+      throw Error('MCP modern discovery rejected');
+    console.log('MCP_2026_DISCOVER=PASS');
+  }else{
+    const init=await send(1,'initialize',{protocolVersion:'2025-03-26',
+      capabilities:{},clientInfo:{name:'mcpgo-private-backend-probe',version:'1.0.0'}});
+    if(!init?.result?.serverInfo)throw Error('Private Playwright MCP initialize response lacks serverInfo');
+    console.log('PRIVATE_PLAYWRIGHT_INITIALIZE=PASS');
+    await send(null,'notifications/initialized');
+  }
   const listed = await send(2, 'tools/list');
   const names = listed?.result?.tools?.map(t => t.name) ?? [];
   console.log('TOOLS_COUNT=' + names.length);
@@ -53,7 +62,11 @@ try {
     console.log('EXTERNAL_NAVIGATION_FILTER=DISABLED');
   }
   if (process.env.PLAYWRIGHT_MCP_VERIFY_TABS === '1') {
-    const tabs=await send(73,'tools/call',{name:'browser_tabs',arguments:{action:'list'}});
+    const scope=external?await send(72,'tools/call',{name:'mcpgo_workspace',arguments:{}}):null;
+    const workspaceId=scope?.result?.structuredContent?.workspace_id;
+    if(external&&!workspaceId)throw Error('MCP workspace was not created');
+    const tabs=await send(73,'tools/call',{name:'browser_tabs',
+      arguments:{action:'list',...(external?{workspace_id:workspaceId}:{})}});
     const content=(tabs?.result?.content||[]).map(x=>x.text||'').join(' ');
     if (tabs?.error || tabs?.result?.isError || /extension did not connect|Invalid token|timed out/i.test(content))
       throw Error('CDP Playwright не подключился к вкладкам личного Chrome');

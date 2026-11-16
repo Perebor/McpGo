@@ -8,7 +8,7 @@
 |---|---|---|
 | Файлы Mac пользователя | Файловая система владельца | TerminalHub от имени user, другие процессы user |
 | Открытые вкладки и учётные сессии Chrome | Личный Google Chrome | Пользователь и разрешённый Chrome CDP client |
-| Terminal session capability | Память `terminal/server.js` | Клиент, получивший id/key, локальный контролирующий процесс |
+| Terminal session capability | Память `terminal/interactive_runtime.cjs` | Клиент, получивший id/key, локальный контролирующий процесс |
 | MCP tool surface | Tunnel association / runtime | Разрешённый ChatGPT MCP client |
 | Агентская очередь | SQLite | Messaging process и локальные процессы владельца |
 | Сохранённые расписания | AutoSend JSON | AutoSend process, локальный владелец |

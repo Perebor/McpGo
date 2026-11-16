@@ -23,8 +23,9 @@ ROOT=pathlib.Path(os.environ.get("MCPGO_RESOURCE_ROOT",
     str(pathlib.Path(__file__).resolve().parents[1]))).resolve()
 sys.path.insert(0,str(ROOT/"onboarding"))
 from setup_engine import SetupEngine,SetupError
+from browser_compat import browser_check
 
-ACTIONS={"status","discover","provision","import","runtime-projects",
+ACTIONS={"status","browser-check","discover","provision","import","runtime-projects",
          "runtime-inspect","runtime-auto","runtime-recover-key",
          "verify-remote","doctor"}
 
@@ -92,7 +93,11 @@ def main():
                  "runtime-recover-key":engine.runtime_recover_key,
                  "verify-remote":engine.verify_remote,
                  "doctor":engine.doctor}
-        result=methods[action]() if action=="status" else methods[action](payload)
+        if action=="browser-check":
+            browser=payload.get("browser", "chrome")
+            result=browser_check(browser)
+        else:
+            result=methods[action]() if action=="status" else methods[action](payload)
         print(json.dumps({"ok":True,"result":result},ensure_ascii=False))
         return 0
     except (ValueError,OSError,SetupError) as exc:

@@ -5,6 +5,7 @@ const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
 const {spawn,spawnSync}=require('node:child_process');
+const MCP_VERSION='2026-07-28';
 const root=path.resolve(__dirname,'../..');
 const enabled=process.platform==='win32'&&process.env.MCPGO_WINDOWS_RUNTIME_TEST==='1';
 test('native Windows Node.exe + ConPTY + OneShot MCP + Files', {skip:!enabled,timeout:90000},async t=>{
@@ -16,7 +17,7 @@ test('native Windows Node.exe + ConPTY + OneShot MCP + Files', {skip:!enabled,ti
  const oneshotCfg=path.join(temp,'terminal','stateless-config.json');
  const env={...process.env,MCPGO_TERMINAL_CONFIG:termCfg,MCPGO_ONESHOT_CONFIG:oneshotCfg,
   MCPGO_NODE_PTY_MODULE:pty,MCPGO_FILES_ROOTS:JSON.stringify([temp]),
-  MCPGO_JOB_ROOT:path.join(temp,'jobs'),MCPGO_ENABLE_STATEFUL:'1',MCPGO_ENABLE_FILES:'1'};
+  MCPGO_JOB_ROOT:path.join(temp,'jobs'),MCPGO_ENABLE_FILES:'1'};
  const processes=[];
  function start(filename){
   const child=spawn(node,[path.join(root,'terminal',filename)],{env,cwd:temp,
@@ -42,15 +43,21 @@ test('native Windows Node.exe + ConPTY + OneShot MCP + Files', {skip:!enabled,ti
  async function call(port,config,method,params={}){
   const cfg=JSON.parse(fs.readFileSync(config,'utf8'));
   const response=await fetch('http://127.0.0.1:'+port+'/'+cfg.mcpPath,{
-   method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-   body:JSON.stringify({jsonrpc:'2.0',id:10,method,params})});
+   method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json',
+    'Mcp-Protocol-Version':MCP_VERSION,'Mcp-Method':method,
+    ...(method==='tools/call'?{'Mcp-Name':params.name}:{})},
+   body:JSON.stringify({jsonrpc:'2.0',id:10,method,params:{...params,
+    _meta:{'io.modelcontextprotocol/protocolVersion':MCP_VERSION,
+     'io.modelcontextprotocol/clientCapabilities':{},
+     'io.modelcontextprotocol/clientInfo':{name:'windows-test',version:'1'}}}})});
   assert.equal(response.status,200);
   const payload=await response.json();
   if(payload.error)throw Error(JSON.stringify(payload.error));
   return payload.result;
  }
- start('server.js');await wait(12847);
  start('stateless_server.js');await wait(12848);
+ const discover=await call(12848,oneshotCfg,'server/discover');
+ assert.ok(discover.supportedVersions.includes(MCP_VERSION));
  const all=await call(12848,oneshotCfg,'tools/list');
  for(const name of ['terminal_create','terminal_send','files_read','terminal_exec'])
   assert.ok(all.tools.some(x=>x.name===name),name+' not exposed');
@@ -60,7 +67,7 @@ test('native Windows Node.exe + ConPTY + OneShot MCP + Files', {skip:!enabled,ti
  assert.ok(session.session_id&&session.session_key);
  await call(12848,oneshotCfg,'tools/call',{name:'terminal_send',arguments:{
   session_id:session.session_id,session_key:session.session_key,
-  text:'Write-Output MCPGO_CONPTY_READY',enter:true}});
+  text:"Write-Output ('MCPGO_' + 'CONPTY_READY')",enter:true}});
  let cursor=0,found=false;
  for(let i=0;i<30;i++){
   const result=await call(12848,oneshotCfg,'tools/call',{name:'terminal_read',arguments:{

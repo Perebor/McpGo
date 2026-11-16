@@ -1,5 +1,5 @@
 /**
- * Compatibility patch for Playwright MCP 0.0.83 / playwright-core 1.64-alpha.
+ * Compatibility patches for Playwright MCP 0.0.85 / playwright-core 1.66-alpha.
  * In personal Chrome, a page may never resolve page.title() (e.g. modal or
  * devtools page), and browser_tabs(list) awaits titles of EVERY open tab.
  * Bound the optional per-tab metadata, not the whole MCP operation.
@@ -75,8 +75,8 @@ const patched = `      async headerSnapshot() {
 `;
 export function patchSource(source) {
   if (source.includes(patched)) return {source,modified:false};
-  const match = source.includes(previousPatched) ? previousPatched : original;
-  if (source.split(match).length !== 2) throw Error('Unsupported Playwright bundle: headerSnapshot() signature changed');
+  const match=source.includes(previousPatched)?previousPatched:original;
+  if(source.split(match).length!==2)throw Error("Unsupported Playwright bundle: headerSnapshot() signature changed");
   return {source:source.replace(match,patched),modified:true};
 }
 const invoked = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -85,5 +85,5 @@ if (invoked) {
   const source=fs.readFileSync(file,'utf8');
   const result=patchSource(source);
   if (result.modified) fs.writeFileSync(file,result.source);
-  console.log(result.modified?'McpGo Playwright metadata timeout patch applied':'McpGo Playwright metadata patch already applied');
+  console.log(result.modified?'McpGo Playwright metadata workaround applied':'McpGo Playwright patches already applied');
 }

@@ -8,9 +8,9 @@
 <section class="intro"><h2>ChatGPT работает на вашем компьютере</h2><p>Терминал PowerShell, автоматизация Chrome и Edge, параллельные операции и защищённые MCP-туннели.</p></section>
 <section class="panel"><div class="heading"><h3>Компоненты</h3><button class="minor" id="restart">Перезапустить</button></div>
 <div class="services">
- <div><span>PowerShell / MCP</span><span id="state-terminal">—</span></div>
- <div><span>ConPTY / интерактивный терминал</span><span id="state-stateful">—</span></div>
+ <div><span>PowerShell / MCP / ConPTY</span><span id="state-terminal">—</span></div>
  <div><span>Playwright / Браузер</span><span id="state-browser">—</span></div>
+<div><span>Playwright / AutoSend</span><span id="state-autosendBrowser">—</span></div>
  <div><span>Защита браузерных действий</span><span id="state-proxy">—</span></div>
  <div><span>Туннель терминала</span><span id="state-terminalTunnel">—</span></div>
  <div><span>Туннель браузера</span><span id="state-browserTunnel">—</span></div>
@@ -41,6 +41,17 @@
 <div class="bottom"><div class="group browser"><label for="browser">Браузер</label>
 <select id="browser"><option value="chrome">Google Chrome</option><option value="msedge">Microsoft Edge</option></select></div>
 <label class="switch"><input type="checkbox" id="autoStart"> Автозапуск с Windows</label></div>
+<div class="browser-compatibility" aria-live="polite">
+<p class="hint" id="browser-version">Проверяем версию выбранного браузера для фонового режима Playwright…</p>
+<div class="actions"><button type="button" class="minor" id="browser-version-check">Проверить версию</button>
+<button type="button" class="minor" id="browser-version-update" hidden>Обновить браузер</button></div>
+</div>
+<div class="group">
+<label for="playwright-token">Playwright Extension · токен подключения</label>
+<input id="playwright-token" type="password" spellcheck="false" autocomplete="off"
+ placeholder="Скопируй из официального Playwright Extension">
+<p class="hint" id="playwright-token-help">Токен шифруется средствами Windows. Пустое поле сохраняет предыдущий токен.
+AutoSend использует свою группу вкладок и никогда не открывает дубликаты автоматически.</p></div>
 <div class="actions"><button type="button" class="minor" id="browser-docs">Расширение Playwright</button><button type="submit" class="primary">Сохранить и подключить</button></div>
 </form></section>
 <section class="panel"><div class="heading"><h3>Сообщения по таймеру</h3><button class="minor" id="refresh-tasks" type="button">Обновить</button></div>

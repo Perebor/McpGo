@@ -81,7 +81,7 @@ struct TunnelInstructionView: View {
 
     private var localServer: String {
         kind == .terminal
-        ? "ChatTerminalHub уже установлен: Command server, OneShot/jobs и профиль chat-terminal-hub.yaml. Новый локальный MCP-сервер создавать не надо."
+        ? "Terminal MCP уже установлен: единый сервер PTY/Jobs на порту 12848 и профиль chat-terminal-hub.yaml. Новый локальный MCP-сервер создавать не надо."
         : "Личный Chrome через CDP (порт MCP 8931) и Safe proxy (127.0.0.1:8940/mcp) уже настроены. В туннель подключается только Safe proxy, не прямой браузерный MCP."
     }
 
@@ -102,7 +102,7 @@ struct TunnelInstructionView: View {
                 detail: "Вернись в Настройки туннелей → \(kind.name). В поле TUNNEL ID вставь идентификатор из шага 2, а в API KEY — ключ из шага 3. Нажми «Сохранить». McpGo хранит новый ключ в Keychain macOS, а Tunnel ID — в защищённой конфигурации. Если изменяешь только Tunnel ID, оставь поле нового API-ключа пустым.",
                 warning: "Никому не отправляй API-ключ в чат, скриншот, Git или лог. Нажатие «Сохранить» само по себе не перезапускает работающий туннель."),
             GuideStep(id: 5, title: "Примени конфигурацию и проверь локальный MCP",
-                detail: "Нажми «Переподключить туннель» и подтверди действие. В разделе «Обзор» проверь активные процессы. \(kind == .terminal ? "Для TerminalHub должны работать Command server, OneShot/jobs и Secure MCP tunnel." : "Для Playwright должны работать Личный Chrome по CDP (8931), Safe proxy (8940) и Secure MCP tunnel. Внешний туннель должен направляться на 127.0.0.1:8940/mcp.") Также нужен исходящий HTTPS к api.openai.com:443.",
+                detail: "Нажми «Переподключить туннель» и подтверди действие. В разделе «Обзор» проверь активные процессы. \(kind == .terminal ? "Для терминала должны работать единый Terminal MCP (PTY/Jobs на 12848) и Secure MCP tunnel." : "Для Playwright должны работать Личный Chrome по CDP (8931), Safe proxy (8940) и Secure MCP tunnel. Внешний туннель должен направляться на 127.0.0.1:8940/mcp.") Также нужен исходящий HTTPS к api.openai.com:443.",
                 warning: kind == .terminal ? "Переподключение терминального туннеля может временно прервать доступ текущего чата к Mac." : "Не подключай ChatGPT напрямую к браузерному MCP на порту 8931 — используется безопасный прокси на 8940."),
             GuideStep(id: 6, title: "Подключи туннель к ChatGPT",
                 detail: "В ChatGPT открой Plugins → «+» → Add custom MCP server. Название: «\(kind.pluginName)». В Connection выбери Tunnel, затем нужный туннель из списка или вставь тот же tunnel_…. Настрой Authentication по требованиям самого MCP-сервера (это НЕ runtime API-ключ tunnel-client). Прочитай предупреждение о рисках, отметь «I understand and want to continue», нажми «Create as a plugin». Если плагин уже подключён, сначала проверь его существующие настройки.",

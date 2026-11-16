@@ -12,7 +12,7 @@ test('normal ChatGPT conversation URL remains the exact recipient',()=>{
  assert.equal(normalizeTarget(target+'?no_universal_links=1&refresh_account=true&startup_account_refresh=true'),target);
  assert.equal(normalizeTarget(target+'/'),target);
  assert.equal(DIRECT_WEB_CHAT_DELIVERY_SUPPORTED,true);
- assert.match(DIRECT_WEB_CHAT_REASON,/Playwright CDP/);
+ assert.match(DIRECT_WEB_CHAT_REASON,/Playwright Extension/);
 });
 test('project-scoped conversation URL is preserved, query params dropped',()=>{
  assert.equal(normalizeTarget(project),project);

@@ -34,6 +34,9 @@ jobs:
         run: |
           (cd autosend && node --test tests/*.test.mjs)
           node --test dashboard/tests/*.test.mjs playwright/tests/*.test.mjs
+          node --test terminal/tests/*.test.cjs terminal/tests/*.test.mjs
+          node --check terminal/interactive_runtime.cjs
+          node --check terminal/stateless_server.js
           node --check dashboard/server.mjs
           node --check autosend/server.mjs
           node --check playwright/restricted-proxy.mjs

@@ -20,4 +20,8 @@ No public release/version-support promise exists yet. A locally running McpGo.ap
 
 ## Cautions
 
-Terminal tools can run commands with the macOS user's permissions. Playwright uses the user's **existing Chrome session** via CDP. Treat both as powerful capabilities; review workspace/client permissions before enabling them.
+Terminal tools can run commands with the macOS user's permissions. Playwright uses the user's **existing Chrome session** via CDP or the official Playwright Extension. Extension auto-approval requires a user-provided, private, browser-profile token that must never be committed or logged. Treat both as powerful capabilities; review workspace/client permissions before enabling them.
+
+### Playwright Extension token (macOS)
+
+In the first-run wizard the Playwright Extension token is submitted to the local onboarding engine over stdin (never process arguments), validated using an isolated read-only MCP trial, and stored owner-only (0600) under `~/Library/Application Support/McpGo/playwright/extension-token`. The live browser is switched only after trial success; failed live verification restores the previous mode and token. Do not paste this token into ChatGPT conversations, issue trackers, or logs.

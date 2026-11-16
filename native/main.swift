@@ -16,22 +16,29 @@ enum McpGoPaths {
         let fm = FileManager.default
         let support = userHome.appendingPathComponent("Library/Application Support/McpGo", isDirectory: true)
         let installed = support.appendingPathComponent("Runtime", isDirectory: true)
-        let check = installed.appendingPathComponent("onboarding/cli.py")
-        if fm.fileExists(atPath: check.path) { return installed.standardizedFileURL.path }
-        if fm.fileExists(atPath: installed.path) {
-            // Never overwrite an existing runtime or follow a symlink.
-            return installed.standardizedFileURL.path
-        }
+        // Upgrade only release-owned code inside a staged runtime tree. Keep
+        // application data and existing tunnel credentials entirely intact.
         do {
             try fm.createDirectory(at: support, withIntermediateDirectories: true,
                                    attributes: [.posixPermissions: 0o700])
-            let staging = support.appendingPathComponent(".runtime-staging-\(UUID().uuidString)", isDirectory: true)
-            try fm.copyItem(at: seed, to: staging)
-            do {
-                try fm.moveItem(at: staging, to: installed)
-            } catch {
-                try? fm.removeItem(at: staging)
-                if !fm.fileExists(atPath: check.path) { throw error }
+            let helper = seed.appendingPathComponent("scripts/upgrade_runtime.py")
+            let python = seed.appendingPathComponent("vendor/python/bin/python3")
+            guard fm.fileExists(atPath: helper.path),
+                  fm.isExecutableFile(atPath: python.path) else {
+                NSLog("McpGo release runtime upgrader or bundled Python missing")
+                return installed.standardizedFileURL.path
+            }
+            let operation = Process()
+            operation.executableURL = python
+            operation.arguments = [helper.path, seed.path, support.path]
+            operation.standardOutput = FileHandle.nullDevice
+            operation.standardError = FileHandle.nullDevice
+            try operation.run()
+            operation.waitUntilExit()
+            if operation.terminationStatus != 0 {
+                // The helper restores the previous runtime after an aborted
+                // switch. A failed upgrade never reruns first-time onboarding.
+                NSLog("McpGo runtime upgrade failed; previous installation retained")
             }
         } catch {
             NSLog("McpGo runtime preparation failed: %@", error.localizedDescription)
@@ -90,7 +97,7 @@ extension Color {
 }
 
 struct AgentState: Decodable { let loaded:Bool; let running:Bool; let pid:Int? }
-struct TerminalState: Decodable { let server:AgentState; let oneshot:AgentState; let tunnel:AgentState }
+struct TerminalState: Decodable { let oneshot:AgentState; let tunnel:AgentState }
 struct BrowserState: Decodable { let browser:AgentState; let proxy:AgentState; let tunnel:AgentState; let backend:Bool; let proxyReady:Bool; let mcpReady:Bool?; let configured:Bool }
 struct MCPVersionState: Decodable { let terminal:String?; let playwright:String? }
 struct RecoveryChannelState: Decodable { let desired:Bool; let status:String }
@@ -603,7 +610,7 @@ private struct DashboardView: View {
 
     private var terminalOn: Bool {
         guard let t=model.state?.terminal else {return false}
-        return t.server.running && t.oneshot.running && t.tunnel.running
+        return t.oneshot.running && t.tunnel.running
     }
     private var browserOn: Bool {
         guard let p=model.state?.playwright else {return false}
@@ -626,13 +633,12 @@ private struct DashboardView: View {
     }
     private var terminalParts: [ServiceLine] {
         guard let t=model.state?.terminal else {
-            return ["Command server", "OneShot / jobs", "Secure MCP tunnel"].enumerated().map {
+            return ["Terminal MCP · PTY / Jobs", "Secure MCP tunnel"].enumerated().map {
                 ServiceLine(id:"t\($0.offset)",name:$0.element,up:false,status:"Ожидание")
             }
         }
         return [
-            ServiceLine(id:"command", name:"Command server", up:t.server.running, status:t.server.running ? "Работает" : "Остановлен"),
-            ServiceLine(id:"oneshot", name:"OneShot / jobs", up:t.oneshot.running, status:t.oneshot.running ? "Работает" : "Остановлен"),
+            ServiceLine(id:"oneshot", name:"Terminal MCP · PTY / Jobs", up:t.oneshot.running, status:t.oneshot.running ? "Работает" : "Остановлен"),
             ServiceLine(id:"terminal-tunnel", name:"Secure MCP tunnel", up:t.tunnel.running, status:t.tunnel.running ? "Процесс запущен" : "Остановлен")
         ]
     }
@@ -737,7 +743,7 @@ private struct DashboardView: View {
                     let t=model.state?.terminal
                     ServicePanel(name:"Терминал", sub:"Локальный MCP  ·  Команды и задачи Mac", symbol:"terminal", group:"terminal",
                                  components:terminalParts, up:terminalOn,
-                                 partial:(t.map{$0.server.running || $0.oneshot.running || $0.tunnel.running} ?? false),
+                                 partial:(t.map{$0.oneshot.running || $0.tunnel.running} ?? false),
                                  footnote:"Автозапуск при входе в macOS",
                                  mcpVersion:model.state?.mcpVersions?.terminal ??
                                      McpGoPaths.installedMCPVersion("terminal/mcp-version.json"),

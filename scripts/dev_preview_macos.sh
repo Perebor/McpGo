@@ -91,6 +91,28 @@ fi
 # Include new recovery/operation modules in the Dev-only embedded runtime
 # before its ad-hoc signature is computed. Never touch /Applications/McpGo.app.
 python3 "$ROOT/scripts/dev_sync_runtime.py" --bundle "$DEV_APP/Contents/Resources/RuntimeSeed"
+# Sync the new, exclusively source-code LaunchAgent into the Dev bundle.
+# The installed LaunchAgents and the user's schedules are never touched.
+AUTOSEND_AGENT_SRC="$ROOT/launchagents/com.mcphub.autosend.browser.plist"
+AUTOSEND_AGENT_DST="$DEV_APP/Contents/Resources/RuntimeSeed/launchagents/com.mcphub.autosend.browser.plist"
+if [[ ! -f "$AUTOSEND_AGENT_SRC" || -L "$AUTOSEND_AGENT_SRC" ||
+      -L "$AUTOSEND_AGENT_DST" || ! -d "$(dirname "$AUTOSEND_AGENT_DST")" ]]; then
+  echo "[dev] Unsafe or missing AutoSend Extension LaunchAgent template" >&2
+  exit 14
+fi
+if ! cmp -s "$AUTOSEND_AGENT_SRC" "$AUTOSEND_AGENT_DST"; then
+  cp -p "$AUTOSEND_AGENT_SRC" "$AUTOSEND_AGENT_DST"
+  echo "[dev] Added AutoSend Extension LaunchAgent to Dev seed."
+fi
+# An existing Dev app may have been copied from a previous release.
+# Retire the obsolete standalone Terminal LaunchAgent from the Dev bundle
+# before signing; it must not be reinstalled on future first-run setup.
+LEGACY_DEV_AGENT="$DEV_APP/Contents/Resources/RuntimeSeed/launchagents/com.chatterminalhub.server.plist"
+if [[ -f "$LEGACY_DEV_AGENT" && ! -L "$LEGACY_DEV_AGENT" ]]; then
+  rm -- "$LEGACY_DEV_AGENT"
+  echo "[dev] Removed obsolete standalone terminal LaunchAgent from Dev seed."
+fi
+python3 "$ROOT/scripts/dev_sync_playwright_seed.py" --bundle "$DEV_APP/Contents/Resources/RuntimeSeed"
 
 # Label this DEV preview with its actual target version in Info.plist.
 # The release bundle and source Info.plist are not modified.

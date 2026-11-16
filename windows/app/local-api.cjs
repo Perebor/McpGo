@@ -1,22 +1,28 @@
 'use strict';
 const http=require('node:http');
+const fs=require('node:fs');
+const path=require('node:path');
 const ROUTES={
  autosend:{port:8972,read:['/api/status'],write:['/api/tasks']},
  messaging:{port:8971,read:['/api/status','/api/agents','/api/history'],
    write:['/api/agents','/api/messages','/api/ack']}
 };
-function localRequest(service,route,body){
+function localRequest(service,route,body,userData){
  const target=ROUTES[service];
  if(!target)throw Error('UNKNOWN_LOCAL_SERVICE');
  const method=body===undefined?'GET':'POST';
  const allowed=body===undefined?target.read:target.write;
  if(!allowed.includes(route))throw Error('FORBIDDEN_LOCAL_ENDPOINT');
  const data=body===undefined?null:Buffer.from(JSON.stringify(body));
+ const token=service==='autosend'&&userData?
+  fs.readFileSync(path.join(userData,'AutoSend','control-token'),'utf8').trim():null;
+ if(service==='autosend'&&(!token||!/^[a-f0-9]{64}$/.test(token)))throw Error('AUTOSEND_CONTROL_TOKEN_MISSING');
  if(data?.length>26000)throw Error('REQUEST_TOO_LARGE');
  return new Promise((resolve,reject)=>{
   const req=http.request({host:'127.0.0.1',port:target.port,path:route,
    method,timeout:10000,headers:{
     'Host':'127.0.0.1:'+target.port,'X-MCPHub-Client':'native',
+    ...(token?{'X-MCPHub-Token':token}:{}),
     'Accept':'application/json',...(data?{
     'Content-Type':'application/json','Content-Length':data.length}:{}),
     }},res=>{

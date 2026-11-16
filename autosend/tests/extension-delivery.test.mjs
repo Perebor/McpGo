@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-import {classifyAgent,parsePageResult,extractTabs,pageInspection,deliverViaPlaywright,confirmsNewUserMessage} from '../cdp-delivery.mjs';
+import {classifyAgent,parsePageResult,extractTabs,pageInspection,deliverViaPlaywright,preClickIssue,classifyPreflightError,confirmsNewUserMessage} from '../delivery.mjs';
 import {sameReadySnapshot,classifyChatState} from '../chat-state.mjs';
 const url='https://chatgpt.com/c/00000000-0000-4000-8000-000000000001';
 const task={url,message:'Test scheduler CDP'};
@@ -38,6 +38,46 @@ test('readiness fails closed for busy agent, draft, wrong conversation and ambig
 test('CDP browser tab indexes are parsed conservatively',()=>{
  assert.deepEqual(extractTabs('### Result\n- 2: Chat (https://chatgpt.com/c/aaa)\n3: cloud (https://console.cloud.ru/)'),[{index:2,url:'https://chatgpt.com/c/aaa'},{index:3,url:'https://console.cloud.ru'}]);
 });
+test('Playwright extension tab listing parses Markdown titles and ignores extension connection page',()=>{
+ const listed='### Result\n- 0: (current) [Welcome](chrome-extension://extension-id/connect.html)\n- 2: [ChatGPT](https://chatgpt.com/c/aaa)';
+ assert.deepEqual(extractTabs(listed),[{index:2,url:'https://chatgpt.com/c/aaa'}]);
+});
+test('scheduler skips missing conversation without creating tabs or typing',async()=>{
+ const f=fake(),original=f.client.tool;
+ f.client.tool=async(name,args)=>{
+  if(name==='browser_tabs'&&args.action==='list'){
+   f.calls.push({name,args});
+   return '### Result\n- 0: (current) [Welcome](chrome-extension://extension-id/connect.html)';
+  }
+  return original(name,args);
+ };
+ const result=await deliverViaPlaywright(task,()=>{throw Error('no claim')},
+  {client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'deferred');
+ assert.equal(result.evidence.code,'CHAT_TAB_MISSING');
+ assert.ok(!f.calls.some(c=>c.name==='browser_tabs'&&c.args.action==='new'));
+ assert.ok(!f.calls.some(c=>c.name==='browser_type'||c.name==='browser_evaluate'));
+});
+test('scheduler refuses ambiguous matching tabs in the same extension group',async()=>{
+ const f=fake(),original=f.client.tool;
+ f.client.tool=async(name,args)=>{
+  if(name==='browser_tabs'&&args.action==='list'){
+   f.calls.push({name,args});
+   return '### Result\n- 0: [Chat A]('+url+')\n- 1: [Chat B]('+url+')';
+  }
+  return original(name,args);
+ };
+ const result=await deliverViaPlaywright(task,()=>{throw Error('no claim')},
+  {client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'deferred');
+ assert.equal(result.evidence.code,'AMBIGUOUS_CHAT_TABS');
+ assert.ok(!f.calls.some(c=>c.name==='browser_tabs'&&c.args.action==='new'));
+ assert.ok(!f.calls.some(c=>c.name==='browser_type'||c.name==='browser_evaluate'));
+});
+test('browser_tabs parser reads only the Result, not repeated tab lists',()=>{
+ assert.deepEqual(extractTabs('### Result\n- 0: [Chat]('+url+')\n### Open tabs\n- 0: [Chat]('+url+')'),
+  [{index:0,url}]);
+});
 test('MCP results parse fenced and plain JSON',()=>{
  assert.equal(parsePageResult('### Result\n```json\n{"stop":true}\n```').stop,true);
  assert.equal(parsePageResult('### Result\n{"stop":false}').stop,false);
@@ -58,6 +98,15 @@ test('MCP result parser ignores echoed Playwright JavaScript with braces',()=>{
 test('MCP result parser rejects invalid JSON instead of parsing echoed source',()=>{
  const response=['### Result','{stop:false}','### Ran Playwright code','```js','({stop:true})','```'].join('\n');
  assert.throws(()=>parsePageResult(response),/некорректный JSON/);
+});
+test('extension proxy queue saturation yields recoverable preflight error without sending',async()=>{
+ const f=fake();
+ f.client.tool=async()=>{throw Error('Playwright MCP HTTP 429: Browser action queue full')};
+ const result=await deliverViaPlaywright(task,()=>{throw Error('must not click')},{client:f.client});
+ assert.equal(result.status,'deferred');
+ assert.equal(result.reason,'transport_busy');
+ assert.equal(result.evidence.clickCommitted,false);
+ assert.equal(result.evidence.code,'BROWSER_QUEUE_BUSY');
 });
 test('busy chat never types or clicks and skips current slot',async()=>{
  const f=fake({stop:true});const result=await deliverViaPlaywright(task,()=>{throw Error('must not click')},{client:f.client});
@@ -206,4 +255,97 @@ test('hidden streaming indicator does not incorrectly mark an idle page busy',()
  const location={origin:'https://chatgpt.com',pathname:'/c/00000000-0000-4000-8000-000000000001'};
  const snapshot=vm.runInNewContext('('+pageInspection+')()',{document,location});
  assert.equal(snapshot.busyText,false);
+});
+
+
+test('completed server stream ignores unrelated assistant DOM re-render while idle',async()=>{
+ const f=fake({streamStatus:'COMPLETE',streamSequence:5,assistantRevision:7});
+ const original=f.client.tool;
+ let inspections=0;
+ f.client.tool=async(name,args)=>{
+  if(name==='browser_type'){
+   const result=await original(name,args);
+   f.state.assistantRevision++; // React composer updated a wrapper inside <main>
+   return result;
+  }
+  if(name==='browser_evaluate'&&!args.function.includes('function guardedClickInPage')){
+   inspections++;
+   if(inspections===4)f.state.assistantRevision++; // also re-rendered before final preflight
+  }
+  return original(name,args);
+ };
+ const result=await deliverViaPlaywright(task,async()=>f.commit(),{client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'verified');
+ assert.equal(f.calls.filter(c=>c.name==='browser_type').length,1);
+ assert.equal(f.calls.filter(c=>c.name==='browser_evaluate'&&c.args.function.includes('function guardedClickInPage')).length,1);
+});
+
+test('idle snapshots accept DOM revisions only when server COMPLETE and sequence unchanged',()=>{
+ const a={...page,streamStatus:'COMPLETE',streamSequence:10,assistantRevision:8};
+ assert.equal(sameReadySnapshot(a,{...a,assistantRevision:12}),true);
+ assert.equal(sameReadySnapshot(a,{...a,assistantRevision:12,streamSequence:11}),false);
+ assert.equal(sameReadySnapshot(a,{...a,assistantRevision:12,lastUserText:'A different user message'}),false);
+ assert.equal(sameReadySnapshot({...a,streamStatus:'UNKNOWN'},a),false);
+ const taskWithUrl={url,message:'Test scheduler CDP'};
+ const typed={...a,editorText:task.message,sendEnabled:true};
+ assert.equal(preClickIssue(a,{...typed,assistantRevision:15},taskWithUrl,5),null);
+ assert.equal(preClickIssue(a,{...typed,streamStatus:'IS_STREAMING'},taskWithUrl,5),'GENERATION_ACTIVE');
+ assert.equal(preClickIssue(a,{...typed,streamSequence:12},taskWithUrl,5),'STREAM_PROGRESS');
+ assert.equal(preClickIssue(a,{...typed,lastUserText:'New'},taskWithUrl,5),'USER_MESSAGES_CHANGED');
+ assert.equal(preClickIssue(a,{...typed,editorText:'Human draft'},taskWithUrl,5),'EDITOR_TEXT_CHANGED');
+});
+
+test('composer send-button hydration gets retried without retyping',async()=>{
+ const f=fake({streamStatus:'COMPLETE',streamSequence:2,assistantRevision:1});
+ const original=f.client.tool;
+ let ready=0;
+ f.client.tool=async(name,args)=>{
+  if(name==='browser_evaluate'&&!args.function.includes('function guardedClickInPage')&&f.state.editorText){
+   ready++;
+   if(ready===1)f.state.sendEnabled=false;
+   else f.state.sendEnabled=true;
+  }
+  return original(name,args);
+ };
+ const result=await deliverViaPlaywright(task,async()=>f.commit(),{client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'verified');
+ assert.ok(ready>=3);
+ assert.equal(f.calls.filter(c=>c.name==='browser_type').length,1);
+});
+
+
+test('real Chrome tab identity 503 reports a precise safe reason without sending',async()=>{
+ const f=fake();
+ const original=f.client.tool;
+ f.client.tool=async(name,args)=>{
+  if(name==='browser_evaluate')
+   throw Error('Playwright MCP HTTP 503: {"error":{"message":"Current tab identity cannot be verified"}}');
+  return original(name,args);
+ };
+ const result=await deliverViaPlaywright(task,()=>{throw Error('must not commit')},
+  {client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'deferred');
+ assert.equal(result.evidence.code,'TAB_IDENTITY_UNVERIFIED');
+ assert.match(result.error,/активную вкладку Chrome/);
+ assert.equal(result.evidence.clickCommitted,false);
+ assert.equal(f.calls.filter(c=>c.name==='browser_type').length,0);
+});
+test('transport preflight diagnostics never expose raw MCP body or URLs',()=>{
+ const response=classifyPreflightError({message:'MCP HTTP 503: page URL https://private.example/sensitive'});
+ assert.equal(response.code,'BROWSER_OBSERVATION_UNAVAILABLE');
+ assert.ok(!JSON.stringify(response).includes('private.example'));
+ assert.equal(classifyPreflightError({message:'Browser action queue wait timed out'}).code,'BROWSER_QUEUE_BUSY');
+ assert.equal(classifyPreflightError({message:'TAB_INDEX_CHANGED_USE_STABLE_ID'}).code,'TAB_INDEX_UNSTABLE');
+});
+
+
+test('scheduler recognizes project canonical URL in readiness and delivery proof',()=>{
+ const project='a'.repeat(32),id='00000000-0000-4000-8000-000000000001';
+ const short='https://chatgpt.com/g/g-p-'+project+'/c/'+id;
+ const canonical='https://chatgpt.com/g/g-p-'+project+'-gafus-refactor/c/'+id;
+ const p={...page,url:canonical};
+ assert.equal(classifyChatState(p,short).kind,'ready');
+ assert.equal(sameReadySnapshot({...p,url:short},p),true);
+ assert.equal(preClickIssue({...p,url:short},{...p,editorText:'Test scheduler CDP',sendEnabled:true},
+   {url:short,message:'Test scheduler CDP'},p.userCount),null);
 });

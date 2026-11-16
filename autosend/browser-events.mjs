@@ -1,3 +1,4 @@
+import {chatGPTConversationKey} from '../playwright/chatgpt-url.mjs';
 /**
  * Event-assisted browser observation on the existing personal Chrome tab.
  * The in-page MutationObserver notifies a SHORT (<=1300 ms) bounded promise.
@@ -8,7 +9,11 @@
 export const MAX_EVENT_WAIT_MS=1300;
 export async function waitForChatMutationInPage(cfg){
  const current=location.origin+location.pathname.replace(/\/$/,'');
- if(current!==cfg.url)return {kind:'scope_changed'};
+ const project=current.match(/^https:\/\/chatgpt\.com\/g\/g-p-([0-9a-f]{32})(?:-[a-z0-9-]{1,160})?\/c\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i);
+ const direct=current.match(/^https:\/\/chatgpt\.com\/c\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i);
+ const currentKey=project?'project:'+project[1].toLowerCase()+':'+project[2].toLowerCase():
+   direct?'direct:'+direct[1].toLowerCase():null;
+ if(!currentKey||currentKey!==cfg.conversationKey)return {kind:'scope_changed'};
  const record=window.__mcpgoAutoSendObserver;
  if(!record||!(record.listeners instanceof Set))
    return {kind:'unavailable'};
@@ -42,7 +47,9 @@ export function buildEventWait({url,assistantRevision,userInsertions,timeoutMs=1
     !url.startsWith('https://chatgpt.com/g/'))throw Error('INVALID_EVENT_URL');
  if(!Number.isInteger(assistantRevision)||!Number.isInteger(userInsertions))
    return null;
- const cfg={url,assistantRevision,userInsertions,
+ const conversationKey=chatGPTConversationKey(url);
+ if(!conversationKey)throw Error('INVALID_EVENT_URL');
+ const cfg={url,conversationKey,assistantRevision,userInsertions,
    timeoutMs:Math.min(MAX_EVENT_WAIT_MS,Math.max(100,timeoutMs))};
  return 'async () => ('+waitForChatMutationInPage.toString()+')('+JSON.stringify(cfg)+')';
 }

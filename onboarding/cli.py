@@ -19,6 +19,7 @@ ACTIONS = {
     'runtime-auto': lambda e,d: e.runtime_auto(d),
     'verify-remote': lambda e,d: e.verify_remote(d),
     'configure': lambda e,d: e.configure(d),
+    'activate-browser-extension': lambda e,d: e.activate_browser_extension(d),
     'check-ownership': lambda e,d: (e.ensure_installation_ownership() or {"allowed": True}),
     'install-deps': lambda e,d: e.install_dependencies(d),
     'install': lambda e,d: e.install_services(d),

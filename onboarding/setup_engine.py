@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 from typing import Any
+from browser_compat import browser_check
 
 ROOT = Path(__file__).resolve().parents[1]
 TUNNEL_ID = re.compile(r"^tunnel_[A-Za-z0-9_-]{3,180}$")
@@ -447,6 +448,173 @@ class SetupEngine:
         self.write_state(state)
         return {"installed": True, "note": "Запуск внешних туннелей требует runtime key в Keychain."}
 
+    def browser_extension_mode(self) -> str:
+        """Public mode flag only. Never return the extension authentication token."""
+        file = self.appdata / "playwright/browser-mode"
+        try:
+            if file.is_symlink():
+                return "invalid"
+            return "extension" if file.read_text("utf-8").strip() == "extension" else "not-configured"
+        except FileNotFoundError:
+            return "not-configured"
+        except OSError:
+            return "invalid"
+
+    def activate_browser_extension(self, data: dict) -> dict:
+        """Test the user's supplied extension token BEFORE changing the live browser.
+
+        Only the browser launch agent is restarted after isolated verification.
+        A failed live check rolls the mode and token back to their prior values.
+        No token is ever returned, printed, logged, or sent through command argv.
+        """
+        if sys.platform != "darwin" or data.get("confirmed") is not True:
+            raise SetupError("Подтвердите переключение Playwright на macOS.")
+        token = str(data.get("token") or "").strip()
+        token = token.removeprefix("PLAYWRIGHT_MCP_EXTENSION_TOKEN=")
+        if not re.fullmatch(r"[^\s\x00-\x1f]{16,2048}", token):
+            raise SetupError("Неверный токен Playwright Extension. Скопируйте его из расширения Chrome.")
+        node = self.root / "vendor/node/bin/node"
+        cli = self.root / "playwright/node_modules/@playwright/mcp/cli.js"
+        probe = self.root / "playwright/probe.mjs"
+        package = self.root / "playwright/node_modules/@playwright/mcp/package.json"
+        if not all(p.is_file() for p in (node, cli, probe, package)):
+            raise SetupError("Playwright Runtime не установлен полностью.")
+        try:
+            version = json.loads(package.read_text("utf-8")).get("version")
+        except (OSError, ValueError):
+            version = None
+        if version != "0.0.85":
+            raise SetupError("Сначала обновите Playwright MCP до 0.0.85.")
+        port = 8999
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=.2):
+                raise SetupError("Тестовый порт 8999 занят. Действующие процессы не тронуты.")
+        except ConnectionRefusedError:
+            pass
+        except OSError as exc:
+            if isinstance(exc, SetupError):
+                raise
+            # No listener is expected. Other socket failures fail closed.
+            if not isinstance(exc, (TimeoutError, ConnectionRefusedError)):
+                raise SetupError("Не удалось проверить тестовый порт 8999.") from None
+        env = os.environ.copy()
+        env["PLAYWRIGHT_MCP_EXTENSION_TOKEN"] = token
+        env["PLAYWRIGHT_MCP_URL"] = f"http://127.0.0.1:{port}/mcp"
+        env["PLAYWRIGHT_MCP_VERIFY_TABS"] = "1"
+        env["TMPDIR"] = str(self.root / "playwright/.cache/tmp") + "/"
+        env["PWTEST_SOCKETS_DIR"] = str(self.root / "playwright/.s")
+        trial_args = [str(node), str(cli), "--host", "127.0.0.1", "--port", str(port),
+                      "--extension", "--background", "--caps", "vision,devtools",
+                      "--block-service-workers", "--no-webmcp"]
+        # Prefer the profile with extension installed, set explicitly only if configured.
+        profile = self.appdata / "playwright/chrome-profile"
+        if profile.exists() and not profile.is_symlink():
+            value = profile.read_text("utf-8").strip()
+            if value and re.fullmatch(r"[A-Za-z0-9 _.-]{1,100}", value) and value not in (".", ".."):
+                trial_args += ["--profile-dir-name", value]
+        trial = None
+        try:
+            trial = subprocess.Popen(trial_args, cwd=str(self.root / "playwright"),
+                                     env=env, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ready = False
+            for _ in range(100):
+                if trial.poll() is not None:
+                    break
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=.2):
+                        ready = True
+                        break
+                except OSError:
+                    time.sleep(.15)
+            if not ready:
+                raise SetupError("Тестовый Playwright Extension не запустился. Работающий браузер не переключался.")
+            test = subprocess.run([str(node), str(probe)], env=env, cwd=str(self.root),
+                                  capture_output=True, timeout=75, check=False)
+            if test.returncode != 0:
+                raise SetupError("Расширение не подтвердило доступ к Chrome. Проверьте токен и профиль; Работающий браузер не переключался.")
+        except subprocess.TimeoutExpired:
+            raise SetupError("Время проверки расширения истекло. Работающий браузер не переключался.") from None
+        except OSError:
+            raise SetupError("Не удалось выполнить тест расширения. Работающий браузер не переключался.") from None
+        finally:
+            if trial is not None:
+                trial.terminate()
+                try:
+                    trial.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    trial.kill()
+                    trial.wait(timeout=5)
+        settings = self.appdata / "playwright"
+        if settings.is_symlink():
+            raise SetupError("Небезопасная директория Playwright.")
+        mode_file, token_file = settings / "browser-mode", settings / "extension-token"
+        if mode_file.is_symlink() or token_file.is_symlink():
+            raise SetupError("Небезопасные настройки Playwright.")
+        old_mode = mode_file.read_bytes() if mode_file.exists() else None
+        old_token = token_file.read_bytes() if token_file.exists() else None
+        label = f"gui/{os.getuid()}/com.mcphub.playwright.browser"
+        def extension_process_active():
+            """Ensure this port belongs to the official Extension backend."""
+            try:
+                listener = subprocess.run(
+                    ["/usr/sbin/lsof", "-t", "-nP", "-iTCP:8931", "-sTCP:LISTEN"],
+                    capture_output=True, timeout=3, check=False)
+                for pid in listener.stdout.decode("ascii", "ignore").splitlines():
+                    if not pid.isdecimal():
+                        continue
+                    command = subprocess.run(
+                        ["/bin/ps", "-p", pid, "-o", "command="],
+                        capture_output=True, timeout=3, check=False)
+                    line = command.stdout.decode("utf-8", "replace")
+                    if ("@playwright/mcp/cli.js" in line and
+                        "--extension" in line and "--background" in line and
+                        "--cdp-endpoint" not in line):
+                        return True
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            return False
+        def kickstart():
+            return subprocess.run(["/bin/launchctl", "kickstart", "-k", label],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=15, check=False).returncode == 0
+        try:
+            atomic_write(token_file, (token + "\n").encode("utf-8"))
+            atomic_write(mode_file, b"extension\n")
+            if not kickstart():
+                raise SetupError("Не удалось перезапустить браузерный LaunchAgent.")
+            final_env = env.copy()
+            final_env.pop("PLAYWRIGHT_MCP_EXTENSION_TOKEN", None)
+            final_env["PLAYWRIGHT_MCP_URL"] = "http://127.0.0.1:8931/mcp"
+            verified = False
+            for _ in range(20):
+                try:
+                    check = subprocess.run([str(node), str(probe)],
+                                           env=final_env, cwd=str(self.root),
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                           timeout=7, check=False)
+                    if check.returncode == 0 and extension_process_active():
+                        verified = True
+                        break
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                time.sleep(.5)
+            if not verified:
+                raise SetupError("Новый браузерный сервер не подтвердил подключение.")
+        except Exception:
+            # Restore previous extension settings; never fall back to CDP.
+            if old_mode is None:
+                mode_file.unlink(missing_ok=True)
+            else:
+                atomic_write(mode_file, old_mode)
+            if old_token is None:
+                token_file.unlink(missing_ok=True)
+            else:
+                atomic_write(token_file, old_token)
+            kickstart()
+            raise SetupError("Переключение на Extension не завершено. Прежний режим восстановлен.") from None
+        return {"mode": "extension", "verified": True, "background": True}
+
     def status_without_secrets(self) -> dict:
         state = self.read_state()
         return {
@@ -466,7 +634,9 @@ class SetupEngine:
             "localConfigured": state.get("localConfigured", False),
             "localServicesInstalled": state.get("localServicesInstalled", False),
             "chatgpt": state.get("chatgpt", {}),
-            "preflight": self.preflight(), "local": self.local_check(),
+            "preflight": self.preflight(), "browserCompatibility": browser_check("chrome"),
+            "browserMode": self.browser_extension_mode(),
+            "local": self.local_check(),
             "platformUrl": PLATFORM_URL, "chatgptUrl": CHATGPT_URL,
             "chatgptVerification": "Requires actual MCP tool call in ChatGPT, not a checkbox",
         }
@@ -655,7 +825,7 @@ class SetupEngine:
             )
         elif not status["browserMcp"]:
             status["browserDetail"] = (
-                "Playwright MCP пока не подтвердил initialize/tools-list. "
+                "Playwright MCP пока не подтвердил server/discover и tools/list. "
                 "Проверь запуск службы Browser и proxy."
             )
         return status
@@ -668,42 +838,40 @@ class SetupEngine:
         parsed = urlparse(url)
         if parsed.hostname != "127.0.0.1" or parsed.scheme != "http":
             return False
-        session = ""
-        def send(method: str, params: dict | None = None, request_id: int | None = 1):
-            nonlocal session
-            packet: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
-            if request_id is not None:
-                packet["id"] = request_id
-            if params is not None:
-                packet["params"] = params
+        version = "2026-07-28"
+        def send(method: str, params: dict | None = None, request_id: int = 1):
+            packet: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method,
+                                      "params": dict(params or {})}
+            packet["params"]["_meta"] = {
+                "io.modelcontextprotocol/protocolVersion": version,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {"name": "McpGo-Setup", "version": "1"},
+            }
             headers = {"Content-Type": "application/json",
                        "Accept": "application/json, text/event-stream",
-                       "MCP-Protocol-Version": "2025-03-26"}
-            if session:
-                headers["mcp-session-id"] = session
+                       "MCP-Protocol-Version": version, "Mcp-Method": method}
+            if method == "tools/call":
+                headers["Mcp-Name"] = packet["params"]["name"]
             data = json.dumps(packet).encode()
             req = urllib.request.Request(url, data=data, method="POST", headers=headers)
-            # Chrome can take several seconds to enumerate tabs in an
-            # already-running personal profile. A fixed four-second timeout
-            # caused false "Browser: not confirmed" statuses on healthy CDP.
             timeout_seconds = 15 if verify_browser and method == "tools/call" else (6 if verify_browser else 4)
             with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                session = resp.headers.get("Mcp-Session-Id", session)
                 contents = resp.read(1048576).decode("utf-8", errors="replace")
-                if request_id is None:
-                    return {}
                 if contents.startswith("{"):
-                    return json.loads(contents)
-                for line in contents.splitlines():
-                    if line.startswith("data: "):
-                        return json.loads(line[6:])
-                raise ValueError("MCP response absent")
+                    result = json.loads(contents)
+                else:
+                    result = None
+                    for line in contents.splitlines():
+                        if line.startswith("data: "):
+                            result = json.loads(line[6:])
+                            break
+                if not result or result.get("result", {}).get("resultType") != "complete":
+                    raise ValueError("MCP 2026 response absent or malformed")
+                return result
         try:
-            init = send("initialize", {"protocolVersion": "2025-03-26",
-                       "capabilities": {}, "clientInfo": {"name": "McpGo-Setup", "version": "1"}})
-            if "result" not in init:
+            discovered = send("server/discover")
+            if version not in discovered.get("result", {}).get("supportedVersions", []):
                 return False
-            send("notifications/initialized", request_id=None)
             names = {t.get("name") for t in send("tools/list", request_id=2)
                      .get("result", {}).get("tools", [])}
             if not mandatory.issubset(names) or "browser_run_code_unsafe" in names:
@@ -711,8 +879,13 @@ class SetupEngine:
             if details is not None:
                 details["mcpReady"] = True
             if verify_browser:
+                scope = send("tools/call", {"name": "mcpgo_workspace", "arguments": {}}, request_id=3)
+                workspace_id = scope.get("result", {}).get("structuredContent", {}).get("workspace_id")
+                if not isinstance(workspace_id, str) or not workspace_id.startswith("ws_"):
+                    return False
                 result = send("tools/call", {
-                    "name": "browser_tabs", "arguments": {"action": "list"}}, request_id=3)
+                    "name": "browser_tabs", "arguments": {
+                        "action": "list", "workspace_id": workspace_id}}, request_id=4)
                 if result.get("error") or result.get("result", {}).get("isError"):
                     return False
                 content = " ".join(str(x.get("text", "")) for x in

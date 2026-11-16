@@ -1,19 +1,14 @@
 'use strict';
-const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const {spawn} = require('node:child_process');
 const {StringDecoder} = require('node:string_decoder');
-const jobs=require('./job_runtime.js');
 const platform=require('./platform.js');
-const MCP_VERSION=require('./mcp-version.json').version;
 const APP = __dirname;
 const CONFIG_PATH = process.env.MCPGO_TERMINAL_CONFIG || path.join(platform.dataRoot(),'terminal','config.json');
 fs.mkdirSync(path.dirname(CONFIG_PATH),{recursive:true,mode:0o700});
-const PORT = 12847;
-const HOST = '127.0.0.1';
 const MAX_SESSIONS = 12;
 const MAX_TEXT = 262144;
 const MAX_BODY = 70000;
@@ -22,10 +17,10 @@ const sessions = new Map();
 function secret() { return crypto.randomBytes(32).toString('hex'); }
 function config() {
   if (!fs.existsSync(CONFIG_PATH)) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify({adminKey:secret(), mcpPath:'mcp/'+secret()},null,2)+'\n',{mode:0o600,flag:'wx'});
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify({adminKey:secret()},null,2)+'\n',{mode:0o600,flag:'wx'});
   }
   const v=JSON.parse(fs.readFileSync(CONFIG_PATH,'utf8'));
-  if (!/^[a-f0-9]{64}$/.test(v.adminKey) || !/^mcp\/[a-f0-9]{64}$/.test(v.mcpPath)) throw Error('Invalid private config');
+  if (!/^[a-f0-9]{64}$/.test(v.adminKey)) throw Error('Invalid private config');
   return v;
 }
 const conf=config();
@@ -115,24 +110,9 @@ function toolSchemas(){
     {name:'terminal_read',description:'Read new output and state from this chat terminal, passing next as since in follow-up reads.',inputSchema:{type:'object',properties:{...sessionFields,since:{type:'integer',default:0}},required:['session_id','session_key'],additionalProperties:false}},
     {name:'terminal_interrupt',description:'Send Ctrl+C to the interactive terminal (foreground job).',inputSchema:{type:'object',properties:sessionFields,required:['session_id','session_key'],additionalProperties:false}},
     {name:'terminal_close',description:'Close only this terminal, ending its shell and foreground processes.',inputSchema:{type:'object',properties:sessionFields,required:['session_id','session_key'],additionalProperties:false}},
-    ...jobs.tools
   ];
 }
 async function performTool(name,a){
-  // Job registry is shared with one-shot MCP; no PTY session key needed for
-  // tools that manage independent detached jobs.
-  if(jobs.tools.some(t=>t.name===name)) {
-    if(name==='job_start')return jobs.startJob(a);
-    if(name==='job_status')return jobs.getStatus(a);
-    if(name==='job_logs')return jobs.logs(a);
-    if(name==='job_recent')return jobs.recent(a);
-    if(name==='job_cancel')return jobs.cancel(a);
-    if(name==='job_result')return jobs.result(a);
-    if(name==='job_watch')return await jobs.watch(a);
-    if(name==='job_output')return jobs.output(a);
-    if(name==='mcpgo_recover')return jobs.recover(a);
-    if(name==='resource_lock_status')return jobs.lockStatus(a);
-  }
   if(name==='terminal_create')return createSession(a.name);
   const s=sessions.get(a.session_id);
   if(!s||!equal(a.session_key,s.key))throw Error('SESSION_NOT_FOUND_OR_FORBIDDEN');
@@ -142,27 +122,11 @@ async function performTool(name,a){
   if(name==='terminal_close')return close(s);
   throw Error('UNKNOWN_TOOL');
 }
-async function rpc(req,res){
-  const p=await body(req);
-  if(p.jsonrpc!=='2.0'||typeof p.method!=='string')return json(res,400,{jsonrpc:'2.0',id:p.id??null,error:{code:-32600,message:'Invalid JSON-RPC request'}});
-  if(p.id===undefined){res.writeHead(202,{'Cache-Control':'no-store'});return res.end();}
-  try{
-    let result;
-    if(p.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'ChatTerminalHub',version:MCP_VERSION},instructions:'For interactive PTY, each conversation must use its own terminal_create/session_key; terminal_send is an interactive write, NOT a durable job receipt. For recoverable commands use job_start and job_status. After an interrupted response call mcpgo_recover BEFORE repeating any command. Never replay unknown shell or browser actions.'};
-    else if(p.method==='ping')result={};
-    else if(p.method==='tools/list')result={tools:toolSchemas()};
-    else if(p.method==='tools/call'){
-      const args=p.params?.arguments||{};
-      try {result={content:[{type:'text',text:JSON.stringify(await performTool(p.params?.name,args))}]};}
-      catch(e){result={isError:true,content:[{type:'text',text:e.message}]};}
-    }else return json(res,200,{jsonrpc:'2.0',id:p.id,error:{code:-32601,message:'Method not found'}});
-    return json(res,200,{jsonrpc:'2.0',id:p.id,result});
-  }catch(e){return json(res,200,{jsonrpc:'2.0',id:p.id??null,error:{code:-32603,message:'Internal error'}});}
-}
-const server=http.createServer(async(req,res)=>{
-  const url=new URL(req.url,'http://127.0.0.1:'+PORT);
+
+function isLocalRoute(pathname){return pathname==='/'||pathname==='/dashboard.css'||pathname==='/dashboard.js'||pathname.startsWith('/api/');}
+async function handleLocal(req,res,url){
   const origin=req.headers.origin;
-  if(origin && origin!=='http://127.0.0.1:'+PORT&&origin!=='http://localhost:'+PORT)return json(res,403,{error:'BAD_ORIGIN'});
+  if(origin && origin!=='http://127.0.0.1:'+url.port&&origin!=='http://localhost:'+url.port)return json(res,403,{error:'BAD_ORIGIN'});
   if(req.method==='GET'&&url.pathname==='/'){
     const html=fs.readFileSync(path.join(APP,'dashboard.html'));
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'none'; object-src 'none'; frame-ancestors 'none'"});
@@ -176,8 +140,6 @@ const server=http.createServer(async(req,res)=>{
     res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
     return res.end(fs.readFileSync(path.join(APP,'dashboard.js')));
   }
-  if(req.method==='GET'&&url.pathname==='/health')return json(res,200,{ok:true,uptime:Math.floor(process.uptime())});
-  if(url.pathname==='/'+conf.mcpPath){if(req.method!=='POST'){res.writeHead(405,{'Allow':'POST'});return res.end();}return rpc(req,res);}
   if(!url.pathname.startsWith('/api/'))return json(res,404,{error:'NOT_FOUND'});
   try{
     if(url.pathname==='/api/sessions'){
@@ -195,11 +157,6 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='DELETE'&&!match[2])return json(res,200,close(s));
     return json(res,405,{error:'METHOD_NOT_ALLOWED'});
   }catch(e){return json(res,e.message==='SESSION_LIMIT'?429:400,{error:e.message});}
-});
-server.listen(PORT,HOST,()=>console.log('ChatTerminalHub local-only http://'+HOST+':'+PORT));
-function shutdown(){
-  for(const s of sessions.values()){try{s.worker.stdin.write('{"action":"close"}\n');}catch(_){}}
-  server.close();setTimeout(()=>process.exit(0),1000).unref();
 }
-process.on('SIGTERM',shutdown);
-process.on('SIGINT',shutdown);
+function shutdown(){for(const s of sessions.values()){try{s.worker.stdin.write('{"action":"close"}\n');}catch(_){}}}
+module.exports={toolSchemas,performTool,isLocalRoute,handleLocal,shutdown,sessionCount:()=>sessions.size};

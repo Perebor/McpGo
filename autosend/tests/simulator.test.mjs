@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SimulatedChat,SimulatedMcp} from '../simulated-browser.mjs';
 import {pageInspection,deliverViaPlaywright,reconcileViaPlaywright,parsePageResult}
- from '../cdp-delivery.mjs';
+ from '../delivery.mjs';
 import {buildGuardedClick} from '../guarded-send.mjs';
 import {buildEventWait} from '../browser-events.mjs';
 import {conversationState,eligibleToSend,nextDue} from '../conversation-fsm.mjs';
@@ -61,11 +61,13 @@ test('simulator: active Chrome tab changes just before dispatch; outcome unknown
  const chat2=new SimulatedChat(url(2));
  const mcp=new SimulatedMcp([chat1,chat2]);
  mcp.onBeforeTool=async(name,args,options,transport)=>{
-  if(options.actionId)transport.active=1;
+  if(name==='browser_evaluate'&&args.function?.includes('function guardedClickInPage'))
+    transport.active=1;
  };
  const result=await deliverViaPlaywright(task(),async()=>actionId(3),
   {client:mcp,wait:noWait});
- assert.equal(result.status,'pending','lost guarded dispatch is ambiguous');
+ assert.equal(result.status,'refused','page guard confirms wrong conversation, no click');
+ assert.equal(result.code,'WRONG_CONVERSATION');
  assert.equal(chat1.clicks+chat2.clicks,0);
  assert.ok(!chat2.editorText);
  assert.equal(mcp.calls.filter(x=>x.guarded).length,1);
@@ -184,4 +186,61 @@ test('simulator: repeated latest user text and shrinking virtualized history sti
  assert.equal(result.evidence.code,'USER_BUBBLE_VERIFIED_VIRTUALIZED');
  assert.equal(result.evidence.newUserCount,false);
  assert.equal(mcp.calls.filter(x=>x.guarded).length,1);
+});
+
+
+test('guarded Send accepts idle DOM repaint after a fresh server COMPLETE check',async()=>{
+ const chat=new SimulatedChat(url(1));
+ await inspect(chat);
+ chat.editorText='TEST MESSAGE 1';
+ chat.send.disabled=false;
+ chat.emitMutation('assistant'); // current DOM revision differs from preflight
+ chat.context.AbortController=AbortController;
+ chat.context.window.fetch=async()=>({ok:true,json:async()=>({status:'COMPLETE'})});
+ chat.context.fetch=chat.context.window.fetch;
+ const source=buildGuardedClick({url:url(1),message:'TEST MESSAGE 1',
+  editorSelector:'#prompt-textarea',sendSelector:'[data-testid="send-button"]',
+  baselineUserCount:1,assistantRevision:0,requireStreamStatus:true,actionId:actionId(10)});
+ const response=await chat.evaluate(source);
+ assert.equal(response.code,'CLICK_DISPATCHED');
+ assert.equal(chat.clicks,1);
+});
+
+test('guarded Send still blocks a live server stream despite an unchanged DOM',async()=>{
+ const chat=new SimulatedChat(url(1));
+ await inspect(chat);
+ chat.editorText='TEST MESSAGE 1';
+ chat.send.disabled=false;
+ chat.context.AbortController=AbortController;
+ chat.context.window.fetch=async()=>({ok:true,json:async()=>({status:'IS_STREAMING'})});
+ chat.context.fetch=chat.context.window.fetch;
+ const source=buildGuardedClick({url:url(1),message:'TEST MESSAGE 1',
+  editorSelector:'#prompt-textarea',sendSelector:'[data-testid="send-button"]',
+  baselineUserCount:1,assistantRevision:0,requireStreamStatus:true,actionId:actionId(11)});
+ const response=await chat.evaluate(source);
+ assert.equal(response.code,'GENERATION_ACTIVE');
+ assert.equal(chat.clicks,0);
+});
+
+
+test('guarded Send accepts the canonical project slug but not another project or chat',async()=>{
+ const project='a'.repeat(32);
+ const chat='00000000-0000-4000-8000-000000000001';
+ const bare='https://chatgpt.com/g/g-p-'+project+'/c/'+chat;
+ const canonical='https://chatgpt.com/g/g-p-'+project+'-gafus-refactor/c/'+chat;
+ const tab=new SimulatedChat(canonical);
+ await tab.evaluate(pageInspection);
+ tab.editorText='TEST MESSAGE 1';tab.send.disabled=false;
+ const cfg={url:bare,message:'TEST MESSAGE 1',editorSelector:'#prompt-textarea',
+  sendSelector:'[data-testid="send-button"]',baselineUserCount:1,
+  assistantRevision:0,actionId:actionId(12)};
+ const accepted=await tab.evaluate(buildGuardedClick(cfg));
+ assert.equal(accepted.code,'CLICK_DISPATCHED');
+ assert.equal(tab.clicks,1);
+ const wrong=new SimulatedChat('https://chatgpt.com/g/g-p-'+('b'.repeat(32))+'-other/c/'+chat);
+ await wrong.evaluate(pageInspection);
+ wrong.editorText='TEST MESSAGE 1';wrong.send.disabled=false;
+ const refused=await wrong.evaluate(buildGuardedClick({...cfg,actionId:actionId(13)}));
+ assert.equal(refused.code,'WRONG_CONVERSATION');
+ assert.equal(wrong.clicks,0);
 });

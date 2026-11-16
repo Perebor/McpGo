@@ -31,6 +31,15 @@ outbound Secure MCP Tunnels forward the terminal and browser MCP endpoints.
    browser profile. The installer is per-user and needs no administrator rights.
 2. Open Chrome or Edge, install and approve the official Playwright MCP Browser
    Extension. Reuse the logged-in browser session; no isolated Chromium.
+   Copy `PLAYWRIGHT_MCP_EXTENSION_TOKEN` from the official extension's
+   **Manage clients** dialog and paste it into McpGo Settings → **Playwright
+   Extension · token**. This token is encrypted through Windows safeStorage;
+   only the fact that it is configured is shown in the UI. Without it both
+   browser services stay unconfigured and do **not** fall back to CDP.
+   AutoSend runs as an additional extension client/group named `MCPGO AutoSend`
+   on loopback port `8932`, separate from the main Browser MCP (`8931/8940`).
+   Select the intended existing conversation tab in that group once. AutoSend
+   never opens duplicate tabs or reloads conversations automatically.
 3. In McpGo, optionally enter an OpenAI **Admin API Key** and click
    **Create two tunnels**. A second explicit action creates an isolated
    McpGo project and restricted Runtime Key. These API operations require the
@@ -53,7 +62,7 @@ The principal entrypoints are:
 - \`windows/app/main.cjs\` / \`runtime.cjs\`: UI, service startup and shutdown
 - \`terminal/platform.js\`: Windows/macOS shell/path/process abstraction
 - \`terminal/pty_worker_win.js\`: Windows ConPTY worker
-- \`terminal/stateful_bridge.cjs\`: OneShot-to-interactive MCP delegation
+- \`terminal/interactive_runtime.cjs\`: Interactive PTY sessions hosted inside the unified Terminal MCP process
 - \`terminal/files_tools.cjs\`: bounded filesystem tools
 - \`windows/onboarding_cli.py\`: Windows bridge to the existing Python installer
 - \`windows/prepare-runtime.py\`: verified official binary downloading
@@ -122,3 +131,42 @@ A Mac cross-compiled installer must never be published as a substitute.
 
 No paid code-signing certificate, unattended updater or SmartScreen bypass.
 The release process refuses to overwrite an existing GitHub release.
+
+### Проверка Chrome и Edge при настройке
+
+В настройках McpGo для Windows есть read-only проверка версии выбранного браузера. Для бесшовного фонового подключения Playwright Extension ориентир — **Chrome 158.0.8127.2+** и Extension 0.5.0+. Если версия устарела или не обнаружена, UI предупреждает об этом и предлагает **по нажатию** открыть официальный сайт обновления (Chrome / Edge). Установка McpGo, PowerShell и туннелей не блокируется, браузеры не меняются автоматически. Для Edge конкретный номер сборки фонового подключения нужно дополнительно проверять на практике.
+
+## Browser-agent parity with macOS
+
+Windows packaging includes the same shared `agent-scope.mjs`,
+`portable-tab-identity.mjs`, `portable-agent-tabs.mjs`,
+`tab-lease-manager.mjs` and `browser-session-manager.mjs` modules used on
+macOS. The general Browser MCP uses the official Extension on `8931` with the
+safe proxy on `8940`; AutoSend has its own backend on `8932` with separate
+session name and tab group. Their scheduler/URL identity and one-click
+receipt implementation is shared across macOS and Windows. No CDP fallback
+or second Windows-only browser implementation exists.
+
+The Windows installer is **not** built by this change. Portable unit tests and package verification run on macOS; real browser/extension, OAuth sessions, window focus, and crash recovery must be accepted on a Windows machine before releasing.
+
+### Workspace IDs (same logic as macOS)
+
+Both platforms package `browser-workspace.mjs` and `workspace-response.mjs`.
+Every browser MCP tool result repeats the high-entropy `workspace_id` as
+structured content and a compact text note. All browser tools support an
+optional `workspace_id` that is removed by McpGo before the Playwright backend
+sees the request. `mcpgo_workspace` restores tabs after a transport session
+change, subject to the same stable identity and collision guards on Windows.
+No duplicate Windows-specific algorithm is needed. Browser execution and
+installer signing still require a separate native Windows E2E acceptance.
+
+### MCP 2026-07-28 transport parity
+
+Browser and Terminal use the same `playwright/mcp-modern-protocol.mjs` across
+macOS and Windows. Modern clients use `server/discover`, strict modern routing
+headers, and independent requests. Because the actual already-installed
+ChatGPT McpGo plugin still sends MCP 2025, transitional legacy compatibility
+is enabled on both platforms until a verified client upgrade. To enforce
+modern-only after acceptance, set `MCPGO_DISABLE_LEGACY=1`. Playwright keeps
+its private 2025 backend protocol and shared extension connection. Windows
+installer/native Chrome/Edge E2E still requires a Windows machine.

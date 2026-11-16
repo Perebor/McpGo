@@ -1,26 +1,16 @@
 import {fingerprint,combinedEvidence} from './reconciliation.mjs';
+import {autosendMcp,ExtensionMcpClient} from './browser-client.mjs';
 import {classifyChatState,sameReadySnapshot,STABLE_READY_INTERVAL_MS,safeEvidence} from './chat-state.mjs';
 import {buildGuardedClick,parseGuardedResult} from './guarded-send.mjs';
 import {buildEventWait} from './browser-events.mjs';
-// Scheduled ChatGPT delivery over the already-running local PlaywrightHub CDP MCP.
-// Deliberately does not create a Chromium/profile, interact with the old extension,
+import {probeStreamInPage,streamBusy,streamReady} from './stream-monitor.mjs';
+import {sameChatGPTConversation} from '../playwright/chatgpt-url.mjs';
+// Scheduled ChatGPT delivery through the already-running local Playwright MCP proxy.
+// The backend uses the official Playwright Chrome extension in extension mode.
+// This module does not create a Chromium profile or use the obsolete native-messaging extension,
 // or auto-retry after the Send button could have been clicked.
-const MCP_URL=process.env.MCPHUB_PLAYWRIGHT_MCP_URL||'http://127.0.0.1:8940/mcp';
-const ACCEPT='application/json, text/event-stream';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-
-function decodeMcp(text){
- if(text.trimStart().startsWith('{'))return JSON.parse(text);
- for(const line of text.split(/\r?\n/))if(line.startsWith('data: ')){
-  try{return JSON.parse(line.slice(6));}catch{}
- }
- throw Error('Playwright MCP returned an unreadable response');
-}
-function contentOf(result){
- if(result?.error)throw Error('MCP: '+String(result.error.message||'error'));
- if(result?.result?.isError)throw Error('Playwright: '+(result.result.content||[]).map(c=>c.text||'').join(' ').slice(0,400));
- return (result?.result?.content||[]).map(c=>c.text||'').join('\n');
-}
+export {ExtensionMcpClient as LocalMcp};
 export function parsePageResult(text){
  // Playwright includes "### Result" followed by "### Ran Playwright code".
  // Only the first section is data; the subsequent section contains JS source
@@ -34,29 +24,6 @@ export function parsePageResult(text){
  try { return JSON.parse(candidate); }
  catch { throw Error('Playwright MCP: некорректный JSON в разделе Result'); }
 }
-export class LocalMcp {
- constructor(url=MCP_URL, fetcher=fetch){this.url=url;this.fetcher=fetcher;this.session='';this.id=0;}
- async request(method,params,options={}){
-  const body={jsonrpc:'2.0',method};if(params!==undefined)body.params=params;
-  if(method!=='notifications/initialized')body.id=++this.id;
-  const headers={accept:ACCEPT,'content-type':'application/json','mcp-protocol-version':'2025-03-26'};
-  if(this.session)headers['mcp-session-id']=this.session;
-  if(options.actionId)headers['x-mcpgo-action-id']=options.actionId;
-  if(options.expectedUrl)headers['x-mcpgo-expected-url']=options.expectedUrl;
-  const response=await this.fetcher(this.url,{method:'POST',headers,body:JSON.stringify(body),signal:AbortSignal.timeout(35000)});
-  this.session=response.headers.get('mcp-session-id')||this.session;
-  const text=await response.text();
-  if(!response.ok)throw Error('Playwright MCP HTTP '+response.status+': '+text.slice(0,200));
-  return method==='notifications/initialized'?null:decodeMcp(text);
- }
- async connect(){
-  const init=await this.request('initialize',{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'McpGo-AutoSend-CDP',version:'1.1.0'}});
-  if(!init?.result?.serverInfo)throw Error('Playwright MCP initialization failed');
-  await this.request('notifications/initialized');
- }
- async tool(name,args,options={}){return contentOf(await this.request('tools/call',{name,arguments:args},options));}
-}
-
 export const pageInspection=`() => {
  const vis=e=>!!e && e.getClientRects().length>0 &&
   (!e.ownerDocument?.defaultView?.getComputedStyle ||
@@ -196,7 +163,7 @@ export function confirmsNewUserMessage(before,after,message){
 // text or an assistant quote. The emitted evidence has no message content.
 export function deliveryEvidence(before,after,message,expectedUrl,previousEvidence=null){
  const target=normalizedMessage(message);
- const urlMatched=!!after&&after.url===expectedUrl;
+ const urlMatched=!!after&&sameChatGPTConversation(after.url,expectedUrl);
  const lastTextMatched=!!target&&normalizedMessage(after?.lastUserText)===target;
  const countedProof=urlMatched&&confirmsNewUserMessage(before,after,message);
  const beforeCount=Number.isInteger(before?.userCount)?before.userCount:null;
@@ -253,36 +220,128 @@ export function deliveryEvidence(before,after,message,expectedUrl,previousEviden
    userInsertionDelta:observations.userInsertionDelta,
    assistantActivitySeen:observations.assistantActivitySeen});
 }
-async function inspect(mcp,message=''){
- const statement=pageInspection.replace("'SCHEDULER_SENTINEL_NOT_PRESENT'",JSON.stringify(message.trim()));
+// Preserve pageInspection as a pure, synchronous DOM snapshot for offline tests.
+// Live browser evaluations additionally install the privacy-preserving fetch
+// listener and read the server's generation status before any Send decision.
+export const pageInspectionWithStream='async () => { const page=('+pageInspection+')(); '+
+ 'const stream=await ('+probeStreamInPage.toString()+')(); return {...page,...stream}; }';
+// Unlike classifyAgent, this check permits our own typed draft in the editor.
+function generationIdle(page){
+ if(page.streamStatus==='UNKNOWN'||page.streamStatus==='IS_STREAMING')return false;
+ if(page.streamStatus==='COMPLETE')return !streamBusy(page);
+ return !page.stop&&!page.busyText;
+}
+// The composer can trigger React mutations in <main> even when an answer is
+// complete. Only actual stream progress, a changed conversation, or changed
+// user content should invalidate the pre-click snapshot.
+export function preClickIssue(before,after,task,baseline){
+ if(!sameChatGPTConversation(after.url,task.url))return 'WRONG_CONVERSATION';
+ if(after.connectionInterrupted)return 'CONNECTION_INTERRUPTED';
+ if(!generationIdle(after))return 'GENERATION_ACTIVE';
+ if(after.userCount!==baseline||
+    String(before.lastUserId||'')!==String(after.lastUserId||'')||
+    normalizedMessage(before.lastUserText)!==normalizedMessage(after.lastUserText))
+  return 'USER_MESSAGES_CHANGED';
+ if(after.editorCount!==1||!after.editorSelector)return 'EDITOR_NOT_READY';
+ if(normalizedMessage(after.editorText)!==normalizedMessage(task.message))
+  return 'EDITOR_TEXT_CHANGED';
+ if(Number.isInteger(before.streamSequence)&&
+    before.streamSequence!==after.streamSequence)return 'STREAM_PROGRESS';
+ if(Number.isInteger(before.assistantRevision)&&
+    before.assistantRevision!==after.assistantRevision&&
+    !(streamReady(before)&&streamReady(after)))return 'ASSISTANT_CHANGED';
+ if(!after.sendEnabled||after.sendCount!==1||!after.sendSelector)return 'SEND_NOT_READY';
+ return null;
+}
+function preClickDeferred(issue){
+ const notes={
+  WRONG_CONVERSATION:'Открыт другой разговор; Send не нажимался',
+  CONNECTION_INTERRUPTED:'Ответ прерван; Send не нажимался',
+  GENERATION_ACTIVE:'Агент снова работает; Send не нажимался',
+  USER_MESSAGES_CHANGED:'В разговоре изменились пользовательские сообщения; Send не нажимался',
+  EDITOR_NOT_READY:'Поле ввода не готово; Send не нажимался',
+  EDITOR_TEXT_CHANGED:'Черновик изменён; Send не нажимался',
+  STREAM_PROGRESS:'Появились новые события генерации; Send не нажимался',
+  ASSISTANT_CHANGED:'Изменился ответ без подтверждения простоя; Send не нажимался',
+  SEND_NOT_READY:'Кнопка Send не стала активной; Send не нажимался'
+ };
+ return {status:'deferred',reason:'preclick',error:notes[issue]||'Страница не готова к отправке',
+  evidence:safeEvidence({code:issue||'PRECLICK_NOT_READY',clickCommitted:false})};
+}
+async function inspect(mcp,message='',expectedUrl=null){
+ const statement=pageInspectionWithStream.replace("'SCHEDULER_SENTINEL_NOT_PRESENT'",JSON.stringify(message.trim()));
  return parsePageResult(await mcp.tool('browser_evaluate',{function:statement}));
 }
+/** Only the Result section of the official browser_tabs list is authoritative. */
 export function extractTabs(text){
- const out=[];
- for(const line of text.split('\n')){
+ const section=String(text).includes('### Result')?
+  String(text).split('### Result')[1].split('### Ran Playwright code')[0].split('### Open tabs')[0]:
+  String(text);
+ const rows=[];
+ for(const line of section.split(/\r?\n/)){
   const match=line.match(/^\s*(?:-\s*)?(\d+):\s+(.+)$/);
   if(!match)continue;
-  const u=match[2].match(/https?:\/\/[^\s)\]<>]+/);
-  if(u)out.push({index:Number(match[1]),url:u[0].replace(/\/$/,'')});
+  const item=match[2].match(/(?:\]\()?(https?:\/\/[^\s)\]<>]+)\)?/);
+  if(item)rows.push({index:Number(match[1]),url:item[1].replace(/\/$/,'')});
  }
- return out;
+ return rows;
+}
+/**
+ * A chat owns exactly one already-approved tab in the AutoSend extension
+ * group. No new tabs, no arbitrary matching by title/index, no side effects.
+ */
+export function locateChatTab(output,target){
+ const matches=extractTabs(output).filter(t=>sameChatGPTConversation(t.url,target));
+ if(!matches.length)return {kind:'missing',code:'CHAT_TAB_MISSING'};
+ if(matches.length>1)return {kind:'ambiguous',code:'AMBIGUOUS_CHAT_TABS'};
+ return {kind:'found',tab:matches[0]};
+}
+function tabDeferred(result,clickCommitted=false){
+ const details={
+  CHAT_TAB_MISSING:'Чат отсутствует в группе MCPGO AutoSend. Откройте его и выберите через Playwright Extension; новая вкладка не создавалась.',
+  AMBIGUOUS_CHAT_TABS:'В группе AutoSend несколько вкладок этого разговора. Оставьте одну; Send не нажимался.'
+ };
+ return {status:'deferred',reason:'tab-scope',error:details[result.code]||'Вкладка недоступна',
+  evidence:safeEvidence({code:result.code,clickCommitted})};
+}
+export function classifyPreflightError(error){
+ const value=String(error?.message||'');
+ if(/Current tab identity cannot be verified|Agent tab changed during selection/i.test(value))
+  return {code:'TAB_IDENTITY_UNVERIFIED',
+   message:'Не удалось подтвердить активную вкладку Chrome; Send не нажимался'};
+ if(/TAB_HANDLE_STALE_OR_AMBIGUOUS|TAB_INDEX_CHANGED_USE_STABLE_ID|tab index synchronization failed/i.test(value))
+  return {code:'TAB_INDEX_UNSTABLE',
+   message:'Индексы вкладок Chrome изменились или совпали; Send не нажимался'};
+ if(/TAB_OWNED_BY_ANOTHER_AGENT/i.test(value))
+  return {code:'TAB_OWNED_BY_ANOTHER_AGENT',
+   message:'Эта вкладка занята другим агентом; Send не нажимался'};
+ if(/HTTP 429|Browser action queue (?:full|wait timed out)/i.test(value))
+  return {code:'BROWSER_QUEUE_BUSY',
+   message:'Очередь расширения браузера перегружена; Send не нажимался'};
+ if(/TimeoutError|AbortError|timeout|timed out/i.test(value))
+  return {code:'BROWSER_OBSERVATION_TIMEOUT',
+   message:'Истекло время ответа Chrome; Send не нажимался'};
+ if(/некорректный JSON в разделе Result|unreadable response/i.test(value))
+  return {code:'PAGE_RESULT_INVALID',
+   message:'Браузер вернул состояние страницы в неожиданном формате; Send не нажимался'};
+ if(/MCP HTTP 50[0234]|MCP session|Private Playwright|Chrome tabs cannot be inspected/i.test(value))
+  return {code:'BROWSER_OBSERVATION_UNAVAILABLE',
+   message:'Выделенная сессия Playwright Extension временно недоступна; Send не нажимался'};
+ return {code:'OBSERVATION_FAILED',
+  message:'Проверка состояния страницы прервана; Send не нажимался'};
 }
 export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}){
- const mcp=deps.client||new LocalMcp();const wait=deps.wait||pause;
- let index=null;let clicked=false;let typed=false;
+ const mcp=deps.client||autosendMcp();const wait=deps.wait||pause;
+ let clicked=false;let typed=false;
  try{
   if(!deps.client)await mcp.connect();
-  const tabList=extractTabs(await mcp.tool('browser_tabs',{action:'list'}));
-  const existing=tabList.find(t=>t.url===task.url);
-  if(existing){index=existing.index;await mcp.tool('browser_tabs',{action:'select',index});}
-  else{
-   const opened=await mcp.tool('browser_tabs',{action:'new',url:task.url});
-   index=extractTabs(opened).find(t=>t.url===task.url)?.index??null;
-  }
+  const located=locateChatTab(await mcp.tool('browser_tabs',{action:'list'}),task.url);
+  if(located.kind!=='found')return tabDeferred(located);
+  await mcp.tool('browser_tabs',{action:'select',index:located.tab.index});
   let page,steady=null,state,stable=false;
   // Two independent, matching ready snapshots are required before typing.
   for(let i=0;i<9;i++){
-   page=await inspect(mcp,task.message);
+   page=await inspect(mcp,task.message,task.url);
    state=classifyAgent(page,task.url);
    if(state.kind==='ready'){
     if(steady&&sameReadySnapshot(steady,page)){stable=true;break;}
@@ -291,7 +350,7 @@ export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}
     continue;
    }
    steady=null;
-   if(['busy','stalled','interrupted'].includes(state.kind)||page.url!==task.url)
+   if(['busy','stalled','interrupted'].includes(state.kind)||!sameChatGPTConversation(page.url,task.url))
     return {status:'deferred',reason:state.kind,error:state.reason,
      evidence:safeEvidence({code:state.code,stopVisible:!!page.stop,
       streamingVisible:!!page.busyText,connectionInterrupted:!!page.connectionInterrupted})};
@@ -301,27 +360,28 @@ export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}
    evidence:safeEvidence({code:'READY_NOT_STABLE'}),
    error:'Состояние страницы изменялось во время проверки; отправка отложена'};
   const baseline=page.userCount;
-  await mcp.tool('browser_type',{target:page.editorSelector,text:task.message,submit:false},
-    {expectedUrl:task.url});
+  await mcp.tool('browser_type',{target:page.editorSelector,text:task.message,submit:false});
   typed=true;
-  const filled=await inspect(mcp,task.message);
-  if(filled.url!==task.url||filled.stop||filled.busyText||filled.connectionInterrupted||
-     filled.userCount!==baseline||filled.editorCount!==1||
-     (Number.isInteger(page.assistantRevision)&&filled.assistantRevision!==page.assistantRevision)||
-     String(filled.editorText||'').trim()!==task.message.trim()||
-     !filled.sendEnabled||filled.sendCount!==1||!filled.sendSelector)
-   return {status:'deferred',reason:'preclick',error:'Состояние страницы изменилось перед отправкой; сообщение не отправлено',
-    evidence:safeEvidence({code:'PRECLICK_NOT_READY'})};
+  // Retry only transient React composer readiness, never an active stream,
+  // changed user message or unexpected draft. No extra typing is performed.
+  let filled,issue=null;
+  for(let attempt=0;attempt<3;attempt++){
+   filled=await inspect(mcp,task.message,task.url);
+   issue=preClickIssue(page,filled,task,baseline);
+   if(!issue||issue!=='SEND_NOT_READY')break;
+   if(attempt<2)await wait(300);
+  }
+  if(issue)return preClickDeferred(issue);
   await wait(300);
-  const finalCheck=await inspect(mcp,task.message);
-  if(finalCheck.url!==task.url||finalCheck.stop||finalCheck.busyText||finalCheck.connectionInterrupted||
-     finalCheck.userCount!==baseline||finalCheck.editorCount!==1||
-     (Number.isInteger(filled.assistantRevision)&&finalCheck.assistantRevision!==filled.assistantRevision)||
-     !finalCheck.sendEnabled||finalCheck.sendCount!==1||
-     finalCheck.sendSelector!==filled.sendSelector||
-     String(finalCheck.editorText||'').trim()!==task.message.trim())
-   return {status:'deferred',reason:'preclick',error:'Перед Send обнаружено изменение; отправка отложена',
-    evidence:safeEvidence({code:'PRECLICK_BUSY'})};
+  let finalCheck;
+  for(let attempt=0;attempt<3;attempt++){
+   finalCheck=await inspect(mcp,task.message,task.url);
+   issue=preClickIssue(filled,finalCheck,task,baseline);
+   if(!issue&&finalCheck.sendSelector!==filled.sendSelector)issue='SEND_NOT_READY';
+   if(!issue||issue!=='SEND_NOT_READY')break;
+   if(attempt<2)await wait(300);
+  }
+  if(issue)return preClickDeferred(issue);
   // Write crash-safe "sending" state before clicking. Ambiguous post-click results never retry.
   const baselineProof={
    // The baseline MUST be the last read-only snapshot immediately before
@@ -343,9 +403,11 @@ export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}
         url:task.url,message:task.message,editorSelector:filled.editorSelector,
         sendSelector:filled.sendSelector,baselineUserCount:baseline,
         assistantRevision:Number.isInteger(filled.assistantRevision)?
-          filled.assistantRevision:null,actionId
+          filled.assistantRevision:null,actionId,
+        requireStreamStatus:finalCheck.streamStatus==='COMPLETE',
+        streamSequence:Number.isInteger(finalCheck.streamSequence)?finalCheck.streamSequence:null
       })
-    },{actionId,expectedUrl:task.url}),parsePageResult
+    },{}),parsePageResult
   );
   if(result.refused) {
     // A *verified* page-side refusal means button.click was never reached.
@@ -359,26 +421,27 @@ export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}
   let evidence=safeEvidence({code:'USER_BUBBLE_NOT_FOUND',clickCommitted:true,messageFound:false});
   for(let i=0;i<12;i++){
    await wait(i<5?550:1000);
-   const after=await inspect(mcp,task.message);
+   const after=await inspect(mcp,task.message,task.url);
    evidence=deliveryEvidence({...baselineProof,assistantHash:fingerprint(baselineProof.assistantText)},
     after,task.message,task.url,evidence);
    if(evidence.messageFound)return {status:'verified',evidence};
-   if(after.url!==task.url)break;
+   if(!sameChatGPTConversation(after.url,task.url))break;
   }
   return {status:'pending',evidence,
    error:'Send мог быть нажат; подтверждённая реплика пока не обнаружена. Повтор заблокирован'};
- }catch{
-  return {status:clicked?'pending':'deferred',reason:'error',
-   evidence:safeEvidence({code:'OBSERVATION_FAILED',clickCommitted:clicked,messageFound:false}),
-   error:clicked?'Проверка прервана; Send повторяться не будет':
-    'Проверка до отправки прервана; Send не нажимался'};
+ }catch(e){
+  const diagnostic=classifyPreflightError(e);
+  const congestion=!clicked&&diagnostic.code==='BROWSER_QUEUE_BUSY';
+  return {status:clicked?'pending':'deferred',reason:congestion?'transport_busy':'error',
+   evidence:safeEvidence({code:clicked?'DELIVERY_UNCERTAIN':diagnostic.code,
+    clickCommitted:clicked,messageFound:false}),
+   error:clicked?'Проверка прервана; Send повторяться не будет':diagnostic.message};
  }
  finally {
   // Never erase an existing draft: only clear our own pre-click text, and only if still exact.
   if(typed&&!clicked){
-   try{const p=await inspect(mcp,task.message);if(p.url===task.url && String(p.editorText||'').trim()===task.message.trim())
-    await mcp.tool('browser_type',{target:p.editorSelector,text:'',submit:false},
-      {expectedUrl:task.url});}catch{}
+   try{const p=await inspect(mcp,task.message,task.url);if(sameChatGPTConversation(p.url,task.url) && String(p.editorText||'').trim()===task.message.trim())
+    await mcp.tool('browser_type',{target:p.editorSelector,text:'',submit:false});}catch{}
   }
   // Keep the existing or newly opened conversation tab: closing it may interrupt
   // the assistant response, and the next interval should reuse the same tab.
@@ -390,18 +453,18 @@ export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}
  * Only a positively identified new user bubble can change status to verified.
  */
 export async function reconcileViaPlaywright(task,receipt,deps={}){
- const mcp=deps.client||new LocalMcp();
+ const mcp=deps.client||autosendMcp();
  if(!Number.isInteger(receipt?.baselineUserCount))
   return {status:'deferred',reason:'Нет исходной квитанции',
    evidence:safeEvidence({code:'OBSERVATION_FAILED',clickCommitted:true,messageFound:false})};
  try{
   if(!deps.client)await mcp.connect();
-  const tabs=extractTabs(await mcp.tool('browser_tabs',{action:'list'}));
-  const tab=tabs.find(t=>t.url===task.url);
-  if(!tab)return {status:'deferred',reason:'Вкладка разговора сейчас недоступна',
-   evidence:safeEvidence({code:'TAB_UNAVAILABLE',clickCommitted:true,messageFound:false})};
+  const located=locateChatTab(await mcp.tool('browser_tabs',{action:'list'}),task.url);
+  const tab=located.kind==='found'?located.tab:null;
+  if(!tab)return {status:'deferred',reason:located.code||'TAB_UNAVAILABLE',
+   evidence:safeEvidence({code:located.code||'TAB_UNAVAILABLE',clickCommitted:true,messageFound:false})};
   await mcp.tool('browser_tabs',{action:'select',index:tab.index});
-  const after=await inspect(mcp,task.message);
+  const after=await inspect(mcp,task.message,task.url);
   const before={userCount:receipt.baselineUserCount,lastUserHash:receipt.baselineLastUserHash,
    lastUserId:receipt.baselineLastUserId,assistantRevision:receipt.baselineAssistantRevision,
    userInsertionRevision:receipt.baselineUserInsertionRevision,
@@ -417,15 +480,16 @@ export async function reconcileViaPlaywright(task,receipt,deps={}){
 
 /** Read only observation of an EXISTING ChatGPT tab. Never opens a new tab. */
 export async function observeExistingChat(task,deps={}){
- const mcp=deps.client||new LocalMcp();
+ const mcp=deps.client||autosendMcp();
  try{
   if(!deps.client)await mcp.connect();
-  const tabs=extractTabs(await mcp.tool('browser_tabs',{action:'list'}));
-  const tab=tabs.find(x=>x.url===task.url);
-  if(!tab)return {status:'unavailable',reason:'Вкладка не открыта'};
+  const located=locateChatTab(await mcp.tool('browser_tabs',{action:'list'}),task.url);
+  const tab=located.kind==='found'?located.tab:null;
+  if(!tab)return {status:'unavailable',code:located.code,
+   reason:tabDeferred(located).error};
   await mcp.tool('browser_tabs',{action:'select',index:tab.index});
-  let page=await inspect(mcp,'');
-  if(page.url!==task.url)return {status:'unavailable',reason:'Вкладка изменила URL'};
+  let page=await inspect(mcp,'',task.url);
+  if(!sameChatGPTConversation(page.url,task.url))return {status:'unavailable',reason:'Вкладка изменила URL'};
   let eventKind='none';
   if(deps.eventWaitMs>0 && (page.stop||page.busyText||page.connectionInterrupted)){
    const functionSource=buildEventWait({
@@ -438,14 +502,17 @@ export async function observeExistingChat(task,deps={}){
      eventKind=evt?.kind==='changed'?'changed':
        evt?.kind==='timeout'?'timeout':'unavailable';
      if(eventKind==='changed'){
-      page=await inspect(mcp,'');
-      if(page.url!==task.url)return {status:'unavailable',reason:'Вкладка изменилась во время события'};
+      page=await inspect(mcp,'',task.url);
+      if(!sameChatGPTConversation(page.url,task.url))return {status:'unavailable',reason:'Вкладка изменилась во время события'};
      }
     }catch {eventKind='unavailable'}
    }
   }
   return {status:'ok',eventKind,observation:{
    urlValid:true,stop:page.stop,busyText:page.busyText,
+   streamStatus:page.streamStatus,streamReason:page.streamReason,
+   streamPhase:page.streamPhase,streamActive:page.streamActive,
+   streamSequence:page.streamSequence,streamLastEventAt:page.streamLastEventAt,
    connectionInterrupted:page.connectionInterrupted,continuationAvailable:page.continuationAvailable,
    progressText:page.progressText,
    assistantRevision:page.assistantRevision,lastAssistantMutationAt:page.lastAssistantMutationAt,
@@ -455,24 +522,4 @@ export async function observeExistingChat(task,deps={}){
    lastUserHash:fingerprint(page.lastUserText)
   }};
  }catch(e){return {status:'unavailable',reason:String(e.message||e).slice(0,180)};}
-}
-/** Only invoked after persistent explicit connection-error, once per incident. */
-export async function reloadStalledChat(task,deps={}){
- const mcp=deps.client||new LocalMcp();
- try{
-  if(!deps.client)await mcp.connect();
-  const tabs=extractTabs(await mcp.tool('browser_tabs',{action:'list'}));
-  const target=tabs.find(t=>t.url===task.url);
-  if(!target)return {status:'unavailable',reason:'Нужная вкладка закрыта'};
-  await mcp.tool('browser_tabs',{action:'select',index:target.index});
-  const before=await inspect(mcp,'');
-  if(before.url!==task.url||!before.connectionInterrupted)
-   return {status:'changed',reason:'Явная ошибка соединения больше не видна'};
-  if(String(before.editorText||'').trim())
-   return {status:'deferred',reason:'В чате пользовательский черновик; не перезагружаем'};
-  // Browser navigation to the exact current conversation URL is equivalent
-  // to ordinary user refresh; never click Stop/Regenerate/Send.
-  await mcp.tool('browser_navigate',{url:task.url});
-  return {status:'reloaded'};
- }catch(e){return {status:'deferred',reason:String(e.message||e).slice(0,180)};}
 }

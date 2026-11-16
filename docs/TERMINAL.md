@@ -4,7 +4,6 @@
 
 | Адрес | Процесс | Назначение |
 |---|---|---|
-| `127.0.0.1:12847` | `terminal/server.js` | Stateful PTY; MCP и локальная dashboard UI |
 | `127.0.0.1:12848` | `terminal/stateless_server.js` | Одноразовое выполнение и инструменты jobs |
 | Secure MCP tunnel | `terminal/run-tunnel.sh` | Outbound связь удалённого MCP-клиента с локальной реализацией |
 
@@ -12,7 +11,7 @@
 
 ## 2. Stateful PTY
 
-`terminal/server.js` экспортирует:
+`terminal/interactive_runtime.cjs` экспортирует:
 - `terminal_create({name?})` — новая сессия; возвращает `session_id` и `session_key`;
 - `terminal_send({session_id,session_key,text,enter?})` — поставить ввод, **не ждать** завершения;
 - `terminal_read({session_id,session_key,since?})` — новые данные и `next` offset;
@@ -125,7 +124,7 @@ AND ожидаемый пользовательский результат де�
 
 TerminalHub — **мощный execution interface к Mac**, не jailed shell. MCP-разрешение, user confirmation для опасных операций, OS ACL и отсутствие внешней публикации портов важнее названия плагина. При публичной разработке обязательны тесты неверного capability, ограничений длин запросов, закрытия сессий и shutdown.
 
-См. `terminal/server.js`, `terminal/stateless_server.js`, `terminal/job_runtime.js`, `terminal/job_worker.js`, `terminal/pty_worker.py`; сопутствующий runtime — [OPERATIONS.md](OPERATIONS.md).
+См. `terminal/interactive_runtime.cjs`, `terminal/stateless_server.js`, `terminal/job_runtime.js`, `terminal/job_worker.js`, `terminal/pty_worker.py`; сопутствующий runtime — [OPERATIONS.md](OPERATIONS.md).
 
 
 ## Reliability 2.0: восстановление после потери ответа MCP

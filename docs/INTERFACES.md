@@ -6,14 +6,13 @@
 
 | Порт | Протокол и сервис | Основные маршруты |
 |---|---|---|
-| 12847 | HTTP Terminal command MCP | отдельный stateful endpoint, GET /health |
 | 12848 | HTTP Terminal OneShot MCP | MCP tools + GET /health |
 | 8931 | HTTP MCP Playwright backend | POST /mcp; raw backend, только локально |
 | 8940 | HTTP MCP Safe Proxy | POST /mcp; MCP session sharing / tool filtering |
 | 8969 | HTTP Dashboard | GET /api/status, POST /api/action |
 | 8971 | HTTP Messaging | GET /api/status, /api/agents, /api/inbox, /api/history; POST /api/messages, /api/ack и управление агентами |
-| 8972 | HTTP AutoSend | GET /api/status; POST /api/tasks; legacy /api/extension/* для совместимости |
-Все listener-порты назначены loopback 127.0.0.1. Наличие legacy extension routes **не** означает, что расширение остаётся текущим каналом доставки; в работающем AutoSend используется `cdp-delivery.mjs`.
+| 8972 | HTTP AutoSend | GET /api/status; POST /api/tasks (включая `action: "preview"`); обязательный приватный локальный токен |
+Все listener-порты назначены loopback 127.0.0.1. Наличие legacy extension routes **не** означает, что расширение остаётся текущим каналом доставки; в работающем AutoSend используется `delivery.mjs`.
 
 ## Терминальный MCP
 
@@ -123,7 +122,7 @@ curl -fsS -H 'X-MCPHub-Client: native' \
 
 ### AutoSend — `autosend/server.mjs`, порт 8972
 
-Тот же native client header: `X-MCPHub-Client: native`. Некоторые `/api/extension/*` маршруты остались от прежнего транспорта, но **текущий scheduler использует Playwright CDP** и не требует extension как пути доставки.
+Тот же native client header: `X-MCPHub-Client: native`. Планировщик использует **выделенный** Playwright Extension backend 8932 и выбранную группу вкладок. Токен native control обязателен; без выбранной вкладки сообщения не отправляются.
 
 Read-only запрос:
 
@@ -132,7 +131,7 @@ curl -fsS -H 'X-MCPHub-Client: native' \
   http://127.0.0.1:8972/api/status
 ```
 
-Ответ содержит `ok`, `tasks`, последние `attempts`, `deliverySupported`, `deliveryReason`, `busyTask`, `serverTime` и совместимые исторические поля об extension status. Текущий `extensionTransport` отображает `Playwright CDP`.
+Ответ содержит `ok`, `tasks`, последние `attempts`, `deliverySupported`, `deliveryReason`, `busyTask`, `serverTime` и совместимые исторические поля об extension status. Текущий `extensionTransport` отображает `Playwright Extension`.
 
 Запись производится `POST /api/tasks`, где `action` — одна из:
 - `create`: `url`, `message`, `interval_seconds`; новая задача создаётся **paused**;
@@ -156,9 +155,9 @@ curl -fsS -H 'X-MCPHub-Client: native' \
 
 URL здесь **синтетический и не является действующим разговором**. API validate: только `https://chatgpt.com/c/UUID` или `/g/g-p-.../c/UUID`; text длиной 1–8000 символов, interval 60–604800 секунд. Размер JSON request до **30000** байт. Создание/включение задачи — это запись в локальное хранилище, не отправка сообщения в ChatGPT.
 
-### Terminal stateful — `terminal/server.js`
+### Terminal interactive — `terminal/interactive_runtime.cjs`
 
-Слушает `127.0.0.1:12847`. Предоставляет `GET /health`, локальную dashboard UI и HTTP/MCP routing по private path из локальной конфигурации. Для доступа к `/api/sessions` используется отдельный admin capability, а для конкретной сессии — session key. Не копируйте активные private paths и session credentials в публичные примеры.
+Работает в едином сервере `127.0.0.1:12848`. Предоставляет `GET /health`, локальную dashboard UI и HTTP/MCP routing по private path из локальной конфигурации. Для доступа к `/api/sessions` используется отдельный admin capability, а для конкретной сессии — session key. Не копируйте активные private paths и session credentials в публичные примеры.
 
 MCP tools: `terminal_create`, `terminal_send`, `terminal_read`, `terminal_interrupt`, `terminal_close`. Протокол JSON-RPC 2.0 и MCP initialize включают `tools/list` и `tools/call`.
 

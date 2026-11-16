@@ -29,6 +29,10 @@ class DevSyncRuntimeTests(TestCase):
             src.write_text("new:" + relative)
             dst.write_text("old:" + relative)
 
+    def test_required_runtime_platform_module_is_allowlisted(self):
+        self.assertIn("terminal/platform.js", MODULE.FILES)
+        self.assertIn("autosend/preview-check.mjs", MODULE.FILES)
+
     def test_code_only_sync_makes_backup_and_is_idempotent(self):
         with patch.object(MODULE, "ROOT", self.source):
             updated = MODULE.sync(self.runtime, backup_root=self.backup)
@@ -40,6 +44,30 @@ class DevSyncRuntimeTests(TestCase):
                     "old:" + relative,
                 )
             self.assertEqual(MODULE.sync(self.runtime, backup_root=self.backup), [])
+
+    def test_retired_autosend_modules_are_backed_up_and_removed(self):
+        old = MODULE.RETIRED_CODE[0]
+        target = self.runtime / old
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("historical browser executor")
+        with patch.object(MODULE, "ROOT", self.source):
+            updated = MODULE.sync(self.runtime, backup_root=self.backup)
+            self.assertIn("retired:" + old, updated)
+            self.assertFalse(target.exists())
+            saved = self.backup / (old + ".before-dev-2.0.7")
+            self.assertEqual(saved.read_text(), "historical browser executor")
+            self.assertEqual(MODULE.sync(self.runtime, backup_root=self.backup), [])
+
+    def test_retired_autosend_symlink_blocks_sync_before_writes(self):
+        old = MODULE.RETIRED_CODE[0]
+        target = self.runtime / old
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(self.source / MODULE.FILES[0])
+        with patch.object(MODULE, "ROOT", self.source):
+            with self.assertRaisesRegex(RuntimeError, "Unsafe retired runtime path"):
+                MODULE.sync(self.runtime, backup_root=self.backup)
+        self.assertEqual((self.runtime / MODULE.FILES[0]).read_text(),
+                         "old:" + MODULE.FILES[0])
 
     def test_unsafe_symlink_fails_before_modifying_any_source(self):
         link = self.runtime / MODULE.FILES[-1]
@@ -55,6 +83,7 @@ class DevSyncRuntimeTests(TestCase):
         script = (ROOT / "scripts/dev_preview_macos.sh").read_text()
         self.assertIn("CFBundleShortVersionString 2.0.7", script)
         self.assertIn("dev_sync_runtime.py", script)
+        self.assertIn("com.mcphub.autosend.browser.plist", script)
         self.assertNotIn("build_release_dmg.py", script)
         self.assertNotIn("git push", script)
         source = (ROOT / "native/main.swift").read_text()

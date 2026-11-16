@@ -27,9 +27,11 @@ $('settings').addEventListener('submit',async event=>{
   const terminalId=$('terminal-id').value.trim(),browserId=$('browser-id').value.trim();
   const data={browser:$('browser').value,autoStart:$('autoStart').checked,
     terminal:terminalId?{id:terminalId,key:$('terminal-key').value}:undefined,
-    browserTunnel:browserId?{id:browserId,key:$('browser-key').value}:undefined};
+    browserTunnel:browserId?{id:browserId,key:$('browser-key').value}:undefined,
+    playwrightExtension:$('playwright-token').value?
+      {token:$('playwright-token').value}:undefined};
   const result=await window.mcpgo.save(data);
-  $('terminal-key').value='';$('browser-key').value='';
+  $('terminal-key').value='';$('browser-key').value='';$('playwright-token').value='';
   render(result);message('Настройки сохранены. Сервисы переподключены.');
  }catch(e){message(e.message,true)}finally{button.disabled=false}
 });
@@ -38,6 +40,39 @@ $('restart').addEventListener('click',async()=>{
  catch(e){message(e.message,true)}
 });
 $('browser-docs').addEventListener('click',()=>window.mcpgo.docs().catch(e=>message(e.message,true)));
+
+async function checkBrowserCompatibility(){
+ const browser=$('browser').value, indicator=$('browser-version'),update=$('browser-version-update');
+ indicator.textContent='Проверяем версию браузера…';
+ indicator.classList.remove('warning');update.hidden=true;
+ try{
+  const result=await window.mcpgo.onboard('browser-check',{browser});
+  // The user can change the selection before the async check completes.
+  if($('browser').value!==browser)return;
+  const label=browser==='chrome'?'Google Chrome':'Microsoft Edge';
+  if(result.backgroundReady){
+   indicator.textContent=label+' '+result.version+
+    ' — версия подходит для фонового Playwright (ориентир '+result.minimumVersion+').'+
+    (result.requiresRealBrowserVerification?' Для Edge нужна проверка реальной браузерной сессии.':'');
+  }else{
+   const detected=result.version?'Найдена версия '+result.version+'. ':'Версию браузера определить не удалось. ';
+   indicator.textContent=detected+'Для фонового режима без переключения окон нужен '+
+    label+' '+result.minimumVersion+' или новее. McpGo продолжит работать и без обновления.';
+   indicator.classList.add('warning');
+   update.hidden=false;
+   update.textContent='Обновить '+label;
+  }
+ }catch(e){
+  if($('browser').value!==browser)return;
+  indicator.textContent='Не удалось проверить версию: '+e.message;
+  indicator.classList.add('warning');
+ }
+}
+$('browser-version-check').addEventListener('click',()=>void checkBrowserCompatibility());
+$('browser').addEventListener('change',()=>void checkBrowserCompatibility());
+$('browser-version-update').addEventListener('click',()=>window.mcpgo.browserUpdate($('browser').value)
+ .catch(e=>message(e.message,true)));
+void checkBrowserCompatibility();
 
 
 const wizard=$('wizard-status');

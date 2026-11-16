@@ -4,7 +4,8 @@ const path=require('node:path');
 const net=require('node:net');
 const {spawn,spawnSync}=require('node:child_process');
 
-const ENDPOINTS=Object.freeze({stateful:12847,terminal:12848,browser:8931,proxy:8940,autosend:8972,messaging:8971});
+const ENDPOINTS=Object.freeze({terminal:12848,browser:8931,proxy:8940,autosend:8972,messaging:8971});
+const CORE_SERVICES=Object.freeze(['terminal','browser','proxy','autosendBrowser','autosend','messaging']);
 function assertTunnelId(id) {
   if(typeof id!=='string'||!/^tunnel_[a-z0-9_]{3,128}$/.test(id))throw Error('INVALID_TUNNEL_ID');
   return id;
@@ -12,7 +13,6 @@ function assertTunnelId(id) {
 function runtimePaths(resourceRoot,userData) {
   return {
     terminal:path.join(resourceRoot,'terminal','stateless_server.js'),
-    stateful:path.join(resourceRoot,'terminal','server.js'),
     ptyModule:path.join(resourceRoot,'pty','node_modules','@lydell','node-pty'),
     python:path.join(resourceRoot,'python','python.exe'),
     tunnelClient:path.join(resourceRoot,'tunnel','tunnel-client.exe'),
@@ -69,14 +69,14 @@ class Runtime {
   }
   report() {
     const state={};
-    for(const name of ['terminal','stateful','browser','proxy','autosend','messaging','terminalTunnel','browserTunnel']){
+    for(const name of ['terminal','browser','proxy','autosendBrowser','autosend','messaging','terminalTunnel','browserTunnel']){
       const item=this.entries.get(name);
       state[name]=item?.state||'stopped';
     }
     this.onChange(state);
     return state;
   }
-  state(){const snapshot={};for(const name of ['terminal','stateful','browser','proxy','autosend','messaging','terminalTunnel','browserTunnel']){
+  state(){const snapshot={};for(const name of ['terminal','browser','proxy','autosendBrowser','autosend','messaging','terminalTunnel','browserTunnel']){
     snapshot[name]=this.entries.get(name)?.state||'stopped';
   }return snapshot}
   node(script,args=[],env={}) {
@@ -87,23 +87,37 @@ class Runtime {
     const p=this.paths;
     if(name==='terminal')return this.node(p.terminal,[],{
       MCPGO_ONESHOT_CONFIG:p.config,MCPGO_JOB_ROOT:path.join(this.userData,'OneShotJobs'),
-      MCPGO_TERMINAL_CONFIG:path.join(this.userData,'terminal','config.json'),MCPGO_ENABLE_STATEFUL:'1',MCPGO_ENABLE_FILES:'1'});
-    if(name==='stateful')return this.node(p.stateful,[],{
-      MCPGO_TERMINAL_CONFIG:path.join(this.userData,'terminal','config.json'),
-      MCPGO_JOB_ROOT:path.join(this.userData,'OneShotJobs'),MCPGO_NODE_PTY_MODULE:p.ptyModule});
+      MCPGO_TERMINAL_CONFIG:path.join(this.userData,'terminal','config.json'),MCPGO_NODE_PTY_MODULE:p.ptyModule,MCPGO_ENABLE_FILES:'1'});
     if(name==='autosend')return this.node(p.autosend,[],{
       MCPHUB_AUTOSEND_STATE:path.join(this.userData,'AutoSend','tasks.json')});
     if(name==='messaging')return {file:p.python,args:[p.messaging,'serve'],cwd:path.dirname(p.messaging),
       env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',MCPHUB_MESSAGE_DB:path.join(this.userData,'Messaging','messages.sqlite3')}};
+    if(name==='autosendBrowser'){
+      if(!fs.existsSync(p.browser))throw Error('PLAYWRIGHT_DEPENDENCIES_MISSING');
+      const extension=await this.credentials('playwrightExtension');
+      if(!extension?.token)return null;
+      fs.mkdirSync(path.join(p.artifacts,'autosend'),{recursive:true});
+      return this.node(p.browser,['--host','127.0.0.1','--port','8932',
+        '--extension','--background','--browser',this.browser,'--shared-browser-context',
+        '--caps','devtools','--block-service-workers','--no-webmcp',
+        '--output-dir',path.join(p.artifacts,'autosend'),'--timeout-navigation','45000'],
+        {PLAYWRIGHT_MCP_REJECT_UNSAFE:'1',PLAYWRIGHT_MCP_SESSION_NAME:'MCPGO AutoSend',
+         PLAYWRIGHT_MCP_SESSION_COLOR:'blue',PLAYWRIGHT_MCP_EXTENSION_TOKEN:extension.token,
+         PLAYWRIGHT_MCP_PING_TIMEOUT_MS:process.env.PLAYWRIGHT_MCP_PING_TIMEOUT_MS??'0'});
+    }
     if(name==='browser'){
       if(!fs.existsSync(p.browser))throw Error('PLAYWRIGHT_DEPENDENCIES_MISSING');
+      const extension=await this.credentials('playwrightExtension');
+      if(!extension?.token)return null;
       fs.mkdirSync(p.artifacts,{recursive:true});
       return this.node(p.browser,['--host','127.0.0.1','--port','8931',
-        '--extension','--browser',this.browser,'--shared-browser-context',
+        '--extension','--background','--browser',this.browser,'--shared-browser-context',
         '--caps','vision,devtools','--block-service-workers','--no-webmcp',
-        '--output-dir',p.artifacts,'--timeout-navigation','45000'],{PLAYWRIGHT_MCP_REJECT_UNSAFE:'1'});
+        '--output-dir',p.artifacts,'--timeout-navigation','45000'],{PLAYWRIGHT_MCP_REJECT_UNSAFE:'1',
+        PLAYWRIGHT_MCP_EXTENSION_TOKEN:extension.token,
+        PLAYWRIGHT_MCP_PING_TIMEOUT_MS:process.env.PLAYWRIGHT_MCP_PING_TIMEOUT_MS??'0'});
     }
-    if(name==='proxy')return this.node(p.proxy,['shared']);
+    if(name==='proxy')return this.node(p.proxy,['shared'],{MCPGO_ACTION_ROOT:path.join(this.userData,'BrowserActions')});
     if(name==='terminalTunnel'||name==='browserTunnel'){
       const target=name==='terminalTunnel'?'terminal':'browser';
       const cred=await this.credentials(target);
@@ -164,14 +178,14 @@ class Runtime {
     this.running=true;
     const generation=++this.generation;
     fs.mkdirSync(this.userData,{recursive:true});
-    await Promise.all(['stateful','terminal','browser','proxy','autosend','messaging'].map(name=>this.launch(name)));
+    await Promise.all(CORE_SERVICES.map(name=>this.launch(name)));
     // Wait for the real local listeners, not just a spawned process.
     const pump=async()=>{
       if(!this.running||generation!==this.generation)return;
-      const [t,pty]=await Promise.all([listening(ENDPOINTS.terminal),listening(ENDPOINTS.stateful)]);
+      const t=await listening(ENDPOINTS.terminal);
       const b=await listening(ENDPOINTS.proxy);
       if(!this.running||generation!==this.generation)return;
-      if(t&&pty&&this.entries.get('terminal')?.child?.exitCode===null &&
+      if(t&&this.entries.get('terminal')?.child?.exitCode===null &&
          !this.entries.get('terminalTunnel')?.child && !this.entries.get('terminalTunnel')?.timer)
         this.launch('terminalTunnel');
       if(b&&this.entries.get('proxy')?.child?.exitCode===null &&
@@ -198,4 +212,4 @@ class Runtime {
     this.report();
   }
 }
-module.exports={Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,listening,killOwnedTree};
+module.exports={Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,listening,killOwnedTree,CORE_SERVICES};

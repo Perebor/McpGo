@@ -27,7 +27,12 @@ class DmgPackagingTests(unittest.TestCase):
         self.assertNotIn("release", builder.SOURCES)
         self.assertIn("action-guard.mjs", builder.SOURCES["playwright"])
         self.assertIn("job_worker.js", builder.SOURCES["terminal"])
-        for entry in ("resource_locks.js", "resource_policy.js", "mcp-version.json"):
+        self.assertIn("browser-client.mjs", builder.SOURCES["autosend"])
+        self.assertIn("preview-check.mjs", builder.SOURCES["autosend"])
+        self.assertIn("delivery.mjs", builder.SOURCES["autosend"])
+        self.assertNotIn("cdp-delivery.mjs", builder.SOURCES["autosend"])
+        self.assertNotIn("stall-watchdog.mjs", builder.SOURCES["autosend"])
+        for entry in ("resource_locks.js", "resource_policy.js", "platform.js", "mcp-version.json"):
             self.assertIn(entry, builder.SOURCES["terminal"])
         for entry in ("tunnel-health.mjs", "tunnel-recovery.mjs", "mcp-versions.mjs"):
             self.assertIn(entry, builder.SOURCES["dashboard"])

@@ -1,7 +1,7 @@
 'use strict';
 const path=require('node:path');
 const {spawn}=require('node:child_process');
-const ACTIONS=new Set(['discover','provision','import','runtime-projects',
+const ACTIONS=new Set(['browser-check','discover','provision','import','runtime-projects',
   'runtime-inspect','runtime-auto','runtime-recover-key','verify-remote','doctor']);
 async function onboarding({action,payload,root,userData,python}){
  if(!ACTIONS.has(action))throw Error('UNSUPPORTED_ONBOARDING_ACTION');

@@ -60,6 +60,8 @@ private enum WizardBridge {
     @Published var error = ""
     @Published var phase = ""
     @Published var checks: [[String:Any]] = []
+    @Published var browserCompatibility: [String:Any] = [:]
+    @Published var browserMode = "not-configured"
     @Published var terminalID = ""
     @Published var browserID = ""
     @Published var terminalReady = false
@@ -88,6 +90,8 @@ private enum WizardBridge {
             let data = try await WizardBridge.perform("status")
             let preflight = data["preflight"] as? [String:Any] ?? [:]
             checks = preflight["checks"] as? [[String:Any]] ?? []
+            browserCompatibility = data["browserCompatibility"] as? [String:Any] ?? [:]
+            browserMode = data["browserMode"] as? String ?? "not-configured"
             phase = data["phase"] as? String ?? "preflight"
             if !restoredPage {
                 restoredPage = true
@@ -137,6 +141,10 @@ private enum WizardBridge {
                        (browserReady ? "Локальные MCP и доступ к вкладкам Chrome подтверждены."
                         : browserDetail.isEmpty ? "Локальная диагностика выполнена."
                         : browserDetail)
+            } else if action == "activate-browser-extension" {
+                note = result["verified"] as? Bool == true
+                    ? "Playwright Extension подключено. Вкладки открываются в группе MCPGO в фоновом режиме."
+                    : "Проверка расширения не подтверждена."
             } else if action == "discover" {
                 let arr = result["tunnels"] as? [[String:Any]] ?? []
                 note = "В выбранной области найдено туннелей: " + String(arr.count)
@@ -236,6 +244,7 @@ struct OnboardingView: View {
     @State private var chosenRuntimeProject = ""
     @State private var importedTerminal = ""
     @State private var importedBrowser = ""
+    @State private var extensionToken = ""
     private let titles = [
         "Проверка Mac", "OpenAI и права", "Туннели",
         "Локальные службы", "Google Chrome", "ChatGPT", "Проверка"
@@ -345,9 +354,51 @@ struct OnboardingView: View {
         .padding(.vertical,9)
     }
 
+    /// Read-only version guidance. Chrome is optional and never blocks terminal setup.
+    private var chromeVersionNotice: some View {
+        VStack(alignment:.leading,spacing:8) {
+            let ready = model.browserCompatibility["backgroundReady"] as? Bool == true
+            let version = model.browserCompatibility["version"] as? String
+            Label(ready ? "Chrome готов для фоновой работы" : "Проверь версию Google Chrome",
+                  systemImage:ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size:13,weight:.semibold))
+                .foregroundStyle(ready ? Palette.online : Palette.warning)
+            Text(ready
+                 ? "Найден Chrome \(version ?? ""). Полностью фоновое подключение Playwright поддерживается."
+                 : (version == nil
+                    ? "Версию Google Chrome определить не удалось. Для фонового подключения нужен Chrome 158.0.8127.2 или новее."
+                    : "Найден Chrome \(version!). Для фонового подключения без переключения окон нужен Chrome 158.0.8127.2 или новее."))
+                .font(.system(size:12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal:false,vertical:true)
+            if !ready {
+                Text("Старый Chrome не блокирует установку McpGo. Расширение Playwright может работать, но окно Chrome иногда будет получать фокус.")
+                    .font(.system(size:11))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal:false,vertical:true)
+            }
+            HStack(spacing:10) {
+                if !ready {
+                    Button("Скачать или обновить Chrome") {
+                        if let url = URL(string:"https://www.google.com/chrome/") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+                Button("Проверить снова") { Task { await model.refresh() } }
+                    .disabled(model.busy)
+            }
+        }
+        .padding(13)
+        .frame(maxWidth:.infinity,alignment:.leading)
+        .background(Palette.background.opacity(0.45),
+                    in:RoundedRectangle(cornerRadius:12))
+    }
+
     private var systemStep: some View {
         VStack(alignment:.leading,spacing:18) {
             heading("1. Проверяем Mac", "Убедимся, что всё готово к подключению ChatGPT.")
+            if preflightLoaded { chromeVersionNotice }
 
             if !preflightLoaded {
                 HStack(spacing:10) {
@@ -1689,47 +1740,64 @@ struct OnboardingView: View {
         VStack(alignment:.leading,spacing:13) {
             heading("5. Личный Chrome",
                     "Playwright подключается к твоему открытому Google Chrome, а не создаёт отдельный профиль.")
+            chromeVersionNotice
 
-            Text("1. Разреши подключение к Chrome")
+            Text("1. Подключи Playwright к Chrome")
                 .font(.system(size:13,weight:.semibold))
                 .foregroundStyle(Palette.ink)
-            Text("Открой chrome://inspect/#remote-debugging в Google Chrome, " +
-                 "включи «Allow remote debugging for this browser instance» " +
-                 "и подтверди запрос Chrome, если он появится.")
-                .font(.system(size:12))
-                .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal:false,vertical:true)
-            Button {
-                guard let url = URL(string:"chrome://inspect/#remote-debugging"),
-                      let chrome = NSWorkspace.shared.urlForApplication(
-                        withBundleIdentifier:"com.google.Chrome"
-                      ) else {
-                    model.error = "Google Chrome не найден. Установи Google Chrome " +
-                                  "или открой chrome://inspect/#remote-debugging в его адресной строке."
-                    return
-                }
-                // Explicitly dispatch the chrome:// URL to Chrome. Sending this
-                // scheme to the macOS default handler triggers "No application
-                // is set to open the URL" even when Chrome is installed.
-                NSWorkspace.shared.open(
-                    [url], withApplicationAt:chrome,
-                    configuration:NSWorkspace.OpenConfiguration()
-                ) { _, error in
-                    if let error {
-                        DispatchQueue.main.async {
-                            model.error = "Chrome не смог открыть настройки: " +
-                                          error.localizedDescription +
-                                          ". Вставь chrome://inspect/#remote-debugging " +
-                                          "в адресную строку Google Chrome."
+            if model.browserMode == "extension" {
+                Label("Режим Playwright Extension активен · вкладки MCPGO в фоне",
+                      systemImage:"checkmark.circle.fill")
+                    .font(.system(size:12,weight:.semibold))
+                    .foregroundStyle(Palette.online)
+            } else {
+                Text("Открой значок Playwright Extension 0.5.0+ в панели Chrome, " +
+                     "скопируй PLAYWRIGHT_MCP_EXTENSION_TOKEN и вставь ниже. " +
+                     "Мастер проверит соединение до переключения работающего браузера. " +
+                     "Токен останется только на этом Mac.")
+                    .font(.system(size:12))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal:false,vertical:true)
+                Button {
+                    guard let url=URL(string:"chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html"),
+                          let chrome=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.google.Chrome") else {
+                        model.error="Google Chrome не найден. Открой значок Playwright Extension вручную."
+                        return
+                    }
+                    NSWorkspace.shared.open([url],withApplicationAt:chrome,
+                                            configuration:NSWorkspace.OpenConfiguration()) { _, error in
+                        if let error {
+                            DispatchQueue.main.async {
+                                model.error="Не удалось открыть Playwright Extension: "+error.localizedDescription
+                            }
                         }
                     }
+                } label: {
+                    Label("Открыть Playwright Extension в Chrome",
+                          systemImage:"arrow.up.right.square")
+                        .font(.system(size:12,weight:.semibold))
                 }
-            } label: {
-                Label("Открыть разрешение Remote Debugging в Chrome",
-                      systemImage:"arrow.up.right.square")
-                    .font(.system(size:12,weight:.semibold))
+                SecureField("Токен Playwright Extension", text:$extensionToken)
+                    .textContentType(.password)
+                    .font(.system(size:12))
+                Button {
+                    let token = extensionToken
+                    extensionToken = ""
+                    Task { await model.perform("activate-browser-extension",
+                        data:["confirmed":true, "token":token]) }
+                } label: {
+                    Label("Проверить и включить фоновый режим",
+                          systemImage:"rectangle.3.group")
+                        .font(.system(size:12,weight:.semibold))
+                }
+                .disabled(model.busy || extensionToken.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                Text("Подключение и список вкладок проверяются отдельно на порту 8999. " +
+                     "Если проверка не пройдёт, McpGo сохранит предыдущие настройки. " +
+                     "На Chrome 157 служебная вкладка первого подключения может один раз перехватить фокус.")
+                    .font(.system(size:11))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal:false,vertical:true)
             }
-
             Divider()
 
             Text("2. Запусти локальные службы")
@@ -1762,14 +1830,14 @@ struct OnboardingView: View {
                     Label("Browser MCP: \(model.browserMcpReady ? "готов" : "не подтверждён")",
                           systemImage:model.browserMcpReady ? "checkmark.circle" : "circle.dotted")
                 }
-                Label("Вкладки Chrome CDP: \(model.browserReady ? "доступны" : "не подтверждены")",
+                Label("Вкладки Chrome Extension: \(model.browserReady ? "доступны" : "не подтверждены")",
                       systemImage:model.browserReady ? "checkmark.circle" : "circle.dotted")
             }
             .font(.system(size:12))
             if model.browserMcpReady && !model.browserReady {
                 Text(model.browserDetail.isEmpty
                      ? "Playwright MCP запущен, но Chrome пока не отдал список вкладок. " +
-                       "Проверь Remote Debugging. Терминал перезапускать не нужно."
+                       "Проверь разрешения Playwright Extension. Терминал перезапускать не нужно."
                      : model.browserDetail)
                     .font(.system(size:11))
                     .foregroundStyle(Palette.warning)

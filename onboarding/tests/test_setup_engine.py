@@ -200,19 +200,19 @@ class SetupEngineTests(unittest.TestCase):
             method=packet["method"]
             timeouts.append((method,timeout))
             results={
-                "initialize":{"serverInfo":{"name":"test"}},
+                "server/discover":{"supportedVersions":["2026-07-28"]},
                 "tools/list":{"tools":[{"name":"browser_tabs"}]},
                 "tools/call":{"content":[{"type":"text","text":"### Result\\nTabs"}]},
             }
             if method=="notifications/initialized":
                 return FakeResponse({})
             return FakeResponse({"jsonrpc":"2.0","id":packet["id"],
-                                 "result":results[method]})
+                                 "result": {"resultType":"complete", **(results[method] if method!="tools/call" or packet.get("params",{}).get("name")!="mcpgo_workspace" else {"structuredContent":{"workspace_id":"ws_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"}})}})
         with patch("urllib.request.urlopen",side_effect=respond):
             self.assertTrue(SetupEngine.probe_tools(
                 "http://127.0.0.1:8940/mcp",{"browser_tabs"},verify_browser=True))
         self.assertEqual(dict(timeouts)["tools/call"],15)
-        self.assertEqual(dict(timeouts)["initialize"],6)
+        self.assertEqual(dict(timeouts)["server/discover"],6)
         self.assertEqual(dict(timeouts)["tools/list"],6)
 
     def test_verify_local_keeps_browser_mcp_ready_when_chrome_tabs_stalls(self):
@@ -235,11 +235,11 @@ class SetupEngineTests(unittest.TestCase):
             if method=="notifications/initialized":
                 return FakeResponse({})
             result={
-                "initialize":{"serverInfo":{"name":"mcpgo-browser"}},
+                "server/discover":{"supportedVersions":["2026-07-28"]},
                 "tools/list":{"tools":[{"name":"browser_tabs"}]}
             }[method]
             return FakeResponse({"jsonrpc":"2.0","id":packet["id"],
-                                 "result":result})
+                                 "result":{"resultType":"complete",**result}})
         with patch("urllib.request.urlopen",side_effect=respond):
             result=engine.verify_local()
         self.assertTrue(result["browserMcp"])
@@ -252,7 +252,10 @@ class SetupEngineTests(unittest.TestCase):
         source=(Path(__file__).parents[2]/"native/OnboardingView.swift").read_text()
         self.assertIn('withBundleIdentifier:"com.google.Chrome"',source)
         self.assertIn('withApplicationAt:chrome',source)
-        self.assertNotIn('NSWorkspace.shared.open(url)',source)
+        # A normal https:// Chrome download may use the default browser; only
+        # chrome:// and chrome-extension:// deep links must force Google Chrome.
+        deep_links=source[source.index('chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html'):]
+        self.assertNotIn('NSWorkspace.shared.open(url)',deep_links)
 
     def test_readonly_browser_mcp_probe_parses_sse_and_checks_real_result(self):
         import http.server
@@ -270,11 +273,11 @@ class SetupEngineTests(unittest.TestCase):
                 if method == "notifications/initialized":
                     return
                 result = {
-                    "initialize": {"serverInfo": {"name": "test"}},
+                    "server/discover": {"supportedVersions": ["2026-07-28"]},
                     "tools/list": {"tools": [{"name": "browser_tabs"}]},
                     "tools/call": {"content": [{"type": "text", "text": "### Result\nTabs"}]},
                 }.get(method)
-                payload = {"jsonrpc": "2.0", "id": packet["id"], "result": result}
+                payload = {"jsonrpc": "2.0", "id": packet["id"], "result": {"resultType": "complete", **(result if method!="tools/call" or packet.get("params",{}).get("name")!="mcpgo_workspace" else {"structuredContent":{"workspace_id":"ws_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"}})}}
                 self.wfile.write(("event: message\ndata: " + json.dumps(payload) + "\n\n").encode())
         from http.server import HTTPServer
         server = HTTPServer(("127.0.0.1", 0), Handler)

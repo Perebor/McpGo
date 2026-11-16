@@ -13,20 +13,39 @@ test('unsigned Windows NSIS preview is per-user and has no auto-publish',()=>{
  assert.equal(cfg.publish,undefined);
  assert.equal(cfg.win.target[0].target,'nsis');
 });
+test('Windows reinstall keeps the stable app identity and userData outside package',()=>{
+ assert.equal(app.build.appId,'ru.mcpgo.desktop');
+ assert.equal(app.build.productName,'McpGo');
+ assert.equal(app.build.nsis.perMachine,false);
+ const source=fs.readFileSync(path.join(repo,'windows/app/main.cjs'),'utf8');
+ const settings=fs.readFileSync(path.join(repo,'windows/app/settings.cjs'),'utf8');
+ assert.match(source,/app\.getPath\('userData'\)/);
+ assert.match(settings,/path\.join\(this\.userData\(\),'settings\.json'\)/);
+ assert.doesNotMatch(source,/rmSync|rmdirSync/);
+ assert.doesNotMatch(settings,/rmSync|rmdirSync/);
+});
 test('bundle allowlists exact runtime files and not private local configuration',()=>{
  const resources=app.build.extraResources;
  const terminal=resources.find(x=>x.to==='mcpgo-runtime/terminal');
  const playwright=resources.find(x=>x.to==='mcpgo-runtime/playwright');
  assert.ok(terminal&&playwright);
  const expected=['stateless_server.js','job_runtime.js','job_worker.js','platform.js',
-  'resource_locks.js','resource_policy.js','mcp-version.json','server.js','pty_worker_win.js','stateful_bridge.cjs','files_tools.cjs','dashboard.html','dashboard.js','dashboard.css'];
+  'resource_locks.js','resource_policy.js','mcp-version.json','interactive_runtime.cjs','pty_worker_win.js','files_tools.cjs','dashboard.html','dashboard.js','dashboard.css'];
  for(const file of expected){
   assert.ok(terminal.filter.includes(file),file+' missing');
   assert.ok(fs.existsSync(path.join(repo,'terminal',file)),file+' absent');
  }
  assert.ok(resources.some(x=>x.from==='../playwright/node_modules'&&x.to==='mcpgo-runtime/playwright/node_modules'&&x.filter.includes('**/*')));
- for(const file of ['restricted-proxy.mjs','action-guard.mjs'])
+ for(const file of ['restricted-proxy.mjs','action-guard.mjs','browser-session-manager.mjs',
+  'tab-lease-manager.mjs','agent-scope.mjs','portable-tab-identity.mjs','portable-agent-tabs.mjs','browser-workspace.mjs','workspace-response.mjs','mcp-modern-protocol.mjs'])
   assert.ok(playwright.filter.includes(file));
+ const autosend=resources.find(x=>x.to==='mcpgo-runtime/autosend');
+ assert.ok(autosend&&autosend.filter.includes('*.mjs'));
+ assert.ok(fs.existsSync(path.join(repo,'autosend','browser-client.mjs')));
+ assert.ok(fs.existsSync(path.join(repo,'autosend','delivery.mjs')));
+ assert.ok(fs.existsSync(path.join(repo,'autosend','preview-check.mjs')));
+ assert.equal(fs.existsSync(path.join(repo,'autosend','cdp-delivery.mjs')),false);
+ assert.equal(fs.existsSync(path.join(repo,'autosend','stall-watchdog.mjs')),false);
  for(const name of ['config.json','stateless-config.json','.env','tunnel.key','settings.json'])
   assert.equal(terminal.filter.includes(name)||playwright.filter.includes(name),false);
  assert.ok(app.build.files.every(x=>!x.includes('**/*')));

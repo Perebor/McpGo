@@ -29,7 +29,8 @@ class SettingsStore {
   const c=this.load();
   return {browser:c.browser==='msedge'?'msedge':'chrome',autoStart:!!c.autoStart,
    terminal:{id:c.terminal?.id||'',configured:!!c.terminal?.ciphertext},
-   browserTunnel:{id:c.browserTunnel?.id||'',configured:!!c.browserTunnel?.ciphertext}};
+   browserTunnel:{id:c.browserTunnel?.id||'',configured:!!c.browserTunnel?.ciphertext},
+   playwrightExtension:{configured:!!c.playwrightExtension?.ciphertext}};
  }
  async cryptoReady(){
   if(!await this.safeStorage.isAsyncEncryptionAvailable())
@@ -53,6 +54,27 @@ class SettingsStore {
    });
   }
   return {id:assertTunnelId(v.id),key:decrypted.result};
+ }
+
+ async extensionToken(){
+  const value=this.load().playwrightExtension;
+  if(!value?.ciphertext)return null;
+  await this.cryptoReady();
+  const decrypted=await this.safeStorage.decryptStringAsync(Buffer.from(value.ciphertext,'base64'));
+  const token=decrypted?.result;
+  if(typeof token!=='string'||!/^\S{16,2048}$/.test(token)||/[\x00-\x1f]/.test(token))
+   throw Error('INVALID_ENCRYPTED_EXTENSION_TOKEN');
+  if(decrypted.shouldReEncrypt){
+   const replacement=await this.safeStorage.encryptStringAsync(token);
+   await this.serial(async()=>{
+    const current=this.load();
+    if(current.playwrightExtension?.ciphertext===value.ciphertext){
+     current.playwrightExtension.ciphertext=replacement.toString('base64');
+     this.write(current);
+    }
+   });
+  }
+  return {token};
  }
  serial(fn){
   const action=this.writeTail.then(fn);
@@ -83,6 +105,19 @@ class SettingsStore {
     if(v.key.length<6||v.key.length>8192||/[\r\n]/.test(v.key))throw Error('INVALID_TUNNEL_KEY');
     await this.cryptoReady();
     c[field]={id,ciphertext:(await this.safeStorage.encryptStringAsync(v.key)).toString('base64')};
+   }
+  }
+  if(input.playwrightExtension!==undefined){
+   const v=input.playwrightExtension;
+   if(!v||typeof v!=='object'||Array.isArray(v))throw Error('INVALID_EXTENSION_SETTINGS');
+   if(v.remove===true)delete c.playwrightExtension;
+   else if(v.token!==undefined&&v.token!==''){
+    if(typeof v.token!=='string')throw Error('INVALID_EXTENSION_TOKEN');
+    const token=v.token.trim().replace(/^PLAYWRIGHT_MCP_EXTENSION_TOKEN=/,'');
+    if(!/^\S{16,2048}$/.test(token)||/[\x00-\x1f]/.test(token))
+     throw Error('INVALID_EXTENSION_TOKEN');
+    await this.cryptoReady();
+    c.playwrightExtension={ciphertext:(await this.safeStorage.encryptStringAsync(token)).toString('base64')};
    }
   }
   this.write(c);

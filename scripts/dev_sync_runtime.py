@@ -14,20 +14,30 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
-    "dashboard/server.mjs", "dashboard/mcp-health.mjs",
+    "dashboard/server.mjs", "dashboard/index.html", "dashboard/mcp-health.mjs",
     "dashboard/tunnel-recovery.mjs", "dashboard/tunnel-health.mjs",
     "dashboard/mcp-versions.mjs", "dashboard/app.js",
-    "terminal/server.js", "terminal/stateless_server.js",
+    "terminal/interactive_runtime.cjs", "terminal/stateless_server.js",
     "terminal/job_runtime.js", "terminal/job_worker.js",
     "terminal/resource_locks.js", "terminal/resource_policy.js",
+    "terminal/platform.js",
     "terminal/mcp-version.json", "terminal/run-tunnel.sh",
-    "launchers/tunnel.mjs",
+    "launchers/tunnel.mjs", "launchers/browser.mjs", "playwright/browser-session-manager.mjs", "playwright/chrome-profile.mjs", "playwright/tab-lease-manager.mjs", "playwright/agent-scope.mjs", "playwright/portable-tab-identity.mjs", "playwright/portable-agent-tabs.mjs", "playwright/browser-workspace.mjs", "playwright/workspace-response.mjs", "playwright/mcp-modern-protocol.mjs", "playwright/chatgpt-url.mjs", "playwright/restricted-proxy.mjs",
+    "onboarding/browser_compat.py", "onboarding/setup_engine.py", "onboarding/cli.py", "onboarding/runtime_provision.py",
     # Sync AutoSend source without touching schedules, state or browser profiles.
     "autosend/server.mjs", "autosend/core.mjs",
-    "autosend/cdp-delivery.mjs", "autosend/chat-state.mjs",
+    "autosend/delivery.mjs", "autosend/browser-client.mjs", "autosend/browser-health.mjs", "autosend/preview-check.mjs", "autosend/schedule.mjs", "autosend/smart-continuation.mjs", "autosend/chat-state.mjs",
     "autosend/guarded-send.mjs", "autosend/browser-events.mjs",
     "autosend/conversation-fsm.mjs",
-    "autosend/reconciliation.mjs", "autosend/stall-watchdog.mjs",
+    "autosend/reconciliation.mjs", "autosend/stream-monitor.mjs",
+)
+
+
+# Pure source-code files retired by the AutoSend extension-only rewrite.
+# Never remove state, historical receipts, keys, profiles or user data.
+RETIRED_CODE = (
+    "autosend/cdp-delivery.mjs",
+    "autosend/stall-watchdog.mjs",
 )
 
 
@@ -52,9 +62,25 @@ def sync(destination_root: Path, *, backup_root: Path | None = None) -> list[str
         if dest.exists() and dest.read_bytes() == src.read_bytes():
             continue
         candidates.append((src, dest, relative))
+    # Validate retired source code before changing any file. Avoid following
+    # symlinks and never remove anything beyond the explicit allowlist.
+    retired = []
+    for relative in RETIRED_CODE:
+        dest = destination_root / relative
+        safe_directory(dest.parent)
+        if dest.is_symlink() or (dest.exists() and not dest.is_file()):
+            raise RuntimeError(f"Unsafe retired runtime path: {relative}")
+        if dest.exists():
+            retired.append((dest, relative))
     # Validate all paths first; a missing module doesn't yield a partial sync.
     for src, dest, relative in candidates:
         if backup_root is not None and dest.exists():
+            backup = backup_root / (relative + ".before-dev-2.0.7")
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            if not backup.exists():
+                shutil.copy2(dest, backup)
+    for dest, relative in retired:
+        if backup_root is not None:
             backup = backup_root / (relative + ".before-dev-2.0.7")
             backup.parent.mkdir(parents=True, exist_ok=True)
             if not backup.exists():
@@ -71,7 +97,9 @@ def sync(destination_root: Path, *, backup_root: Path | None = None) -> list[str
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
-    return [relative for _, _, relative in candidates]
+    for dest, _relative in retired:
+        dest.unlink()
+    return [relative for _, _, relative in candidates] + [f"retired:{rel}" for _, rel in retired]
 
 
 if __name__ == "__main__":

@@ -43,18 +43,26 @@ test('reloaded tasks.json reconstructs same state without a second state store',
  const first=conversationStates(tasks,now);
  const afterRestart=conversationStates(JSON.parse(JSON.stringify(tasks)),now);
  assert.deepEqual(first,afterRestart);
- assert.equal(first[url(1)].state,STATES.RECOVERING);
- assert.equal(first[url(2)].state,STATES.WORKING);
+ assert.equal(first[url(1)].state,STATES.READY);
+ assert.equal(first[url(2)].state,STATES.READY);
  assert.equal(first[url(3)].state,STATES.VERIFYING_SEND);
  assert.equal(first[url(4)].state,STATES.PAUSED);
 });
 
-test('task marked recovering cannot send even if its due time passed',()=>{
+test('legacy watchdog flags have no effect on the new scheduler',()=>{
  const t={...task(1),watchdog:{mode:'recovering'}};
- assert.equal(eligibleToSend(t,[t],now),false);
- assert.equal(nextDue([t],now),null);
+ assert.equal(eligibleToSend(t,[t],now),true);
+ assert.equal(nextDue([t],now).id,t.id);
 });
-
+test('project slug variants cannot evade the per-conversation send lock',()=>{
+ const p='a'.repeat(32),c='00000000-0000-4000-8000-000000000001';
+ const bare='https://chatgpt.com/g/g-p-'+p+'/c/'+c;
+ const named='https://chatgpt.com/g/g-p-'+p+'-gafus-refactor/c/'+c;
+ const unknown={...task(1,'unknown'),url:bare};
+ const sibling={...task(2),url:named};
+ assert.equal(conversationState([unknown,sibling],named).blocked,true);
+ assert.equal(eligibleToSend(sibling,[unknown,sibling],now),false);
+});
 test('verification finished in chat A cannot unlock an unresolved B state',()=>{
  const a=task(1,'verifying'),b=task(2,'unknown'),c=task(3);
  assert.equal(eligibleToSend(c,[a,b,c],now),true);

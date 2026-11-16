@@ -23,7 +23,8 @@ test('supervisor starts existing JS service, exposes status and cleans process t
  fs.mkdirSync(path.dirname(script),{recursive:true});
  fs.writeFileSync(script,"setInterval(()=>{},1000);\n");
  const agent=new Runtime({resourceRoot:dir,userData:path.join(dir,'user'),
-   nodeExecutable:process.execPath,credentials:async()=>null});
+   nodeExecutable:process.execPath,credentials:async name=>
+     name==='playwrightExtension'?{token:'abcdefghijklmnopqrstuvwxyz012345'}:null});
  t.after(()=>agent.stop());
  agent.running=true;
  await agent.launch('browser');

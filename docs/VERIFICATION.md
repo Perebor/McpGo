@@ -39,7 +39,7 @@ node --test terminal/tests/*.test.*
 ```bash
 node --check dashboard/server.mjs
 node --check autosend/server.mjs
-node --check autosend/cdp-delivery.mjs
+node --check autosend/delivery.mjs
 node --check playwright/restricted-proxy.mjs
 bash -n playwright/start.sh playwright/start-tunnel.sh playwright/configure-tunnel.sh
 python3 -m py_compile messaging/hub.py

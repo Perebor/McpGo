@@ -2,16 +2,15 @@
 
 ## Назначение
 
-Предоставляет Mac-инструменты для команд и длительных задач через MCP. В текущей реализации доступны **два независимых локальных HTTP процесса**:
-
-- `terminal/server.js` — stateful command server на `127.0.0.1:12847`, включая сессионные терминальные вызовы. Есть `GET /health`.
-- `terminal/stateless_server.js` — OneShot/jobs MCP на `127.0.0.1:12848`, включая инструменты `terminal_exec`, `job_start`, `job_status`, `job_logs`. Есть `GET /health`.
-
-Внешний доступ из ChatGPT организуется через **отдельный** Terminal Secure MCP Tunnel. Локальная служба OneShot и command server — не одно и то же; MCP-плагин может публиковать лишь предусмотренный профилем набор инструментов.
+Поддерживает macOS и Windows. **Один локальный HTTP/MCP-процесс**
+`terminal/stateless_server.js` на `127.0.0.1:12848` предоставляет OneShot,
+длительные Jobs, интерактивные PTY-сессии и локальную панель управления.
+`terminal/interactive_runtime.cjs` — модуль внутри того же процесса, не сервер.
+Внешнее подключение — один Terminal Secure MCP Tunnel к приватному `/exec/<secret>`.
 
 ## OneShot
 
-`terminal_exec({command,cwd?,timeout_ms?})` исполняет одну команду. Предельное время — 90 секунд. После вызова нет сохранённой интерактивной терминальной сессии. Анализируйте все поля результата: `exit_code`, `timed_out`, `spawn_error`, stdout/stderr. Результат с тайм-аутом нельзя интерпретировать как безопасный для автоматического повтора.
+`terminal_exec({command,cwd?,timeout_ms?,request_id?,resource_key?})` запускает команду как долговечный фоновый Job. Если команда завершилась за 12 секунд, возвращается результат; иначе процесс не останавливается, а возвращаются `promoted_to_job:true`, `job_id` и `result_ready:false`. Дальше используйте `job_status` / `job_result` / `job_logs`. После обрыва проверяйте `mcpgo_recover`, не повторяйте операцию вслепую. `timeout_ms` ограничивает время самой команды (по умолчанию 20 минут, максимум 4 часа), а не ожидание MCP. Ожидание MCP — до 12 секунд; для тестов значение настраивается через `MCPGO_TERMINAL_SYNC_WAIT_MS` (100–15000 мс). Одинаково работает на macOS и Windows.
 
 ## Длительные jobs
 
@@ -23,23 +22,26 @@
 
 Проверка PASS требует `state=exited`, `exit_code=0`, `timed_out=false` и отсутствия spawn_error.
 
-## Сессионный command server
+## Интерактивный терминал
 
-`server.js` реализует отдельный MCP-совместимый endpoint c `initialize`, `tools/list`, `tools/call` и управлением интерактивными терминальными сессиями. Вызовы stateful terminal API требуют создания собственной сессии и хранения выданных session credentials внутри разговора. Не путайте это с `terminal_exec`: последний не держит сессию между вызовами.
+Инструменты `terminal_create`, `terminal_send`, `terminal_read`,
+`terminal_interrupt`, `terminal_close` доступны в том же MCP-подключении,
+что и `terminal_exec`. Они используют независимые session_id/session_key
+и PTY (macOS zsh / Windows ConPTY) без отдельных HTTP-мостов.
+Локальная панель доступна на `http://127.0.0.1:12848/` и защищена ключом администратора.
 
 ## LaunchAgents и tunnel
 
 | Служба | Задача |
 |---|---|
-| `com.chatterminalhub.server` | Command server 12847 |
-| `com.chatterminalhub.oneshot` | OneShot/job runtime 12848 |
+| `com.chatterminalhub.oneshot` | Единый Terminal MCP, Jobs, PTY, локальная панель 12848 |
 | `com.chatterminalhub.tunnel` | Secure MCP tunnel |
 
 Активный wrapper туннеля находится в `~/Library/Application Support/ChatTerminalHub/run-tunnel.sh` (owner-only), а шаблон в `launchagents/com.chatterminalhub.tunnel.plist`. Dashboard McpGo умеет исправлять существующие plist, ранее указывавшие на Desktop. При изменении активного plist может потребоваться `bootout` и `bootstrap`.
 
 ## Операционный сценарий
 
-1. Прочитать `GET /health` для двух локальных служб.
+1. Прочитать `GET /health` единого Terminal MCP на 12848.
 2. Проверить `launchctl list` и `launchctl print` для tunnel.
 3. В подключённом MCP-клиенте выполнить безопасную команду `terminal_exec`.
 4. Для длительных операций использовать `job_start → job_status → job_logs`; не повторять потенциально неидемпотентную операцию при неизвестном исходе.
@@ -49,3 +51,15 @@
 Команды выполняются с правами владельца процесса. Отдельной песочницы всего Mac этот модуль не создаёт. Для опасных операций нужен контроль полномочий MCP-клиента, разрешение владельца и осмысленная проверка окружения. Продукт не должен вмешиваться в процессы других приложений без прямого запроса.
 
 Дополнительно: [архитектура](../docs/ARCHITECTURE.md), [контракты](../docs/INTERFACES.md), [эксплуатация](../docs/OPERATIONS.md), [безопасность](../docs/SECURITY.md).
+
+### MCP 2026-07-28 external Terminal endpoint
+
+`stateless_server.js` on its existing private random MCP path implements
+MCP 2026-07-28 via `server/discover`, `tools/list`, `tools/call`, per-request
+capabilities and routing headers, and `resultType:complete` server metadata.
+Existing ChatGPT Terminal connections may still send 2025 `initialize`;
+that is temporarily accepted while migrating the real plugin. Set
+`MCPGO_DISABLE_LEGACY=1` after an actual verified 2026 plugin handshake.
+The durable job engine, idempotency, resource locks, interactive terminal
+operations, and recovery IDs remain unchanged. `interactive_runtime.cjs` handles interactive sessions and the local UI
+inside the same Terminal MCP process; no extra HTTP listener is needed.

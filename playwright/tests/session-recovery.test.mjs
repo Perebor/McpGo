@@ -10,13 +10,14 @@ const backend=http.createServer();
 let generation=1;
 let currentSession='session-1';
 let initialized=0, toolCalls=0, badToolCalls=0;
+const upstreamNames=[];
 const payload=(id,result)=>'event: message\ndata: '+JSON.stringify({jsonrpc:'2.0',id,result})+'\n\n';
 backend.on('request',async(req,res)=>{
  const parts=[];for await(const b of req)parts.push(b);
  const data=parts.length?JSON.parse(Buffer.concat(parts).toString()):{};
  const sid=req.headers['mcp-session-id'];
  if(data.method==='initialize'){
-   initialized++;currentSession='session-'+generation;
+   initialized++;upstreamNames.push(data.params?.clientInfo?.name);currentSession='session-'+generation;
    res.writeHead(200,{'content-type':'text/event-stream','mcp-session-id':currentSession});
    return res.end(payload(data.id,{protocolVersion:'2025-03-26',serverInfo:{name:'Fake Playwright',version:'1'},capabilities:{tools:{}}}));
  }
@@ -29,14 +30,15 @@ backend.on('request',async(req,res)=>{
  if(data.method==='tools/call'){
    toolCalls++;
    res.writeHead(200,{'content-type':'text/event-stream'});
-   return res.end(payload(data.id,{content:[{type:'text',text:'### Result\nTabs'}]}));
+   return res.end(payload(data.id,{content:[{type:'text',
+     text:data.params.name==='browser_tabs'?'### Result\n- 0: (current) [Test](https://example.org)\n- 1: [Other](https://example.net)':'### Result\nDone'}]}));
  }
  res.writeHead(200);res.end('{}');
 });
 async function listen(server){server.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));return server.address().port;}
 const backPort=await listen(backend);
 const reserved=http.createServer();const proxyPort=await listen(reserved);await new Promise(r=>reserved.close(r));
-const proxy=spawn(process.execPath,[proxyFile,'shared'],{env:{...process.env,MCPGO_PROXY_PORT:String(proxyPort),MCPGO_BACKEND_PORT:String(backPort)},stdio:['ignore','pipe','pipe']});
+const proxy=spawn(process.execPath,[proxyFile,'shared'],{env:{...process.env,NODE_ENV:'test',MCPGO_LEGACY_TEST_ONLY:'1',MCPGO_PROXY_PORT:String(proxyPort),MCPGO_BACKEND_PORT:String(backPort)},stdio:['ignore','pipe','pipe']});
 let err='';
 proxy.stderr.on('data',b=>err+=b.toString());
 async function waitReady(){
@@ -50,9 +52,11 @@ async function waitReady(){
 await waitReady();
 after(async()=>{proxy.kill('SIGTERM');await new Promise(resolve=>backend.close(resolve));});
 let id=1;
-async function post(method,params){
+async function post(method,params,agent){
  const body={jsonrpc:'2.0',method};if(method!=='notifications/initialized')body.id=id++;if(params)body.params=params;
- const result=await fetch('http://127.0.0.1:'+proxyPort+'/mcp',{method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify(body)});
+ const headers={'content-type':'application/json',accept:'application/json, text/event-stream'};
+ if(agent)headers['x-mcpgo-agent-id']=agent;
+ const result=await fetch('http://127.0.0.1:'+proxyPort+'/mcp',{method:'POST',headers,body:JSON.stringify(body)});
  const text=await result.text();
  return {status:result.status,session:result.headers.get('mcp-session-id'),text};
 }
@@ -62,11 +66,13 @@ test('fresh initialize, initialized notification and filtered list',async()=>{
  assert.equal((await post('notifications/initialized')).status,202);
  const list=await post('tools/list');assert.equal(list.status,200);
  assert.match(list.text,/browser_tabs/);assert.doesNotMatch(list.text,/browser_run_code_unsafe/);
+ assert.match(list.text,/mcpgo_browser_status/);
+ assert.deepEqual(upstreamNames,['MCPGO']);
 });
 test('dead shared session is reinitialized for the next new client',async()=>{
  generation++;currentSession='session-'+generation;
  const init=await initialize();assert.equal(init.status,200);
- assert.equal(init.session,'session-'+generation);
+ assert.match(init.session,/^[a-f0-9-]{36}$/);
  assert.equal((await post('notifications/initialized')).status,202);
  assert.equal((await post('tools/list')).status,200);
 });
@@ -86,4 +92,53 @@ test('fresh initialization restores functionality after a refused mutation',asyn
  const init=await initialize();assert.equal(init.status,200);
  assert.equal((await post('notifications/initialized')).status,202);
  assert.equal((await post('tools/list')).status,200);
+});
+
+test('read-only session status never connects Chrome and subsequent reconnections keep client name',async()=>{
+ const before=toolCalls;
+ const url='http://127.0.0.1:'+proxyPort+'/healthz';
+ const response=await fetch(url);
+ assert.equal(response.status,200);
+ const status=await response.json();
+ assert.equal(status.sessionName,'MCPGO');
+ assert.equal(status.mcp,'ready');
+ assert.ok(['unknown','connected'].includes(status.browser));
+ assert.equal(toolCalls,before);
+ const tool=await post('tools/call',{name:'mcpgo_browser_status',arguments:{}});
+ assert.equal(tool.status,200);
+ assert.equal(toolCalls,before);
+ assert.ok(upstreamNames.every(name=>name==='MCPGO'));
+});
+
+test('tab lease prevents multiple agents and legacy clients from acting on owned tabs',async()=>{
+ const agentA='agent-A',agentB='agent-B';
+ const claim=()=>({name:'mcpgo_tab_lease',arguments:{action:'claim',index:0}});
+ const release=()=>({name:'mcpgo_tab_lease',arguments:{action:'release',index:0}});
+ const a=await post('tools/call',claim(),agentA);
+ assert.equal(a.status,200,a.text);
+ const b=await post('tools/call',claim(),agentB);
+ assert.equal(b.status,409,b.text);
+ assert.match(b.text,/TAB_OWNED_BY_ANOTHER_AGENT/);
+ const third=await post('tools/call',{name:'browser_click',arguments:{}},agentB);
+ assert.equal(third.status,409);
+ const legacy=await post('tools/call',{name:'browser_click',arguments:{}});
+ assert.equal(legacy.status,409);
+ const owned=await post('tools/call',{name:'browser_click',arguments:{}},agentA);
+ assert.equal(owned.status,200,owned.text);
+ assert.equal((await post('tools/call',release(),agentA)).status,200);
+ assert.equal((await post('tools/call',{name:'browser_click',arguments:{}})).status,200);
+});
+
+
+test('untrusted website origins and simple content types cannot call local browser proxy',async()=>{
+ const endpoint='http://127.0.0.1:'+proxyPort+'/mcp';
+ const data=JSON.stringify({jsonrpc:'2.0',id:52,method:'tools/call',
+   params:{name:'browser_tabs',arguments:{action:'new'}}});
+ const before=toolCalls;
+ const simple=await fetch(endpoint,{method:'POST',headers:{'content-type':'text/plain'},body:data});
+ assert.equal(simple.status,415);
+ const foreign=await fetch(endpoint,{method:'POST',headers:{origin:'https://malicious.example',
+   'content-type':'application/json'},body:data});
+ assert.equal(foreign.status,403);
+ assert.equal(toolCalls,before,'Chrome must not see browser-origin attacks');
 });

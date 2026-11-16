@@ -76,7 +76,7 @@ const backendPort=await listen(backend);
 const reserved=http.createServer(),proxyPort=await listen(reserved);
 await new Promise(resolve=>reserved.close(resolve));
 const proxy=spawn(process.execPath,[fileURLToPath(new URL('../restricted-proxy.mjs',import.meta.url)),'shared'],
- {env:{...process.env,MCPGO_PROXY_PORT:String(proxyPort),
+ {env:{...process.env,NODE_ENV:'test',MCPGO_LEGACY_TEST_ONLY:'1',MCPGO_PROXY_PORT:String(proxyPort),
   MCPGO_BACKEND_PORT:String(backendPort),
   MCPGO_ACTION_ROOT:path.join(folder,'integration')},stdio:['ignore','pipe','pipe']});
 let proxyStderr='';

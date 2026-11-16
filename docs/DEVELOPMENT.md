@@ -33,7 +33,7 @@ python3 -m unittest discover -s messaging/tests -v
 cd autosend
 node --test tests/*.test.mjs
 node --check server.mjs
-node --check cdp-delivery.mjs
+node --check delivery.mjs
 cd ../playwright
 node --check restricted-proxy.mjs
 ```

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -23,7 +24,8 @@ async function startIsolated(state){
  const env={...process.env,
   MCPHUB_AUTOSEND_PORT:String(port),
   MCPHUB_AUTOSEND_STATE:stateFile,
-  MCPHUB_PLAYWRIGHT_MCP_URL:'http://127.0.0.1:1/mcp',
+  MCPHUB_AUTOSEND_BROWSER_PORT:'65412',
+  MCPHUB_AUTOSEND_BROWSER_MCP_URL:'http://127.0.0.1:65412/mcp',
   MCPHUB_AUTOSEND_CHECK_MS:'50',
   NODE_ENV:'test'
  };
@@ -37,7 +39,9 @@ async function startIsolated(state){
  for(let i=0;i<50;i++){
   if(child.exitCode!==null)break;
   try{
-   const response=await fetch(base+'/api/status',{headers:{'X-MCPHub-Client':'native'}});
+   const tokenPath=path.join(folder,'control-token');
+   let token='';try{token=readFileSync(tokenPath,'utf8').trim()}catch{}
+   const response=await fetch(base+'/api/status',{headers:{'X-MCPHub-Client':'native','X-MCPHub-Token':token}});
    if(response.ok){started=true;break;}
   }catch{}
   await new Promise(resolve=>setTimeout(resolve,30));
@@ -47,7 +51,7 @@ async function startIsolated(state){
   await rm(folder,{recursive:true,force:true});
   throw Error('Isolated AutoSend failed to start: '+stdout+' '+stderr);
  }
- return {child,folder,stateFile,base};
+ return {child,folder,stateFile,base,headers:{'X-MCPHub-Client':'native','Content-Type':'application/json','X-MCPHub-Token':readFileSync(path.join(folder,'control-token'),'utf8').trim()}};
 }
 async function shutdown(s){
  s.child.kill('SIGTERM');
@@ -58,18 +62,18 @@ async function shutdown(s){
  if(s.child.exitCode===null)s.child.kill('SIGKILL');
  await rm(s.folder,{recursive:true,force:true});
 }
-const headers={'X-MCPHub-Client':'native','Content-Type':'application/json'};
+
 test('isolated HTTP server creates a paused schedule without sending or touching other installations',async()=>{
  const instance=await startIsolated();
  try{
   const posted=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'create',url:CHAT_URL,message:'test',interval_seconds:900})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'create',url:CHAT_URL,message:'test',interval_seconds:900})
   });
   assert.equal(posted.status,200);
   const created=await posted.json();
   assert.equal(created.task.status,'paused');
   assert.equal(created.task.enabled,false);
-  const response=await fetch(instance.base+'/api/status',{headers:{'X-MCPHub-Client':'native'}});
+  const response=await fetch(instance.base+'/api/status',{headers:instance.headers});
   assert.equal(response.status,200);
   const result=await response.json();
   assert.equal(result.tasks.length,1);
@@ -91,7 +95,7 @@ test('server restart preserves pending click proof and never dispatches automati
  };
  const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
  try{
-  const response=await fetch(instance.base+'/api/status',{headers:{'X-MCPHub-Client':'native'}});
+  const response=await fetch(instance.base+'/api/status',{headers:instance.headers});
   const result=await response.json();
   assert.equal(result.tasks[0].status,'verifying');
   assert.equal(result.tasks[0].delivery_count,0);
@@ -110,14 +114,14 @@ test('manual unknown verification via HTTP only rechecks saved receipt; never qu
  const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
  try{
   const response=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'recheck_unknown',id:task.id})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'recheck_unknown',id:task.id})
   });
   assert.equal(response.status,200);
   const started=await response.json();
   assert.equal(started.checking,true);
   assert.equal(started.sendBlocked,true);
   const result=await (await fetch(instance.base+'/api/status',{
-   headers:{'X-MCPHub-Client':'native'}
+   headers:instance.headers
   })).json();
   const updated=result.tasks[0];
   assert.equal(updated.enabled,false);
@@ -126,7 +130,7 @@ test('manual unknown verification via HTTP only rechecks saved receipt; never qu
   assert.equal(updated.verification.manualRechecks,1);
   assert.equal(updated.verification.baselineUserCount,3);
   const forbidden=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'send_once',id:task.id})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'send_once',id:task.id})
   });
   assert.equal(forbidden.status,400,'manual recheck cannot be turned into new send');
   const disk=JSON.parse(await readFile(instance.stateFile,'utf8'));
@@ -140,11 +144,11 @@ test('manual unknown recheck without a baseline returns an error, never creates 
  const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
  try{
   const response=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'recheck_unknown',id:task.id})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'recheck_unknown',id:task.id})
   });
   assert.equal(response.status,400);
   const result=await (await fetch(instance.base+'/api/status',{
-   headers:{'X-MCPHub-Client':'native'}
+   headers:instance.headers
   })).json();
   assert.equal(result.tasks[0].status,'unknown');
  }finally{await shutdown(instance)}
@@ -163,14 +167,14 @@ test('HTTP conversation FSM blocks only the same chat, while other chats stay ru
   delivery_count:0,last_error:''};
  const instance=await startIsolated({version:1,tasks:[unknown,sibling,independent],attempts:[]});
  try {
-  const same=await fetch(instance.base+'/api/tasks',{method:'POST',headers,
+  const same=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,
     body:JSON.stringify({action:'start',id:'s1'})});
   assert.equal(same.status,400,'unresolved receipt forbids a second schedule in the same chat');
-  const other=await fetch(instance.base+'/api/tasks',{method:'POST',headers,
+  const other=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,
     body:JSON.stringify({action:'start',id:'i1'})});
   assert.equal(other.status,200,'another conversation remains schedulable');
   const status=await (await fetch(instance.base+'/api/status',{
-   headers:{'X-MCPHub-Client':'native'}})).json();
+   headers:instance.headers})).json();
   assert.equal(status.conversations[CHAT_URL].state,'UNKNOWN');
   assert.equal(status.conversations[CHAT_URL].blocked,true);
   assert.equal(status.conversations[u2].state,'READY');
@@ -189,7 +193,7 @@ test('user can explicitly confirm already-sent unknown without a new Send or rea
  const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
  try{
   const response=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'confirm_received',id:task.id})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'confirm_received',id:task.id})
   });
   assert.equal(response.status,200);
   const confirmed=await response.json();
@@ -197,7 +201,7 @@ test('user can explicitly confirm already-sent unknown without a new Send or rea
   assert.equal(confirmed.sendBlocked,true);
   assert.equal(confirmed.paused,true);
   const status=await (await fetch(instance.base+'/api/status',{
-   headers:{'X-MCPHub-Client':'native'}})).json();
+   headers:instance.headers})).json();
   const updated=status.tasks[0];
   assert.equal(updated.enabled,false);
   assert.equal(updated.manual_once,false);
@@ -209,7 +213,7 @@ test('user can explicitly confirm already-sent unknown without a new Send or rea
   assert.equal(status.attempts.length,1);
   assert.equal(status.attempts[0].result,'verified_manual');
   const duplicate=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'confirm_received',id:task.id})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'confirm_received',id:task.id})
   });
   assert.equal(duplicate.status,400,'manual confirmation must not be counted twice');
   const disk=JSON.parse(await readFile(instance.stateFile,'utf8'));
@@ -224,12 +228,43 @@ test('manual confirmation is refused for a scheduled task with no attempted Send
  const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
  try{
   const response=await fetch(instance.base+'/api/tasks',{
-   method:'POST',headers,body:JSON.stringify({action:'confirm_received',id:task.id})
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'confirm_received',id:task.id})
   });
   assert.equal(response.status,400);
   const status=await (await fetch(instance.base+'/api/status',{
-   headers:{'X-MCPHub-Client':'native'}})).json();
+   headers:instance.headers})).json();
   assert.equal(status.tasks[0].delivery_count,0);
   assert.equal(status.attempts.length,0);
  }finally{await shutdown(instance)}
+});
+
+test('preview without sending reports unavailable browser and preserves a paused task',async()=>{
+ const instance=await startIsolated();
+ try{
+  const created=await (await fetch(instance.base+'/api/tasks',{
+   method:'POST',headers:instance.headers,
+   body:JSON.stringify({action:'create',url:CHAT_URL,message:'DO_NOT_SEND',interval_seconds:900})
+  })).json();
+  const response=await fetch(instance.base+'/api/tasks',{
+   method:'POST',headers:instance.headers,body:JSON.stringify({action:'preview',id:created.task.id})
+  });
+  assert.equal(response.status,200);
+  const checked=await response.json();
+  assert.equal(checked.ready,false);
+  assert.equal(checked.sendBlocked,true);
+  assert.match(checked.reason,/Playwright Extension backend/);
+  const state=await (await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  assert.equal(state.tasks[0].status,'paused');
+  assert.equal(state.tasks[0].delivery_count,0);
+  assert.deepEqual(state.attempts,[]);
+ }finally{await shutdown(instance);}
+});
+test('spoofed native header without control token is forbidden',async()=>{
+ const instance=await startIsolated();
+ try{
+  const bad=await fetch(instance.base+'/api/status',{headers:{'X-MCPHub-Client':'native'}});
+  assert.equal(bad.status,403);
+  const forged=await fetch(instance.base+'/api/status',{headers:{...instance.headers,'X-MCPHub-Token':'f'.repeat(64)}});
+  assert.equal(forged.status,403);
+ }finally{await shutdown(instance);}
 });

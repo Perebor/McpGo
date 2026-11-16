@@ -16,7 +16,7 @@ const PORT = 8969;
 const DOMAIN = `gui/${process.getuid()}`;
 const AGENTS = path.join(os.homedir(), 'Library/LaunchAgents');
 const groups = {
-  terminal: ['com.chatterminalhub.server','com.chatterminalhub.oneshot','com.chatterminalhub.tunnel'],
+  terminal: ['com.chatterminalhub.oneshot','com.chatterminalhub.tunnel'],
   'terminal-tunnel': ['com.chatterminalhub.tunnel'],
   playwright: ['com.mcphub.playwright.browser','com.mcphub.playwright.proxy','com.mcphub.playwright.tunnel'],
 };
@@ -147,10 +147,22 @@ async function mcpReadiness(){
   try{return await mcpHealthFlight;}
   finally{mcpHealthFlight=null;}
 }
+async function browserTelemetry() {
+  // Probe ONLY our own proxy's in-memory state; never wake Chrome or create tabs.
+  try {
+    const response=await fetch('http://127.0.0.1:8940/healthz',
+      {signal:AbortSignal.timeout(700)});
+    if(!response.ok)return null;
+    const value=await response.json();
+    return ['unknown','connecting','connected','recovering','degraded'].includes(value?.browser)
+      ? value : null;
+  }catch{return null}
+}
 async function status() {
   const terminal = groups.terminal.map(job);
   const browser = groups.playwright.map(job);
   const [backend,proxy] = await Promise.all([alive(ports.browser),alive(ports.proxy)]);
+  const browserSession=proxy?await browserTelemetry():null;
   // Keep the status endpoint fast; Chrome can wait for user CDP consent.
   if(backend&&proxy)void mcpReadiness();
   const mcpReady=backend&&proxy?mcpHealthCache.value:false;
@@ -158,7 +170,7 @@ async function status() {
   const hasFile = n => {try {return fs.statSync(`${keyDir}/${n}`).size>0;}catch{return false;}};
   const hasKeychain = (() => {try {execFileSync('/usr/bin/security',['find-generic-password','-a',os.userInfo().username,'-s','com.mcphub.playwright.openai.tunnel'],{stdio:'ignore',timeout:2500});return true;}catch{return false;}})();
   const configured=hasFile('tunnel.id') && (hasFile('tunnel.key') || hasKeychain);
-  return {installationRoot:ROOT,busy,mcpVersions:mcpVersions(ROOT),recovery:recovery.snapshot(),terminal:{server:terminal[0],oneshot:terminal[1],tunnel:terminal[2]},playwright:{browser:browser[0],proxy:browser[1],tunnel:browser[2],backend,proxyReady:proxy,mcpReady,configured},updatedAt:new Date().toISOString()};
+  return {installationRoot:ROOT,busy,mcpVersions:mcpVersions(ROOT),recovery:recovery.snapshot(),terminal:{oneshot:terminal[0],tunnel:terminal[1]},playwright:{browser:browser[0],proxy:browser[1],tunnel:browser[2],backend,proxyReady:proxy,mcpReady,browserSession,configured},updatedAt:new Date().toISOString()};
 }
 function load(label) {
   if(label===TUNNEL_LABEL) ensureTerminalTunnel();
@@ -177,7 +189,11 @@ async function action(group,verb) {
   if (!Object.hasOwn(groups,group) || !['start','stop','restart'].includes(verb)) throw Error('Неизвестное действие');
   if (verb==='stop' || verb==='restart') {
     for (const label of [...groups[group]].reverse()) unload(label);
-    // launchd bootout is asynchronous: do not re-bootstrap while the old ports are still open.
+    // launchd bootout is asynchronous: never bootstrap a still-registered label.
+    if (!await waitFor(async()=>groups[group].every(label=>!job(label).loaded),15000))
+      throw Error('Службы ещё выгружаются — повторный запуск отменён');
+    if(group==='terminal' && !await waitFor(async()=>!(await alive(12848)),15000))
+      throw Error('Терминал ещё закрывает порт 12848 — повторный запуск отменён');
     if (group==='playwright') {
       const stopped=await waitFor(async()=>
         groups.playwright.every(label=>!job(label).loaded) &&
@@ -219,7 +235,12 @@ async function action(group,verb) {
           timeout:44000,stdio:['ignore','pipe','pipe']});
       } catch {throw Error('Playwright CDP не видит вкладки Chrome. Проверь включение Chrome Remote Debugging и перезапусти Playwright.');}
     } else {
-      for(const label of groups[group]) load(label);
+      if(group==='terminal') {
+        load(groups.terminal[0]);
+        if(!await waitFor(async()=>job(groups.terminal[0]).running && await alive(12848),16000))
+          throw Error('Terminal MCP не открыл порт 12848 — проверьте журнал oneshot');
+        load(groups.terminal[1]);
+      } else for(const label of groups[group]) load(label);
       if(!await waitFor(async()=>groups[group].every(label=>job(label).running),12000))
         throw Error('Не все службы запустились — проверьте журнал туннеля');
       await new Promise(r=>setTimeout(r,1800));

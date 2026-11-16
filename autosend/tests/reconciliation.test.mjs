@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {reconcileViaPlaywright,confirmsNewUserMessage,deliveryEvidence} from '../cdp-delivery.mjs';
+import {reconcileViaPlaywright,confirmsNewUserMessage,deliveryEvidence} from '../delivery.mjs';
 import {
   verificationReceipt,canReconcile,expired,scheduleNextCheck,finishVerified,finishUnknown,recheckUnknown,
   VERIFY_WINDOW_MS,restoreAttemptEvidence,fingerprint,combinedEvidence

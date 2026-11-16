@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
-const {Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths}=require('../app/runtime.cjs');
+const {Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,CORE_SERVICES}=require('../app/runtime.cjs');
 test('tunnel keys never appear in command arguments',()=>{
  const args=clientArgs({tunnelId:'tunnel_secure_4',url:'http://127.0.0.1:8940/mcp',
    config:'C:\\tunnel.yaml',healthFile:'C:\\health.url'});
@@ -35,5 +35,49 @@ test('Windows plans reuse existing MCP source rather than a second fork',async()
    nodeExecutable:'McpGo.exe',credentials:()=>null,browser:'msedge'});
  assert.deepEqual((await runtime.plan('terminal')).args.slice(0,1),[p.terminal]);
  assert.equal((await runtime.plan('terminal')).env.ELECTRON_RUN_AS_NODE,'1');
+ assert.ok((await runtime.plan('terminal')).env.MCPGO_NODE_PTY_MODULE);
+ assert.equal('stateful' in runtime.state(),false);
  assert.equal(await runtime.plan('terminalTunnel'),null);
+});
+
+
+test('dedicated AutoSend browser is a core Windows service, isolated from Browser MCP',async t=>{
+ assert.ok(CORE_SERVICES.includes('autosendBrowser'));
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'mcpgo-windows-browser-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const cli=path.join(root,'playwright','node_modules','@playwright','mcp','cli.js');
+ fs.mkdirSync(path.dirname(cli),{recursive:true});
+ fs.writeFileSync(cli,'');
+ const calls=[];
+ const secret='abcdefghijklmnopqrstuvwxyz012345';
+ const runtime=new Runtime({resourceRoot:root,userData:path.join(root,'data'),
+  nodeExecutable:'node.exe',credentials:async name=>{
+   calls.push(name);
+   return name==='playwrightExtension'?{token:secret}:null;
+  },browser:'msedge'});
+ const agent=await runtime.plan('browser');
+ const autosend=await runtime.plan('autosendBrowser');
+ assert.ok(agent.args.includes('--extension'));
+ assert.ok(autosend.args.includes('--extension'));
+ assert.ok(agent.args.includes('--shared-browser-context'));
+ assert.ok(autosend.args.includes('--shared-browser-context'));
+ assert.equal(agent.args[agent.args.indexOf('--port')+1],'8931');
+ assert.equal(autosend.args[autosend.args.indexOf('--port')+1],'8932');
+ assert.equal(autosend.env.PLAYWRIGHT_MCP_SESSION_NAME,'MCPGO AutoSend');
+ assert.equal(autosend.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN,secret);
+ assert.equal(agent.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN,secret);
+ assert.ok(!autosend.args.includes(secret),'never leak browser token in command arguments');
+ assert.ok(!agent.args.includes(secret),'never leak browser token in command arguments');
+ assert.ok(calls.every(name=>name==='playwrightExtension'));
+});
+test('Windows fails closed when official Extension token has not been configured',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'mcpgo-windows-browser-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const cli=path.join(root,'playwright','node_modules','@playwright','mcp','cli.js');
+ fs.mkdirSync(path.dirname(cli),{recursive:true});
+ fs.writeFileSync(cli,'');
+ const runtime=new Runtime({resourceRoot:root,userData:path.join(root,'data'),
+  nodeExecutable:'node.exe',credentials:async()=>null,browser:'chrome'});
+ assert.equal(await runtime.plan('browser'),null);
+ assert.equal(await runtime.plan('autosendBrowser'),null);
 });

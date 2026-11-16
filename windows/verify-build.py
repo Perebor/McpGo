@@ -25,14 +25,16 @@ def main():
     base=pathlib.Path(args.directory)
     runtime=base/"resources/mcpgo-runtime"
     required={
-        "terminal":["stateless_server.js","server.js","pty_worker_win.js",
-                    "stateful_bridge.cjs","files_tools.cjs","platform.js","job_worker.js",
+        "terminal":["stateless_server.js","interactive_runtime.cjs","pty_worker_win.js",
+                    "files_tools.cjs","platform.js","job_worker.js",
                     "job_runtime.js","resource_locks.js","resource_policy.js","mcp-version.json"],
-        "autosend":["server.mjs","cdp-delivery.mjs","core.mjs","conversation-fsm.mjs",
-                    "reconciliation.mjs","guarded-send.mjs"],
+        "autosend":["server.mjs","delivery.mjs","browser-client.mjs","preview-check.mjs","browser-health.mjs","schedule.mjs","smart-continuation.mjs","core.mjs","conversation-fsm.mjs",
+                    "reconciliation.mjs","guarded-send.mjs","chat-state.mjs","browser-events.mjs","stream-monitor.mjs"],
         "messaging":["hub.py"],
-        "onboarding":["setup_engine.py","runtime_provision.py","cli.py"],
-        "playwright":["restricted-proxy.mjs","action-guard.mjs",
+        "onboarding":["setup_engine.py","runtime_provision.py","cli.py","browser_compat.py"],
+        "playwright":["restricted-proxy.mjs","action-guard.mjs","browser-session-manager.mjs",
+                      "tab-lease-manager.mjs","agent-scope.mjs","portable-tab-identity.mjs",
+                      "portable-agent-tabs.mjs","browser-workspace.mjs","workspace-response.mjs","mcp-modern-protocol.mjs","chatgpt-url.mjs",
                       "node_modules/@playwright/mcp/cli.js",
                       "node_modules/playwright-core/lib/coreBundle.js"],
         "node":["node.exe"],

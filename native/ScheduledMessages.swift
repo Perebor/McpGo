@@ -25,19 +25,20 @@ private struct ScheduledVerification:Decodable {
     let lastEvidence:ScheduledDeliveryEvidence?
     let manualRechecks:Int?
 }
-private struct ScheduledStallWatchdog:Decodable {
-    let mode:String
-    let checkedAt:String?
-    let lastProgressAt:String?
-    let faultSince:String?
-    let lastReloadAt:String?
-    let reloadCount:Int?
-}
 private struct ScheduledChatMessage: Decodable, Identifiable {
     let id:String
     let url:String
     let message:String
     let interval_seconds:Int
+    let schedule_mode:String?
+    let run_at:String?
+    let time_zone:String?
+    let local_time:String?
+    let weekdays:[Int]?
+    let end_at:String?
+    let delay_seconds:Int?
+    let max_continuations:Int?
+    let continuations_sent:Int?
     let enabled:Bool
     let next_at:String?
     let status:String
@@ -50,7 +51,6 @@ private struct ScheduledChatMessage: Decodable, Identifiable {
     let safe_retry_count:Int?
     let manual_once:Bool?
     let verification:ScheduledVerification?
-    let watchdog:ScheduledStallWatchdog?
     let created_at:String
 }
 private struct DeliveryAttempt: Decodable, Identifiable {
@@ -58,6 +58,10 @@ private struct DeliveryAttempt: Decodable, Identifiable {
     let task_id:String
     let time:String
     let result:String
+    let slot_id:String?
+    let scheduled_at:String?
+    let started_at:String?
+    let duration_ms:Int?
     let stage:String?
     let error:String
     let diagnostic:ScheduledDeliveryEvidence?
@@ -86,11 +90,22 @@ private struct AutoSendConversation:Decodable {
     let reason:String?
     let owner_task_id:String?
 }
+private struct ScheduledHistorySummary:Decodable {
+    let verified:Int
+    let skipped:Int
+    let unknown:Int
+    let other:Int
+}
 private struct AutoSendResponse: Decodable {
     let ok:Bool?
     let tasks:[ScheduledChatMessage]?
     let attempts:[DeliveryAttempt]?
     let conversations:[String:AutoSendConversation]?
+    let historySummary:ScheduledHistorySummary?
+    let ready:Bool?
+    let reason:String?
+    let chatFound:Bool?
+    let sendBlocked:Bool?
     let deliverySupported:Bool?
     let deliveryReason:String?
     let extensionConnected:Bool?
@@ -108,14 +123,16 @@ private struct AutoSendResponse: Decodable {
     @Published var tasks:[ScheduledChatMessage]=[]
     @Published var attempts:[DeliveryAttempt]=[]
     @Published var conversations:[String:AutoSendConversation]=[:]
+    @Published var historySummary:ScheduledHistorySummary?
+    @Published var preflightResults:[String:String]=[:]
     @Published var deliverySupported=false
     @Published var extensionConnected=false
-    @Published var extensionTransport="Playwright CDP"
+    @Published var extensionTransport="Playwright MCP · расширение Chrome"
     @Published var extensionLastSeen:String?
     @Published var extensionDiagnostic:ChromePageDiagnostic?
-    @Published var extensionVersion="CDP"
-    @Published var requiredExtensionVersion="CDP"
-    @Published var deliveryReason="Проверка подключения к Playwright CDP…"
+    @Published var extensionVersion="Playwright Extension"
+    @Published var requiredExtensionVersion="Playwright Extension"
+    @Published var deliveryReason="Проверка подключения к Playwright Extension AutoSend…"
     @Published var error:String?
     @Published var notice:String?
     @Published var loading=false
@@ -127,6 +144,14 @@ private struct AutoSendResponse: Decodable {
     private func request(_ endpoint:String, payload:[String:Any]?=nil) async throws -> AutoSendResponse {
         var req=URLRequest(url:base.appendingPathComponent(endpoint))
         req.setValue("native",forHTTPHeaderField:"X-MCPHub-Client")
+        let tokenFile=FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/McpGo/AutoSend/control-token")
+        let token=try String(contentsOf:tokenFile,encoding:.utf8).trimmingCharacters(in:.whitespacesAndNewlines)
+        guard token.count==64 else {
+            throw NSError(domain:"MCPHubAutoSend",code:403,
+                userInfo:[NSLocalizedDescriptionKey:"Локальная авторизация AutoSend не настроена."])
+        }
+        req.setValue(token,forHTTPHeaderField:"X-MCPHub-Token")
         req.timeoutInterval=75
         if let payload {
             req.httpMethod="POST"
@@ -152,13 +177,14 @@ private struct AutoSendResponse: Decodable {
             tasks=state.tasks ?? []
             attempts=state.attempts ?? []
             conversations=state.conversations ?? [:]
+            historySummary=state.historySummary
             deliverySupported=state.deliverySupported ?? false
             extensionConnected=state.extensionConnected ?? false
             extensionTransport=state.extensionTransport ?? "не определён"
             extensionLastSeen=state.extensionLastSeen
             extensionDiagnostic=state.extensionDiagnostic
             extensionVersion=state.extensionVersion ?? "не определена"
-            requiredExtensionVersion=state.requiredExtensionVersion ?? "2.0.0"
+            requiredExtensionVersion=state.requiredExtensionVersion ?? "Playwright Extension"
             deliveryReason=state.deliveryReason ?? "Нет подтверждённого транспорта отправки."
             busyTask=state.busyTask ?? ""
             lastUpdated=Date()
@@ -181,15 +207,34 @@ private struct AutoSendResponse: Decodable {
         } catch {self.error=error.localizedDescription}
     }
 
+    func preview(_ taskID:String) async {
+        guard !loading else {return}
+        loading=true
+        defer {loading=false}
+        do {
+            let result=try await request("api/tasks",payload:["action":"preview","id":taskID])
+            let checkedTime=Date().formatted(date:.omitted,time:.shortened)
+            preflightResults[taskID]=(result.ready == true ? "✅ " : "⚠️ ") +
+                (result.reason ?? "Не удалось определить готовность разговора.") +
+                " · Проверено в " + checkedTime + " · Send не нажимался"
+            error=nil
+        } catch {preflightResults[taskID]="Проверка не удалась: " + error.localizedDescription}
+    }
     func execute(_ action:String, values:[String:Any]=[:]) async -> Bool {
         loading=true
         defer {loading=false}
         do {
             let body=["action":action].merging(values){_,new in new}
             _ = try await request("api/tasks",payload:body)
+            // A check is a point-in-time observation, not a persistent
+            // status. Clear the old result whenever its task is changed.
+            if ["update","start","pause","remove"].contains(action),
+               let taskID=values["id"] as? String {
+                preflightResults.removeValue(forKey:taskID)
+            }
             notice = switch action {
             case "create": "Расписание создано выключенным. Проверь URL и включи его самостоятельно."
-            case "start": "Расписание включено. Первое сообщение — через указанный интервал."
+            case "start": "Расписание включено. Следующее действие — согласно выбранному режиму."
             case "pause": "Расписание остановлено."
             case "remove": "Расписание удалено."
             case "send_once": "Запрос поставлен в очередь Playwright. Результат появится в журнале."
@@ -211,6 +256,15 @@ struct ScheduledMessagesView:View {
     @State private var message=""
     @State private var interval="30"
     @State private var intervalUnit="minutes"
+    @State private var scheduleMode="interval"
+    @State private var runAt=Date().addingTimeInterval(3600)
+    @State private var timeZoneID=TimeZone.current.identifier
+    @State private var localTime="10:00"
+    @State private var weekdays:Set<Int>=[1,2,3,4,5]
+    @State private var hasEndDate=false
+    @State private var endDate=Date().addingTimeInterval(30*86400)
+    @State private var delaySeconds="30"
+    @State private var maxContinuations="20"
     @State private var editingTaskID:String?
     @State private var confirmation:Confirmation?
     @State private var showingHistory=false
@@ -225,11 +279,47 @@ struct ScheduledMessagesView:View {
         let explanation:String
     }
     private var isSharedLink:Bool {url.contains("chatgpt.com/share/")}
-    private var isWebChatLink:Bool {
-        // Normal chats and ChatGPT Project chats use different URL prefixes.
-        // The conversation UUID must still be the final path segment.
-        let pattern=#"^https://chatgpt\.com(?:/g/g-p-[a-zA-Z0-9][a-zA-Z0-9-]{2,160})?/c/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(\?.*)?$"#
-        return url.trimmingCharacters(in:.whitespacesAndNewlines).range(of:pattern,options:.regularExpression) != nil
+    private var cleanedWebChatInput:String {
+        // Copy/paste from formatted text may substitute Unicode dashes for
+        // ASCII '-' or inject zero-width separators. The backend only accepts
+        // ASCII UUIDs; canonicalize visual equivalents before validation.
+        var cleaned=url.trimmingCharacters(in:.whitespacesAndNewlines)
+        for separator in ["\u{200B}","\u{200C}","\u{200D}","\u{FEFF}"] {
+            cleaned=cleaned.replacingOccurrences(of:separator,with:"")
+        }
+        for dash in ["\u{2010}","\u{2011}","\u{2012}","\u{2013}",
+                     "\u{2014}","\u{2212}","\u{FE63}","\u{FF0D}"] {
+            cleaned=cleaned.replacingOccurrences(of:dash,with:"-")
+        }
+        return cleaned
+    }
+    private var normalizedWebChatURL:String? {
+        // Exact same accepted path shapes as normalizeTarget() in core.mjs.
+        let input=cleanedWebChatInput
+        guard input.count<=1000,let components=URLComponents(string:input),
+              components.scheme?.lowercased()=="https",
+              components.host?.lowercased()=="chatgpt.com",
+              components.port==nil,components.user==nil,
+              components.password==nil,components.fragment==nil else {return nil}
+        let pattern=#"^(?:/g/g-p-[a-zA-Z0-9][a-zA-Z0-9-]{2,160})?/c/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$"#
+        let path=components.percentEncodedPath
+        guard path.range(of:pattern,options:.regularExpression) != nil else {return nil}
+        let canonicalPath=path.hasSuffix("/") ? String(path.dropLast()) : path
+        return "https://chatgpt.com" + canonicalPath.lowercased()
+    }
+    private var invalidWebChatURLIssue:String {
+        guard let parts=URLComponents(string:cleanedWebChatInput) else {
+            return "Вставленная ссылка содержит символы, которые нельзя разобрать как URL."
+        }
+        guard parts.scheme?.lowercased()=="https",parts.host?.lowercased()=="chatgpt.com" else {
+            return "Нужна ссылка с адресом https://chatgpt.com/."
+        }
+        if parts.fragment != nil {return "Удали часть ссылки после символа #."}
+        if let id=parts.path.components(separatedBy:"/c/").last,
+           parts.path.contains("/c/"),id.count != 36 {
+            return "ID чата неполный или содержит лишние символы: должно быть 36 символов, сейчас \(id.count)."
+        }
+        return "Не удалось распознать путь разговора. Скопируй адрес из Chrome целиком."
     }
     private var seconds:Int {
         let v=Int(interval) ?? 0
@@ -237,10 +327,39 @@ struct ScheduledMessagesView:View {
         let (value,overflow)=v.multipliedReportingOverflow(by:multiplier)
         return overflow ? 0 : value
     }
-    private var canCreate:Bool {
-        isWebChatLink &&
-        !message.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && message.count<=8000 &&
-        seconds>=60 && seconds<=604800 && !model.loading
+    private var formValidationIssue:String? {
+        if url.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+            return "Укажи ссылку на существующий чат ChatGPT."
+        }
+        if isSharedLink {
+            return "Ссылка /share/ не подходит — нужна исходная ссылка разговора /c/."
+        }
+        if normalizedWebChatURL == nil {
+            return invalidWebChatURLIssue
+        }
+        if message.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+            return "Напиши сообщение, которое будет отправляться по расписанию."
+        }
+        if message.count>8000 {return "Сообщение должно быть не длиннее 8000 символов."}
+        switch scheduleMode {
+        case "once":
+            if runAt<=Date(){return "Выбери дату и время в будущем."}
+        case "daily","weekly":
+            if TimeZone(identifier:timeZoneID)==nil {return "Укажи существующий часовой пояс, например Europe/Moscow."}
+            if localTime.range(of:#"^([01][0-9]|2[0-3]):[0-5][0-9]$"#,options:.regularExpression)==nil {
+                return "Укажи время в формате ЧЧ:ММ, например 10:00."
+            }
+            if scheduleMode=="weekly" && weekdays.isEmpty {return "Выбери хотя бы один день недели."}
+            if hasEndDate && endDate<=Date() {return "Дата окончания должна быть в будущем."}
+        case "after_response":
+            let delay=Int(delaySeconds) ?? 0
+            let limit=Int(maxContinuations) ?? 0
+            if !(10...3600).contains(delay) {return "Пауза после ответа должна составлять 10–3600 секунд."}
+            if !(1...200).contains(limit) {return "Укажи лимит продолжений от 1 до 200."}
+        default:
+            if !(60...604800).contains(seconds) {return "Интервал должен составлять от 1 минуты до 7 дней."}
+        }
+        return nil
     }
     private func displayDate(_ iso:String?) -> String {
         guard let iso else{return "—"}
@@ -248,6 +367,20 @@ struct ScheduledMessagesView:View {
         precise.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
         guard let d=precise.date(from:iso) ?? ISO8601DateFormatter().date(from:iso) else{return "—"}
         return d.formatted(date:.abbreviated,time:.shortened)
+    }
+    private func scheduleDescription(_ task:ScheduledChatMessage)->String {
+        switch task.schedule_mode ?? "interval" {
+        case "once":return "Однократно · " + displayDate(task.run_at)
+        case "daily":return "Ежедневно в " + (task.local_time ?? "—") + " · " + (task.time_zone ?? "")
+        case "weekly":
+            let names=["Вс","Пн","Вт","Ср","Чт","Пт","Сб"]
+            return "По дням: " + (task.weekdays ?? []).filter{$0>=0 && $0<7}.map{names[$0]}.joined(separator:", ") +
+                " · " + (task.local_time ?? "—")
+        case "after_response":
+            return "После ответа · пауза " + String(task.delay_seconds ?? 30) + " сек · " +
+                String(task.continuations_sent ?? 0) + "/" + String(task.max_continuations ?? 20)
+        default:return shortInterval(task.interval_seconds)
+        }
     }
     private func shortInterval(_ seconds:Int)->String {
         if seconds % 86400 == 0 {return "Каждые \(seconds/86400) дн."}
@@ -298,9 +431,7 @@ struct ScheduledMessagesView:View {
 
     private func conversationDescription(_ state:String)->String {
         switch state {
-        case "READY":return "Готов к проверке"
-        case "WORKING":return "Агент отвечает"
-        case "RECOVERING":return "Восстановление чата"
+        case "READY":return "Ожидает проверки по расписанию"
         case "VERIFYING_SEND":return "Проверка Send без повтора"
         case "UNKNOWN":return "Неизвестный результат · отправка заблокирована"
         default:return "Расписание не активно"
@@ -349,7 +480,7 @@ struct ScheduledMessagesView:View {
                 }
                 HStack(alignment:.top,spacing:10) {
                     Image(systemName:"info.circle.fill").foregroundStyle(Palette.accent)
-                    Text("McpGo проверяет указанный чат через Playwright CDP в личном Google Chrome. Если агент отвечает или состояние чата неясно — пропускает попытку до следующего интервала. При подтверждённой отправке повторов нет. Для первого запуска расписание включается вручную.")
+                    Text("McpGo проверяет указанный чат через расширение Playwright MCP в личном Google Chrome. Если агент отвечает или состояние чата неясно — пропускает попытку до следующего интервала. При подтверждённой отправке повторов нет. Для первого запуска расписание включается вручную.")
                         .font(.system(size:11.5)).foregroundStyle(Palette.muted)
                         .fixedSize(horizontal:false,vertical:true)
                 }
@@ -360,7 +491,7 @@ struct ScheduledMessagesView:View {
                         Image(systemName:"globe")
                             .font(.system(size:20)).foregroundStyle(Palette.accent)
                         VStack(alignment:.leading,spacing:4) {
-                            Text("PlaywrightHub · личный Chrome (CDP)")
+                            Text("Playwright MCP · расширение Chrome")
                                 .font(.system(size:13,weight:.semibold)).foregroundStyle(Palette.ink)
                             Text(model.extensionConnected ? "Подключено · браузер готов к проверкам" : "Нет соединения · проверка повторится автоматически")
                                 .font(.system(size:11)).foregroundStyle(model.extensionConnected ? Palette.online : Palette.warning)
@@ -414,27 +545,99 @@ struct ScheduledMessagesView:View {
                             .background(Palette.inner,in:RoundedRectangle(cornerRadius:9))
                             .overlay(RoundedRectangle(cornerRadius:9).stroke(Palette.stroke))
                     }
+                    VStack(alignment:.leading,spacing:10) {
+                        Picker("Режим расписания",selection:$scheduleMode) {
+                            Text("Каждые N минут / часов").tag("interval")
+                            Text("Однократно в дату и время").tag("once")
+                            Text("Ежедневно в определённое время").tag("daily")
+                            Text("По выбранным дням недели").tag("weekly")
+                            Text("После завершения ответа ИИ").tag("after_response")
+                        }.pickerStyle(.menu)
+                        switch scheduleMode {
+                        case "once":
+                            DatePicker("Когда отправить",selection:$runAt,
+                                       displayedComponents:[.date,.hourAndMinute])
+                                .datePickerStyle(.compact)
+                        case "daily","weekly":
+                            HStack(spacing:12) {
+                                VStack(alignment:.leading,spacing:4) {
+                                    Text("Время (ЧЧ:ММ)").font(.system(size:10.5)).foregroundStyle(Palette.muted)
+                                    TextField("10:00",text:$localTime)
+                                        .textFieldStyle(.roundedBorder).frame(width:92)
+                                }
+                                VStack(alignment:.leading,spacing:4) {
+                                    Text("Часовой пояс").font(.system(size:10.5)).foregroundStyle(Palette.muted)
+                                    TextField("Europe/Moscow",text:$timeZoneID).textFieldStyle(.roundedBorder)
+                                }
+                            }
+                            if scheduleMode == "weekly" {
+                                HStack(spacing:5) {
+                                    ForEach(0..<7,id: \.self) { index in
+                                        let names=["Вс","Пн","Вт","Ср","Чт","Пт","Сб"]
+                                        Button(names[index]) {
+                                            if weekdays.contains(index) {weekdays.remove(index)}
+                                            else {weekdays.insert(index)}
+                                        }
+                                        .buttonStyle(HubInteractiveButtonStyle(treatment:.bordered))
+                                        .foregroundStyle(weekdays.contains(index) ? Palette.online : Palette.muted)
+                                    }
+                                }
+                            }
+                            Toggle("Дата окончания",isOn:$hasEndDate).toggleStyle(.switch)
+                            if hasEndDate {
+                                DatePicker("Окончание",selection:$endDate,
+                                           displayedComponents:[.date,.hourAndMinute])
+                            }
+                        case "after_response":
+                            HStack(spacing:12) {
+                                VStack(alignment:.leading,spacing:4) {
+                                    Text("Пауза после ответа (сек.)").font(.system(size:10.5)).foregroundStyle(Palette.muted)
+                                    TextField("30",text:$delaySeconds).textFieldStyle(.roundedBorder).frame(width:95)
+                                }
+                                VStack(alignment:.leading,spacing:4) {
+                                    Text("Максимум продолжений").font(.system(size:10.5)).foregroundStyle(Palette.muted)
+                                    TextField("20",text:$maxContinuations).textFieldStyle(.roundedBorder).frame(width:95)
+                                }
+                            }
+                            Text("Начнёт работу только после замеченного ответа ИИ. Простой открытой вкладки недостаточно.")
+                                .font(.system(size:10.5)).foregroundStyle(Palette.quiet)
+                        default:
+                            HStack(spacing:10) {
+                                Text("Повторять каждые").font(.system(size:11)).foregroundStyle(Palette.muted)
+                                TextField("30",text:$interval).textFieldStyle(.roundedBorder).frame(width:90)
+                                Picker("Единица",selection:$intervalUnit) {
+                                    Text("минут").tag("minutes")
+                                    Text("часов").tag("hours")
+                                    Text("дней").tag("days")
+                                }.labelsHidden().frame(width:112)
+                            }
+                        }
+                    }
                     HStack(alignment:.bottom,spacing:10) {
-                        VStack(alignment:.leading,spacing:6) {
-                            Text("Повторять каждые")
-                                .font(.system(size:11,weight:.semibold)).foregroundStyle(Palette.muted)
-                            TextField("30",text:$interval)
-                                .textFieldStyle(.roundedBorder).frame(width:90)
-                        }
-                        Picker("Единица",selection:$intervalUnit) {
-                            Text("минут").tag("minutes")
-                            Text("часов").tag("hours")
-                            Text("дней").tag("days")
-                        }
-                        .labelsHidden().frame(width:112)
                         Spacer()
                         if editingTaskID != nil {
                             Button("Отмена") { resetForm() }
                                 .buttonStyle(HubInteractiveButtonStyle(treatment:.bordered))
                         }
                         Button {
+                            guard let normalizedURL=normalizedWebChatURL,formValidationIssue==nil else {
+                                return
+                            }
                             let action=editingTaskID == nil ? "create" : "update"
-                            var values:[String:Any]=["url":url,"message":message,"interval_seconds":seconds]
+                            var values:[String:Any]=["url":normalizedURL,"message":message,
+                                                     "interval_seconds":min(604800,max(60,seconds)),"schedule_mode":scheduleMode]
+                            switch scheduleMode {
+                            case "once":values["run_at"]=ISO8601DateFormatter().string(from:runAt)
+                            case "daily","weekly":
+                                values["time_zone"]=timeZoneID
+                                values["local_time"]=localTime
+                                if scheduleMode == "weekly" {values["weekdays"]=weekdays.sorted()}
+                                values["end_at"]=hasEndDate ? ISO8601DateFormatter().string(from:endDate) : NSNull()
+                            case "after_response":
+                                values["delay_seconds"]=Int(delaySeconds) ?? 30
+                                values["max_continuations"]=Int(maxContinuations) ?? 20
+                            default:break
+                            }
                             if let editingTaskID {values["id"]=editingTaskID}
                             Task {
                                 if await model.execute(action,values:values) {resetForm()}
@@ -444,7 +647,13 @@ struct ScheduledMessagesView:View {
                                   systemImage: editingTaskID == nil ? "plus" : "checkmark")
                                 .font(.system(size:12,weight:.semibold)).foregroundStyle(Color(hex:0x121526))
                         }
-                        .buttonStyle(HubInteractiveButtonStyle(treatment:.filled)).disabled(!canCreate)
+                        // Validation is explained instead of silently disabling the button.
+                        .buttonStyle(HubInteractiveButtonStyle(treatment:.filled)).disabled(model.loading)
+                    }
+                    if let issue=formValidationIssue {
+                        Label(issue,systemImage:"info.circle")
+                            .font(.system(size:10.5)).foregroundStyle(Palette.warning)
+                            .fixedSize(horizontal:false,vertical:true)
                     }
                     Text(editingTaskID == nil ?
                          "Созданные расписания выключены. Поддерживаются обычные и проектные чаты. Первая отправка — через выбранный интервал после нажатия «Включить»." :
@@ -485,6 +694,11 @@ struct ScheduledMessagesView:View {
                                     VStack(alignment:.leading,spacing:4) {
                                         Text("\(displayDate(attempt.time)) · \(attemptDescription(attempt))")
                                             .font(.system(size:11,weight:.medium)).foregroundStyle(Palette.ink)
+                                        if let planned=attempt.scheduled_at {
+                                            Text("По плану: " + displayDate(planned) +
+                                                 (attempt.duration_ms != nil ? " · \(attempt.duration_ms! / 1000) сек." : ""))
+                                                .font(.system(size:10)).foregroundStyle(Palette.quiet)
+                                        }
                                         if !attempt.error.isEmpty {
                                             Text(attempt.error).font(.system(size:10.5)).foregroundStyle(Palette.muted)
                                                 .fixedSize(horizontal:false,vertical:true)
@@ -505,7 +719,7 @@ struct ScheduledMessagesView:View {
                         }.padding(.top,12)
                     } label: {
                         HStack(spacing:10) {
-                            Text("Журнал отправок (\(model.attempts.count) последних)")
+                            Text("Журнал · успехов: \(model.historySummary?.verified ?? 0) · пропусков: \(model.historySummary?.skipped ?? 0) · неизвестных: \(model.historySummary?.unknown ?? 0)")
                                 .font(.system(size:12,weight:.semibold))
                                 .foregroundStyle(Palette.muted)
                             Spacer()
@@ -575,11 +789,29 @@ struct ScheduledMessagesView:View {
         message=""
         interval="30"
         intervalUnit="minutes"
+        scheduleMode="interval"
+        runAt=Date().addingTimeInterval(3600)
+        timeZoneID=TimeZone.current.identifier
+        localTime="10:00"
+        weekdays=[1,2,3,4,5]
+        hasEndDate=false
+        endDate=Date().addingTimeInterval(30*86400)
+        delaySeconds="30"
+        maxContinuations="20"
     }
     private func edit(_ task:ScheduledChatMessage) {
         editingTaskID=task.id
         url=task.url
         message=task.message
+        scheduleMode=task.schedule_mode ?? "interval"
+        if let value=task.run_at,let d=ISO8601DateFormatter().date(from:value){runAt=d}
+        timeZoneID=task.time_zone ?? TimeZone.current.identifier
+        localTime=task.local_time ?? "10:00"
+        weekdays=Set(task.weekdays ?? [1,2,3,4,5])
+        hasEndDate=task.end_at != nil
+        if let value=task.end_at,let d=ISO8601DateFormatter().date(from:value){endDate=d}
+        delaySeconds=String(task.delay_seconds ?? 30)
+        maxContinuations=String(task.max_continuations ?? 20)
         if task.interval_seconds % 86400 == 0 {
             interval=String(task.interval_seconds / 86400)
             intervalUnit="days"
@@ -617,7 +849,7 @@ struct ScheduledMessagesView:View {
                     Text(task.url)
                         .font(.system(size:11,design:.monospaced)).foregroundStyle(Palette.ink)
                         .lineLimit(1).textSelection(.enabled)
-                    Text(shortInterval(task.interval_seconds))
+                    Text(scheduleDescription(task))
                         .font(.system(size:11)).foregroundStyle(Palette.quiet)
                 }
                 Spacer(minLength:8)
@@ -647,7 +879,8 @@ struct ScheduledMessagesView:View {
                 VStack(alignment:.leading,spacing:3) {
                     Text("Следующая попытка")
                         .font(.system(size:10.5)).foregroundStyle(Palette.quiet)
-                    Text(displayDate(task.next_at))
+                    Text(task.schedule_mode=="after_response" && task.next_at==nil && task.enabled ?
+                         "Ожидаем завершения ответа" : displayDate(task.next_at))
                         .font(.system(size:11,weight:.medium)).foregroundStyle(Palette.ink)
                 }
                 Spacer()
@@ -656,27 +889,6 @@ struct ScheduledMessagesView:View {
                         .font(.system(size:10.5)).foregroundStyle(Palette.quiet)
                     Text(String(task.delivery_count))
                         .font(.system(size:11,weight:.medium)).foregroundStyle(Palette.ink)
-                }
-            }
-            if let watcher=task.watchdog {
-                let stale=watcher.mode=="suspected-stall"
-                let recovering=watcher.mode=="recovering"
-                let connectionError=watcher.mode=="interrupted" || watcher.mode=="connection-error" || watcher.mode=="reloading" || watcher.mode=="refresh-deferred"
-                if stale || recovering || connectionError {
-                    Label(
-                        recovering ? "Обновили зависшую вкладку; повторно проверяем готовность" :
-                        connectionError ? "Ответ прерван · восстановим чат и отправим заданное сообщение продолжения после проверки готовности" :
-                        "Нет видимого прогресса. Продолжительную работу без явной ошибки не прерываем.",
-                        systemImage: recovering ? "arrow.clockwise.circle.fill" :
-                            connectionError ? "wifi.exclamationmark" : "clock.badge.exclamationmark"
-                    )
-                    .font(.system(size:11,weight:.medium))
-                    .foregroundStyle(connectionError || stale ? Palette.warning : Palette.accent)
-                    .fixedSize(horizontal:false,vertical:true)
-                    if let when=watcher.lastProgressAt {
-                        Text("Последнее изменение ответа: \(displayDate(when)) · автообновлений: \(watcher.reloadCount ?? 0)")
-                            .font(.system(size:10.5)).foregroundStyle(Palette.muted)
-                    }
                 }
             }
             if task.status=="verifying", let proof=task.verification {
@@ -740,7 +952,19 @@ struct ScheduledMessagesView:View {
                     .font(.system(size:11)).foregroundStyle(Palette.warning)
                     .fixedSize(horizontal:false,vertical:true)
             }
+            if let status=model.preflightResults[task.id] {
+                Text(status).font(.system(size:10.5)).foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal:false,vertical:true)
+            }
             HStack(spacing:10) {
+                Button {
+                    Task { await model.preview(task.id) }
+                } label: {
+                    Label("Проверить без отправки",systemImage:"checkmark.shield")
+                        .font(.system(size:11)).foregroundStyle(Palette.ink)
+                }
+                .buttonStyle(HubInteractiveButtonStyle(treatment:.bordered))
+                .disabled(model.loading || task.status=="sending" || task.status=="checking" || task.status=="verifying")
                 Button {
                     Task {_ = await model.execute(task.enabled ? "pause" : "start",values:["id":task.id])}
                 } label: {
@@ -755,7 +979,7 @@ struct ScheduledMessagesView:View {
                 Button {
                     confirmation=Confirmation(id:task.id,action:"send_once",
                         title:"Отправить сообщение сейчас?",
-                        explanation:"Playwright CDP проверит указанный чат. Если агент свободен, сообщение будет отправлено. При неопределённом результате автоматические повторы запрещены.")
+                        explanation:"Расширение Playwright MCP проверит указанный чат. Если агент свободен, сообщение будет отправлено. При неопределённом результате автоматические повторы запрещены.")
                 } label: {
                     Label("Отправить сейчас",systemImage:"paperplane")
                         .font(.system(size:11)).foregroundStyle(Palette.ink)

@@ -15,19 +15,25 @@ function render(data){
   const tunnelLabel=(target,running)=>!running?'Не запущен':
     textFor[rec[target]?.status]||'Процесс запущен';
 
-  const terminalOn=t.server.running&&t.oneshot.running&&t.tunnel.running;
+  const terminalOn=t.oneshot.running&&t.tunnel.running;
   const browserOn=p.browser.running&&p.backend&&p.proxy.running&&p.proxyReady&&p.mcpReady===true&&p.tunnel.running;
-  for(const [group,on,any] of [['terminal',terminalOn,t.server.running||t.oneshot.running||t.tunnel.running],['playwright',browserOn,p.browser.running||p.proxy.running||p.tunnel.running]]){
+  for(const [group,on,any] of [['terminal',terminalOn,t.oneshot.running||t.tunnel.running],['playwright',browserOn,p.browser.running||p.proxy.running||p.tunnel.running]]){
     const el=$(group+'-state'); el.textContent=on?'Локально запущен':any?'Частично включён':'Остановлен';el.className='state'+(on?' on':any?' partial':'');
     const block=document.querySelector('[data-group="'+group+'"]');
     for(const btn of block.querySelectorAll('[data-action]'))btn.disabled=working||data.busy||(btn.dataset.action==='start'&&on)||(btn.dataset.action==='stop'&&!any)||(btn.dataset.action==='restart'&&!any);
   }
-  mark('terminal-server',t.server.running,' '+(t.server.running?'Работает':'Не запущен'));
   mark('terminal-oneshot',t.oneshot.running,' '+(t.oneshot.running?'Работает':'Не запущен'));
   mark('terminal-tunnel',t.tunnel.running&&rec.terminal?.status==='CONNECTED',
     tunnelLabel('terminal',t.tunnel.running),t.tunnel.running&&rec.terminal?.status==='NEEDS_ATTENTION');
   mark('playwright-browser',p.browser.running&&p.backend,p.backend?'Порт открыт':'Не запущен',p.browser.running&&!p.backend);
-  mark('playwright-proxy',p.proxy.running&&p.proxyReady&&p.mcpReady===true,p.proxyReady?(p.mcpReady===true?'MCP работает':'MCP недоступен'):'Не запущен',p.proxy.running&&p.mcpReady!==true);
+  const chromeState=p.browserSession?.browser || 'unknown';
+  const chromeDetail=chromeState==='connected'?'Chrome подключён':
+    chromeState==='degraded'?'Chrome: требуется восстановление':
+    chromeState==='connecting'?'Chrome: подключение':
+    chromeState==='recovering'?'Chrome: восстановление':'Chrome ещё не проверен';
+  mark('playwright-proxy',p.proxy.running&&p.proxyReady&&p.mcpReady===true,
+    p.proxyReady?(p.mcpReady===true?'MCP работает · '+chromeDetail:'MCP недоступен'):'Не запущен',
+    p.proxy.running&&(p.mcpReady!==true||chromeState==='degraded'));
   mark('playwright-tunnel',p.tunnel.running&&rec.playwright?.status==='CONNECTED',
     p.configured?tunnelLabel('playwright',p.tunnel.running):'Не настроен',
     !p.configured||rec.playwright?.status==='NEEDS_ATTENTION');

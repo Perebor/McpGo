@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const {latestWindowsPreview,checkUpdates,safeReleaseUrl}=require('../app/updates.cjs');
 const item=(version,extra={})=>({
  tag_name:'v'+version,prerelease:true,draft:false,
- assets:[{name:'McpGo Setup '+version+'.exe',size:160000000}],...extra
+ assets:[{name:'McpGo.Setup.'+version+'.exe',size:160000000}],...extra
 });
 test('picks only newer, actual Windows prerelease with installer',()=>{
  const r=latestWindowsPreview([
@@ -16,6 +16,7 @@ test('picks only newer, actual Windows prerelease with installer',()=>{
  assert.equal(r.version,'2.1.0-preview.2');
  assert.equal(r.url,'https://github.com/mcpgo1/McpGo/releases/tag/v2.1.0-preview.2');
  assert.equal(latestWindowsPreview([item('2.1.0-preview.1')],'2.1.0-preview.1').available,false);
+ assert.equal(latestWindowsPreview([item('2.1.0-preview.2',{assets:[{name:'McpGo Setup 2.1.0-preview.2.exe',size:160000000}]})],'2.1.0-preview.1').available,false);
 });
 test('rejects alien websites and incorrect tags',()=>{
  assert.throws(()=>safeReleaseUrl('https://evil.example/next.exe'),/UNTRUSTED/);

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import {validateSchedule,nextCalendarSlot,nextAfterRun,recordSlot} from './schedule.mjs';
 
 const root = path.join(os.homedir(), 'Library/Application Support/McpGo/AutoSend');
 export const stateFile = process.env.MCPHUB_AUTOSEND_STATE || path.join(root,'tasks.json');
@@ -27,20 +28,22 @@ export function normalizeTarget(raw) {
   return 'https://chatgpt.com'+u.pathname.replace(/\/$/,'').toLowerCase();
 }
 export const DIRECT_WEB_CHAT_DELIVERY_SUPPORTED=true;
-export const DIRECT_WEB_CHAT_REASON='Отправка выполняется через Playwright CDP в личном Chrome после проверки точной ссылки и готовности агента; при занятости попытка откладывается.';
+export const DIRECT_WEB_CHAT_REASON='Отправка выполняется через отдельную группу официального Playwright Extension, только в уже выбранной вкладке разговора; при занятости попытка откладывается.';
 
 export function validateInput(body){
   if (!body || typeof body !== 'object') throw Error('Недопустимые параметры.');
   const url=normalizeTarget(body.url);
   if(typeof body.message!=='string' || body.message.trim().length<1 || body.message.length>8000)
     throw Error('Текст должен быть от 1 до 8000 символов.');
-  const seconds=Number(body.interval_seconds);
+  const schedule=validateSchedule(body);
+  const seconds=Number(body.interval_seconds??60);
   if(!Number.isInteger(seconds) || seconds<MIN_INTERVAL || seconds>MAX_INTERVAL) throw Error('Интервал должен быть от 1 минуты до 7 дней.');
-  return {url,message:body.message,interval_seconds:seconds};
+  return {url,message:body.message,interval_seconds:seconds,...schedule};
 }
 export function newTask(data, now=Date.now()) {
   const d=validateInput(data);
   return {id:crypto.randomUUID(),...d,enabled:false,next_at:null,status:'paused',last_error:'',
+    schedule_revision:1,slot_ledger:[],continuations_sent:0,smart_seen_busy:false,
     last_attempt_at:null,last_success_at:null,delivery_count:0,created_at:new Date(now).toISOString()};
 }
 export function sanitize(t){
@@ -50,38 +53,148 @@ export function ensurePrivateDir(dir){
   fs.mkdirSync(dir,{recursive:true,mode:0o700});
   fs.chmodSync(dir,0o700);
 }
+// AES-256-GCM protects saved message content from accidental JSON disclosure.
+// Key and state are both private to the OS user; this is not a defence against
+// malware with full access to the user's account. Failing decryption is fatal:
+// never silently create/replay scheduled messages after losing the key.
+function messageKey(file,create){
+  const keyFile=path.join(path.dirname(file),'message-key');
+  if(!fs.existsSync(keyFile)&&create){
+    let fd;
+    try{
+      fd=fs.openSync(keyFile,'wx',0o600);
+      fs.writeFileSync(fd,crypto.randomBytes(32));fs.fsyncSync(fd);
+      fs.closeSync(fd);fd=undefined;
+      if(process.platform!=='win32'){
+        const dirFd=fs.openSync(path.dirname(keyFile),'r');
+        try{fs.fsyncSync(dirFd);}finally{fs.closeSync(dirFd);}
+      }
+    }catch(e){if(e.code!=='EEXIST')throw e;}
+    finally{if(fd!==undefined)fs.closeSync(fd);}
+  }
+  const stat=fs.lstatSync(keyFile);
+  if(!stat.isFile()||stat.isSymbolicLink()||
+     (process.platform!=='win32'&&(stat.mode&0o077)!==0)||
+     (typeof process.getuid==='function'&&stat.uid!==process.getuid()))
+    throw Error('Unsafe AutoSend message encryption key permissions');
+  const key=fs.readFileSync(keyFile);
+  if(key.length!==32)throw Error('Invalid AutoSend message encryption key');
+  return key;
+}
+function seal(message,id,key){
+ const iv=crypto.randomBytes(12);
+ const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+ cipher.setAAD(Buffer.from(id,'utf8'));
+ const data=Buffer.concat([cipher.update(message,'utf8'),cipher.final()]);
+ return {v:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),
+  ciphertext:data.toString('base64')};
+}
+function unseal(entry,id,key){
+ if(entry?.v!==1 || typeof entry.iv!=='string'||typeof entry.tag!=='string'||typeof entry.ciphertext!=='string')
+  throw Error('Invalid encrypted AutoSend record');
+ const dec=crypto.createDecipheriv('aes-256-gcm',key,Buffer.from(entry.iv,'base64'));
+ dec.setAAD(Buffer.from(id,'utf8'));dec.setAuthTag(Buffer.from(entry.tag,'base64'));
+ return Buffer.concat([dec.update(Buffer.from(entry.ciphertext,'base64')),dec.final()]).toString('utf8');
+}
 export function readState(file=stateFile){
   ensurePrivateDir(path.dirname(file));
   if(!fs.existsSync(file)) return {version:1,tasks:[],attempts:[]};
   if(fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const obj=JSON.parse(fs.readFileSync(file,'utf8'));
   if(obj.version!==1 || !Array.isArray(obj.tasks) || !Array.isArray(obj.attempts)) throw Error('Unexpected task store format');
+  if(obj.tasks.some(t=>t.sealed_message)){
+    const key=messageKey(file,false);
+    for(const t of obj.tasks){
+      if(t.sealed_message){
+        if(Object.hasOwn(t,'message'))throw Error('Ambiguous encrypted AutoSend message');
+        t.message=unseal(t.sealed_message,t.id,key);
+        delete t.sealed_message;
+      }
+    }
+  }
   return obj;
 }
 export function writeState(state,file=stateFile){
   const dir=path.dirname(file);ensurePrivateDir(dir);
   if(fs.existsSync(file)&&fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const tmp=path.join(dir,'.tasks-'+crypto.randomUUID()+'.tmp');
+  let fd;
   try {
-    fs.writeFileSync(tmp,JSON.stringify(state,null,2)+'\n',{mode:0o600,flag:'wx'});
-    fs.chmodSync(tmp,0o600);
+    fd=fs.openSync(tmp,'wx',0o600);
+    const tasks=state.tasks.map(t=>({...t}));
+    if(tasks.some(t=>typeof t.message==='string')){
+      const key=messageKey(file,true);
+      for(const t of tasks)if(typeof t.message==='string'){
+        t.sealed_message=seal(t.message,t.id,key);
+        delete t.message;
+      }
+    }
+    fs.writeFileSync(fd,JSON.stringify({...state,tasks},null,2)+'\n');
+    fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
     fs.renameSync(tmp,file);
-  } finally {try{fs.unlinkSync(tmp);}catch{}}
+    // Persist the atomic rename as well as file contents before Send.
+    // Windows does not permit opening directories as file descriptors.
+    if(process.platform!=='win32'){
+      const parent=fs.openSync(dir,'r');
+      try{fs.fsyncSync(parent);}finally{fs.closeSync(parent);}
+    }
+  } finally {if(fd!==undefined)fs.closeSync(fd);try{fs.unlinkSync(tmp);}catch{}}
+}
+export function getOrCreateControlToken(file=path.join(path.dirname(stateFile),'control-token')){
+  ensurePrivateDir(path.dirname(file));
+  if(!fs.existsSync(file)){
+    try{fs.writeFileSync(file,crypto.randomBytes(32).toString('hex'),{mode:0o600,flag:'wx'});}
+    catch(e){if(e.code!=='EEXIST')throw e;}
+  }
+  const info=fs.lstatSync(file);
+  if(!info.isFile() || info.isSymbolicLink() ||
+     (process.platform!=='win32'&&(info.mode&0o077)!==0) ||
+     (typeof process.getuid==='function'&&info.uid!==process.getuid()))
+    throw Error('Unsafe local AutoSend control-token permissions');
+  const token=fs.readFileSync(file,'utf8').trim();
+  if(!/^[a-f0-9]{64}$/.test(token))throw Error('Invalid AutoSend control token');
+  return token;
 }
 export function arm(task,now=Date.now()) {
-  task.enabled=true;task.status='scheduled';task.last_error='';task.next_at=new Date(now+task.interval_seconds*1000).toISOString();
+  const next=nextCalendarSlot(task,now);
+  if(next===null && task.schedule_mode!=='after_response')
+    throw Error('В расписании нет будущих запусков. Проверь дату и время.');
+  task.enabled=true;task.status='scheduled';task.last_error='';task.next_at=next;
+  task.continuations_sent=0;task.smart_seen_busy=false;task.smart_ready_since=null;
+}
+export function rescheduleAfterAttempt(task,now=Date.now()){
+  // A manual send-once must NEVER transform into an enabled recurring task
+  // when the first attempt is deferred before clicking Send.
+  const manualOnly=task.manual_once===true&&!task.enabled;
+  const next=nextAfterRun(task,now);
+  if(next){task.status='scheduled';task.next_at=next;if(!manualOnly)task.enabled=true;}
+  else if(task.schedule_mode==='after_response'&&!manualOnly){
+    task.status='scheduled';task.next_at=null;
+  }else{pause(task);task.manual_once=false;}
 }
 export function pause(task){task.enabled=false;task.next_at=null;task.status='paused'}
 export function markUnknownOnBoot(state){
   for(const t of state.tasks){
+    // Migrate away the legacy auto-reload/watchdog state. Never revive it:
+    // the new scheduler only observes its dedicated extension tab group.
+    delete t.watchdog;
+    delete t.continuationMarker;
+    // A response observed before a process restart is not proof of a fresh
+    // response afterwards. Do not auto-continue stale busy/ready markers.
+    if(t.schedule_mode==='after_response'){
+      t.smart_seen_busy=false;t.smart_ready_since=null;t.smart_last_marker=null;
+      if(t.status==='scheduled')t.next_at=null;
+    }
     if(t.manual_once && !t.enabled && t.status==='scheduled'){
       pause(t);t.manual_once=false;
       t.last_error='Однократная отправка отменена при перезапуске. Она не будет запущена без нового подтверждения.';
     }
     if(t.status==='checking'){
       // No click was committed: re-arm safely after one full interval.
-      t.status='scheduled';t.next_at=new Date(Date.now()+t.interval_seconds*1000).toISOString();
-      t.last_error='Проверка прервана перезапуском. Сообщение не отправлялось; следующая попытка по расписанию.';
+      if(t.active_slot_id){recordSlot(t,t.active_slot_id,t.active_scheduled_at||t.last_attempt_at,'skipped');}
+      rescheduleAfterAttempt(t);
+      t.active_slot_id=null;t.active_scheduled_at=null;
+      t.last_error='Проверка прервана перезапуском до Send; пропущенный запуск не повторяется.';
     }
     if(t.status==='sending' && Number.isInteger(t.verification?.baselineUserCount)){
       // A persisted click receipt survives process restart; reconciliation is
@@ -99,7 +212,7 @@ export function markUnknownOnBoot(state){
     }
     if(t.url?.startsWith('codex://') || (t.enabled && !t.url?.startsWith('https://chatgpt.com/c/') && !t.url?.startsWith('https://chatgpt.com/g/g-p-'))){
       t.enabled=false;t.status='blocked';t.next_at=null;t.manual_once=false;
-      t.last_error='Устаревший адрес Codex. Для Playwright CDP необходим URL /c/.';
+      t.last_error='Устаревший адрес Codex. Для AutoSend необходим URL разговора /c/.';
     }
   }
 }

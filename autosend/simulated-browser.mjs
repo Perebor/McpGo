@@ -163,8 +163,8 @@ export class SimulatedMcp {
     this.dispatched.add(options.actionId); // Durable proxy claim BEFORE dispatch.
    }
    const value=await this.chat.evaluate(args.function);
-   if(options.actionId && this.lostAfterClick && value?.status==='clicked')
-    throw Error('TRANSPORT_LOST_AFTER_CLICK');
+   if(args.function?.includes('function guardedClickInPage')&&this.lostAfterClick&&
+      value?.status==='clicked')throw Error('TRANSPORT_LOST_AFTER_CLICK');
    return '### Result\n'+JSON.stringify(value);
   }
   throw Error('Unexpected simulator tool '+name);

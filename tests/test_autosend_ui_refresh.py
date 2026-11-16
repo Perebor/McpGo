@@ -16,6 +16,13 @@ class AutoSendUIRefreshTests(unittest.TestCase):
         self.assertIn('guard !refreshInFlight, !loading else { return }',SOURCE)
         self.assertIn('defer { refreshInFlight=false }',SOURCE)
 
+    def test_validation_explains_current_input_not_stale_error(self):
+        self.assertIn('Label(issue,systemImage:"info.circle")',SOURCE)
+        self.assertNotIn('formValidationError',SOURCE)
+        self.assertIn('if normalizedWebChatURL == nil',SOURCE)
+        self.assertIn('if message.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty',SOURCE)
+        self.assertIn('cleanedWebChatInput',SOURCE)
+
     def test_actions_refresh_immediately_after_success(self):
         self.assertIn('loading=false\n            await refresh()',SOURCE)
 

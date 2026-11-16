@@ -36,7 +36,7 @@ description: Безопасно выполнять локальные коман
 6. Финальный ответ: что изменено, что проверено, PASS/FAIL, блокеры.
 
 ## Актуальный запуск туннеля
-LaunchAgents: `com.chatterminalhub.server`, `com.chatterminalhub.oneshot`, `com.chatterminalhub.tunnel`. Исправленный запуск использует `~/Library/Application Support/ChatTerminalHub/run-tunnel.sh` вместо пути на Desktop. McpGo Dashboard мигрирует старую конфигурацию. Запущенный PID ещё не подтверждает end-to-end MCP: проверь безопасным реальным `terminal_exec`.
+LaunchAgents: `com.chatterminalhub.oneshot`, `com.chatterminalhub.tunnel`. Исправленный запуск использует `~/Library/Application Support/ChatTerminalHub/run-tunnel.sh` вместо пути на Desktop. McpGo Dashboard мигрирует старую конфигурацию. Запущенный PID ещё не подтверждает end-to-end MCP: проверь безопасным реальным `terminal_exec`.
 
 ## Ограничения
 - Продакшен-запись, деплой, пуш, удаление, остановка чужих процессов — только с явным разрешением в контексте конкретной задачи.

@@ -1,3 +1,4 @@
+import {chatGPTConversationKey} from '../playwright/chatgpt-url.mjs';
 /**
  * Page-scoped guarded Send. The last safety check and one Send click happen
  * synchronously in ONE browser_evaluate invocation, under the proxy's shared
@@ -27,7 +28,11 @@ export function guardedClickInPage(cfg) {
     (e.ownerDocument.defaultView.getComputedStyle(e).visibility!=='hidden' &&
      e.ownerDocument.defaultView.getComputedStyle(e).display!=='none'));
  const current=location.origin+location.pathname.replace(/\/$/,'');
- if(current!==cfg.url)return refuse('WRONG_CONVERSATION');
+ const project=current.match(/^https:\/\/chatgpt\.com\/g\/g-p-([0-9a-f]{32})(?:-[a-z0-9-]{1,160})?\/c\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i);
+ const direct=current.match(/^https:\/\/chatgpt\.com\/c\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i);
+ const currentKey=project?'project:'+project[1].toLowerCase()+':'+project[2].toLowerCase():
+   direct?'direct:'+direct[1].toLowerCase():null;
+ if(!currentKey||currentKey!==cfg.conversationKey)return refuse('WRONG_CONVERSATION');
  if(document.readyState!=='complete')return refuse('PAGE_NOT_READY');
  const edits=[...document.querySelectorAll(cfg.editorSelector)].filter(visible);
  if(edits.length!==1)return refuse('EDITOR_NOT_UNIQUE');
@@ -37,9 +42,18 @@ export function guardedClickInPage(cfg) {
    '[data-testid="stop-button"],button[aria-label="Stop generating"],button[aria-label="Stop streaming"],button[aria-label="Stop response"],button[aria-label="Stop"],button[aria-label="Остановить генерацию"],button[aria-label="Остановить"]'
  )].some(visible);
  const streaming=[...document.querySelectorAll('[data-testid="streaming-indicator"],[data-is-streaming="true"]')].some(visible);
- if(stop||streaming)return refuse('GENERATION_ACTIVE');
+ // A fresh server COMPLETE permits a stale Stop button, but only after the
+ // guarded, same-tab, last-moment probe below has succeeded.
+ if((stop||streaming)&&!cfg.serverConfirmedComplete)return refuse('GENERATION_ACTIVE');
+ if(cfg.streamSequence!==null&&cfg.streamSequence!==undefined&&
+    window.__mcpgoAutoSendStream?.sequence!==cfg.streamSequence)
+   return refuse('STREAM_PROGRESS');
  const observation=window.__mcpgoAutoSendObserver;
- if(cfg.assistantRevision!==null && observation?.revision!==cfg.assistantRevision)
+ // DOM re-renders are not proof that the assistant is working. For a live
+ // dispatch the fresh, same-tab COMPLETE server probe plus stream sequence
+ // take precedence; offline/uncertain dispatches keep the strict DOM guard.
+ if(!cfg.serverConfirmedComplete && cfg.assistantRevision!==null &&
+    observation?.revision!==cfg.assistantRevision)
    return refuse('ASSISTANT_CHANGED');
  const legacy=[...document.querySelectorAll('[data-message-author-role="user"]')];
  const modern=[...document.querySelectorAll('[class~="bg-user-message"]')];
@@ -64,9 +78,10 @@ export function guardedClickInPage(cfg) {
 }
 
 export function buildGuardedClick({url,message,editorSelector,sendSelector,
-                                   baselineUserCount,assistantRevision,actionId}) {
- if(typeof url!=='string'||!/^https:\/\/chatgpt\.com\/(?:g\/g-p-[a-zA-Z0-9-]+\/)?c\/[0-9a-fA-F-]{36}$/.test(url))
-  throw Error('INVALID_GUARDED_CHAT_URL');
+                                   baselineUserCount,assistantRevision,actionId,
+                                   requireStreamStatus=false,streamSequence=null}) {
+ const conversationKey=chatGPTConversationKey(url);
+ if(!conversationKey)throw Error('INVALID_GUARDED_CHAT_URL');
  if(typeof message!=='string'||!message.trim()||message.length>8000)
   throw Error('INVALID_GUARDED_MESSAGE');
  if(!SAFE_EDITORS.has(editorSelector)||!SAFE_SENDS.has(sendSelector))
@@ -75,12 +90,28 @@ export function buildGuardedClick({url,message,editorSelector,sendSelector,
   throw Error('INVALID_GUARDED_BASELINE');
  if(typeof actionId!=='string'||!/^autosend:[a-f0-9-]{36}$/.test(actionId))
   throw Error('INVALID_GUARDED_ACTION_ID');
- const config={url,message:message.trim(),editorSelector,sendSelector,
+ const config={url,conversationKey,message:message.trim(),editorSelector,sendSelector,
    baselineUserCount,assistantRevision:Number.isInteger(assistantRevision)?assistantRevision:null,
-   actionId};
- // No dynamic eval in the local server. browser_evaluate evaluates the
- // serialized function in the selected personal Chrome tab only.
- return '() => ('+guardedClickInPage.toString()+')('+JSON.stringify(config)+')';
+   actionId,streamSequence:Number.isInteger(streamSequence)?streamSequence:null,
+   serverConfirmedComplete:false};
+ // Offline simulations do not have the private ChatGPT endpoint. The real
+ // delivery path uses this verification and refuses uncertain status.
+ if(!requireStreamStatus)
+  return '() => ('+guardedClickInPage.toString()+')('+JSON.stringify(config)+')';
+ return 'async () => {const cfg='+JSON.stringify(config)+';'+
+  'const id=cfg.url.slice(-36);let response;'+
+  'try{const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),3500);'+
+  'try{const res=await fetch("/backend-api/conversation/"+encodeURIComponent(id)+"/stream_status",'+
+  '{credentials:"same-origin",cache:"no-store",signal:ctl.signal});'+
+  'if(!res.ok)return {status:"refused",code:"STREAM_STATUS_UNAVAILABLE"};'+
+  'response=await res.json();}finally{clearTimeout(timer);}}'+
+  'catch{return {status:"refused",code:"STREAM_STATUS_UNAVAILABLE"};}'+
+  'if(response?.status!=="COMPLETE")return {status:"refused",code:"GENERATION_ACTIVE"};'+
+  'const stream=window.__mcpgoAutoSendStream;'+
+  'if(stream?.active&&Date.now()-Number(stream.lastEventAt||0)<5000)'+
+  'return {status:"refused",code:"STREAM_PROGRESS"};'+
+  'cfg.serverConfirmedComplete=true;return ('+guardedClickInPage.toString()+')(cfg); }';
+
 }
 export function parseGuardedResult(text,parsePageResult) {
  const result=parsePageResult(text);

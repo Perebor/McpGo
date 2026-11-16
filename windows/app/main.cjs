@@ -44,10 +44,10 @@ ipcMain.handle('mcpgo:check-updates',()=>checkUpdates(appVersion));
 ipcMain.handle('mcpgo:open-update',(_event,url)=>shell.openExternal(safeReleaseUrl(url)));
 ipcMain.handle('mcpgo:open-releases',()=>shell.openExternal('https://github.com/mcpgo1/McpGo/releases'));
 
-ipcMain.handle('mcpgo:service-read',(_event,service,route)=>localRequest(service,route));
-ipcMain.handle('mcpgo:service-action',(_event,service,route,body)=>localRequest(service,route,body));
+ipcMain.handle('mcpgo:service-read',(_event,service,route)=>localRequest(service,route,undefined,app.getPath('userData')));
+ipcMain.handle('mcpgo:service-action',(_event,service,route,body)=>localRequest(service,route,body,app.getPath('userData')));
 ipcMain.handle('mcpgo:onboard',async(_event,action,payload)=>{
- if(!['provision','runtime-auto','runtime-projects','discover','runtime-inspect','verify-remote'].includes(action))
+ if(!['browser-check','provision','runtime-auto','runtime-projects','discover','runtime-inspect','verify-remote'].includes(action))
   throw Error('UNSUPPORTED_ONBOARDING_ACTION');
  if((action==='provision'||action==='runtime-auto')&&payload?.confirmed!==true)
   throw Error('EXPLICIT_CONFIRMATION_REQUIRED');
@@ -77,6 +77,11 @@ ipcMain.handle('mcpgo:onboard',async(_event,action,payload)=>{
  return result;
 });
 ipcMain.handle('mcpgo:docs',()=>shell.openExternal('https://github.com/microsoft/playwright-mcp'));
+ipcMain.handle('mcpgo:browser-update',(_event,browser)=>{
+ const urls={chrome:'https://www.google.com/chrome/',msedge:'https://www.microsoft.com/edge'};
+ if(!Object.hasOwn(urls,browser))throw Error('INVALID_BROWSER');
+ return shell.openExternal(urls[browser]);
+});
 app.on('second-instance',openWindow);
 app.on('window-all-closed',()=>{}); // Closing the window keeps the tray agent alive.
 app.on('before-quit',()=>{quitting=true;runtime?.stop()});
@@ -85,7 +90,8 @@ app.whenReady().then(async()=>{
  runtime=new Runtime({resourceRoot:root,userData:app.getPath('userData'),
  nodeExecutable:app.isPackaged?path.join(root,'node','node.exe'):
    path.join(root,'windows','vendor','node','node.exe'),browser:settings.public().browser,
- credentials:target=>settings.credential(target==='browser'?'browserTunnel':'terminal'),onChange:publish});
+ credentials:target=>target==='playwrightExtension'?settings.extensionToken():
+  settings.credential(target==='browser'?'browserTunnel':'terminal'),onChange:publish});
  openWindow();
  tray=new Tray(nativeImage.createFromPath(iconPath()).resize({width:16,height:16}));
  tray.setContextMenu(Menu.buildFromTemplate([

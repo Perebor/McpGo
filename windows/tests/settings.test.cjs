@@ -34,6 +34,19 @@ test('stores encrypted tunnel keys, never discloses them in public status',async
  assert.deepEqual(await store.credential('terminal'),{id:ID,key:'a-very-secret-key'});
  assert.deepEqual(await store.credential('browserTunnel'),{id:BROWSER_ID,key:'other-password'});
 });
+test('reinstalling the Windows app under the same account reuses existing encrypted credentials',async t=>{
+ const {store,file}=fixture(t);
+ const extensionToken='abcdefghijklmnopqrstuvwxyz012345';
+ await store.save({terminal:{id:ID,key:'existing-terminal-secret'},
+  browserTunnel:{id:BROWSER_ID,key:'existing-browser-secret'},
+  playwrightExtension:{token:extensionToken}});
+ const persistedBefore=fs.readFileSync(file,'utf8');
+ const updatedApp=new SettingsStore({userData:()=>path.dirname(file),safeStorage:cryptoMock()});
+ assert.deepEqual(await updatedApp.credential('terminal'),{id:ID,key:'existing-terminal-secret'});
+ assert.deepEqual(await updatedApp.credential('browserTunnel'),{id:BROWSER_ID,key:'existing-browser-secret'});
+ assert.deepEqual(await updatedApp.extensionToken(),{token:extensionToken});
+ assert.equal(fs.readFileSync(file,'utf8'),persistedBefore);
+});
 test('unchanged key and ID keep encrypted value; changing tunnel ID requires key',async t=>{
  const {store}=fixture(t);
  await store.save({terminal:{id:ID,key:'secure-first'}});
@@ -69,4 +82,41 @@ test('rotates encrypted blob only if original is still current',async t=>{
  safe.decryptStringAsync=async()=>({result:'one-secret',shouldReEncrypt:true});
  await store.credential('terminal');
  assert.deepEqual(await store.credential('terminal'),{id:ID,key:'one-secret'});
+});
+
+
+test('Playwright Extension token is encrypted on Windows and never exposed to the UI',async t=>{
+ const {store,file}=fixture(t);
+ const token='abcdefghijklmnopqrstuvwxyz012345';
+ await store.save({playwrightExtension:{token}});
+ const raw=fs.readFileSync(file,'utf8');
+ assert.equal(raw.includes(token),false);
+ assert.equal(JSON.stringify(store.public()).includes(token),false);
+ assert.deepEqual(store.public().playwrightExtension,{configured:true});
+ assert.deepEqual(await store.extensionToken(),{token});
+ await store.save({browser:'msedge',playwrightExtension:{token:''}});
+ assert.deepEqual(await store.extensionToken(),{token});
+ await store.save({playwrightExtension:{remove:true}});
+ assert.equal(store.public().playwrightExtension.configured,false);
+ assert.equal(await store.extensionToken(),null);
+});
+test('Playwright Extension token rejects insecure values and never stores plaintext',async t=>{
+ const {store,file}=fixture(t);
+ for(const token of ['short','contains whitespace 123456789','bad\nnewlines',
+  'X'.repeat(2049)]){
+  await assert.rejects(store.save({playwrightExtension:{token}}),/INVALID_EXTENSION_TOKEN/);
+ }
+ assert.equal(fs.existsSync(file),false);
+ await store.save({playwrightExtension:{token:'PLAYWRIGHT_MCP_EXTENSION_TOKEN=abcdefghijklmnop'}});
+ assert.deepEqual(await store.extensionToken(),{token:'abcdefghijklmnop'});
+});
+test('Playwright token never falls back to unencrypted persistence',async t=>{
+ const {store,file}=fixture(t,{
+  isAsyncEncryptionAvailable:async()=>false,
+  encryptStringAsync:async()=>{throw Error('SHOULD_NOT_ENCRYPT')},
+  decryptStringAsync:async()=>{throw Error('SHOULD_NOT_DECRYPT')}
+ });
+ await assert.rejects(store.save({playwrightExtension:{token:'abcdefghijklmnopqrstuvwxyz012345'}}),
+  /SECURE_STORAGE_UNAVAILABLE/);
+ assert.equal(fs.existsSync(file),false);
 });

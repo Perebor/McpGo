@@ -6,7 +6,7 @@
 
 **Self-hosted macOS control plane: Terminal MCP, управление личным Chrome через Playwright, Secure MCP Tunnels, локальная очередь агентов и AutoSend.**
 
-**Актуальность:** 8 ноября 2026. **Стадия:** локально проверенный подписанный и нотарифицированный DMG 2.0.3; публичный GitHub Release ещё не создан. Этот документ адресован разработчику, оператору, аудитору безопасности и будущему участнику открытого проекта.
+**Актуальность:** 16 ноября 2026. **Стадия:** подготовка публичного macOS 2.1.0 и Windows 2.1.0-preview.2. Подпись и результаты нотарификации нужно проверить по GitHub Release перед установкой. Этот документ адресован разработчику, оператору, аудитору безопасности и будущему участнику открытого проекта.
 
 > **Обещание прозрачности.** Для каждого существенного технического утверждения указаны исходные файлы или проверяемые команды. Мы не называем PID гарантией работающего MCP; успешный клик — выполненной задачей; localhost — полноценной песочницей; а наличие лицензии MIT — доказательством безопасности или готовности релиза.
 
@@ -52,7 +52,7 @@ flowchart TB
   GPT["ChatGPT / разрешённый MCP-клиент"]
   TT["Secure MCP Tunnel · Terminal"]
   BT["Secure MCP Tunnel · Browser"]
-  T["Terminal command :12847 · OneShot/jobs :12848"]
+  T["Terminal MCP / PTY / OneShot/jobs :12848"]
   P["Safe MCP proxy :8940/mcp"]
   PW["Playwright MCP :8931/mcp"]
   CH["Обычный Chrome / CDP"]
@@ -74,7 +74,6 @@ flowchart TB
 
 ```bash
 launchctl list | grep -E 'com\.chatterminalhub|com\.mcphub'
-curl -fsS http://127.0.0.1:12847/health
 curl -fsS http://127.0.0.1:12848/health
 curl -fsS http://127.0.0.1:8969/api/status
 ```
@@ -133,7 +132,7 @@ tests/          регрессионные проверки
 docs/           инженерная документация
 ```
 
-Для проверки информации откройте исходные файлы: `terminal/server.js:toolSchemas`, `terminal/stateless_server.js`, `playwright/restricted-proxy.mjs`, `autosend/cdp-delivery.mjs:deliverViaPlaywright`, `autosend/core.mjs`, `messaging/hub.py`, `dashboard/server.mjs`.
+Для проверки информации откройте исходные файлы: `terminal/interactive_runtime.cjs:toolSchemas`, `terminal/stateless_server.js`, `playwright/restricted-proxy.mjs`, `autosend/delivery.mjs:deliverViaPlaywright`, `autosend/core.mjs`, `messaging/hub.py`, `dashboard/server.mjs`.
 
 ## 8. Где проходит граница Mac ↔ внешний мир
 

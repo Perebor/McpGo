@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 repo="mcpgo1/McpGo"
 workflow="windows-preview.yml"
 artifact="McpGo-Windows-unsigned-preview"
-tag="v2.1.0-preview.1"
+tag="v$(node -p "require('./windows/package.json').version")"
 version="${tag#v}"
 ci_name="McpGo Setup ${version}.exe"
 # GitHub Releases normalizes spaces to dots in uploaded asset names.

@@ -6,7 +6,7 @@ const OWNER='mcpgo1';
 const REPO='McpGo';
 const RELEASES_API='https://api.github.com/repos/'+OWNER+'/'+REPO+'/releases?per_page=20';
 const VERSION=/^v(\d+)\.(\d+)\.(\d+)-preview\.(\d+)$/;
-const ASSET=/^McpGo Setup \d+\.\d+\.\d+-preview\.\d+\.exe$/;
+const ASSET=/^McpGo\.Setup\.\d+\.\d+\.\d+-preview\.\d+\.exe$/;
 
 function parseVersion(version){
  const value=VERSION.exec('v'+String(version).replace(/^v/,''));
@@ -26,7 +26,7 @@ function latestWindowsPreview(rows,current){
   if(row.tag_name!=='v'+tag.slice(0,3).join('.')+'-preview.'+tag[3])return false;
   return Array.isArray(row.assets)&&row.assets.some(asset=>
    typeof asset?.name==='string'&&ASSET.test(asset.name)&&
-   asset.name==='McpGo Setup '+row.tag_name.slice(1)+'.exe'&&asset.size>10000000);
+   asset.name==='McpGo.Setup.'+row.tag_name.slice(1)+'.exe'&&asset.size>10000000);
  });
  valid.sort((a,b)=>cmp(parseVersion(b.tag_name),parseVersion(a.tag_name)));
  const tag=valid[0]?.tag_name;

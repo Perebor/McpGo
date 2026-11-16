@@ -41,7 +41,7 @@ node --check restricted-proxy.mjs
 Откройте `McpGo.app` или `Открыть McpGo.command`. В разделе «Обзор» проверьте три службы TerminalHub и три PlaywrightHub. Служба Dashboard автоматически обслуживает `http://127.0.0.1:8969`; статусы обновляются из локального API.
 
 Терминальные LaunchAgents:
-- `com.chatterminalhub.server` — команды Mac;
+- `com.chatterminalhub.oneshot` — Terminal MCP, Jobs и PTY;
 - `com.chatterminalhub.oneshot` — OneShot и jobs;
 - `com.chatterminalhub.tunnel` — внешний Secure MCP Tunnel.
 

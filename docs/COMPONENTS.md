@@ -22,12 +22,12 @@ flowchart LR
 |---|---|---|---|
 | View | `native/main.swift` и View-файлы | UI, запроса status/action, выбор агента | Не управляет напрямую внешним MCP |
 | Dashboard | `dashboard/server.mjs` | `launchctl`, проверка PID/портов, миграция terminal tunnel plist | Не является полным менеджером пакетов |
-| Stateful terminal | `terminal/server.js` + `pty_worker.py` | PTY-сессии, input/read/interrupt/close | Не возвращает synchronous exit code на каждый send |
-| Stateless terminal | `terminal/stateless_server.js` | Одноразовые команды и MCP job tools | Не сохраняет интерактивную оболочку |
+| Stateful terminal | `terminal/interactive_runtime.cjs` + `pty_worker.py` | PTY-сессии, input/read/interrupt/close | Не возвращает synchronous exit code на каждый send |
+| Stateless terminal | `terminal/stateless_server.js` | MCP 2026-07-28 и одноразовые команды и MCP job tools | Не сохраняет интерактивную оболочку |
 | Job runtime | `terminal/job_runtime.js`, `job_worker.js` | Detached subprocess, status и лог-файлы | Не гарантирует success по факту создания job |
 | Browser MCP | `playwright/start.sh`, `@playwright/mcp` | Работа с пользовательским Chrome CDP | Не запускает отдельный Chromium штатно |
 | Browser proxy | `playwright/restricted-proxy.mjs` | Shared session, MCP filtering, tab-index warmup | Не является web firewall |
-| AutoSend | `autosend/core.mjs`, `server.mjs`, `cdp-delivery.mjs` | Очередь расписаний, DOM state, клик, итог | Не проверяет завершение ответа агента |
+| AutoSend | `autosend/core.mjs`, `server.mjs`, `delivery.mjs` | Очередь расписаний, DOM state, клик, итог | Не проверяет завершение ответа агента |
 | Messaging | `messaging/hub.py`, `start.mjs` | Локальный реестр агентов/очередь/ack | Не раскрывает закрытый transcript |
 | Tunnels | `terminal/run-tunnel.sh`, `playwright/start-tunnel.sh`, launcher wrappers | Outbound MCP transport | Не выполняет CLI разрешения пользователя за него |
 | OS lifecycle | `launchagents/*.plist` | Запуск и restart после входа/сбоев | Не гарантирует CDN/backend uptime |
@@ -104,7 +104,7 @@ sequenceDiagram
 
 ## 5. Исторические реализации
 
-В `autosend/` могут сохраняться `chrome-extension/`, `native-messaging/`, `desktop.mjs`, `browser.mjs`, а также регрессионные тесты бывших транспортов. Они документируют миграцию, **не** доказывают, что extension является текущим способом доставки. Действующий scheduler зовёт `deliverViaPlaywright` из `cdp-delivery.mjs`.
+Устаревшие собственные расширения, Native Messaging, CDP-доставка и автоматическая перезагрузка чата удалены из AutoSend. Рабочие модули: `browser-client.mjs`, `delivery.mjs`, `server.mjs`. См. [ADR-001](adr/001-autosend-extension-only.md).
 
 В `native/` могут храниться backup binaries, bundle snapshots и исторические файлы. Для публичного source release это **артефакты разработки**, не часть рекомендуемой поставки.
 
@@ -115,7 +115,7 @@ sequenceDiagram
 | `dashboard/server.mjs` groups | SwiftUI state decoder, LaunchAgent labels |
 | Browser proxy | `playwright/start-tunnel.sh`, browser MCP, AutoSend tests |
 | Terminal job schema | `terminal/stateless_server.js`, `job_runtime.js`, Tool descriptions |
-| AutoSend states | `core.mjs`, `server.mjs`, `cdp-delivery.mjs`, SwiftUI scheduled UI |
+| AutoSend states | `core.mjs`, `server.mjs`, `delivery.mjs`, SwiftUI scheduled UI |
 | SQLite schema | `messaging/hub.py` + tests + backup/migration docs |
 | Skills | Исходники `skills/`, bundled `Resources/skills`, codesign |
 | Приложение | `native/*.swift`, Info.plist, AppIcon, signatures |

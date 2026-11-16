@@ -1,15 +1,19 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
-import {deliverViaPlaywright,reconcileViaPlaywright,observeExistingChat,reloadStalledChat,LocalMcp} from './cdp-delivery.mjs';
-import {POLL_MS,updateWatchdog,noteReload,recoveryObservation,continuationOpportunity} from './stall-watchdog.mjs';
+import {deliverViaPlaywright,reconcileViaPlaywright,observeExistingChat} from './delivery.mjs';
+import {probeBrowserHealth} from './browser-health.mjs';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
 import {verificationReceipt,canReconcile,expired,scheduleNextCheck,finishUnknown,finishVerified,recheckUnknown,restoreAttemptEvidence} from './reconciliation.mjs';
-import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput} from './core.mjs';
+import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken} from './core.mjs';
+import {stableSlotId,recordSlot,safeSlotStatus} from './schedule.mjs';
+import {trackSmartContinuation} from './smart-continuation.mjs';
 import {conversationState,conversationStates,eligibleToSend,nextDue,canObserveTask} from './conversation-fsm.mjs';
+import {checkPreview} from './preview-check.mjs';
 
 const PORT=Number(process.env.MCPHUB_AUTOSEND_PORT || 8972);
-let cdpOnline=false;let cdpLastError='';let workerBusy=false;
+let backendOnline=false;let backendLastError='';let browserOnline=false;let browserLastError='';let browserLastSeen=null;let workerBusy=false;
 const CHECK_MS=Number(process.env.MCPHUB_AUTOSEND_CHECK_MS||10000);
+const CONTROL_TOKEN=getOrCreateControlToken();
 const db=readState();
 markUnknownOnBoot(db);
 writeState(db);
@@ -17,17 +21,54 @@ const MAX_IN_FLIGHT=240000;
 function persist(){writeState(db)}
 function now(){return new Date().toISOString()}
 function find(id){const t=db.tasks.find(t=>t.id===id);if(!t)throw Error('Расписание не найдено.');return t}
+function authenticated(req){
+ const provided=req.headers['x-mcphub-token'];
+ return req.headers['x-mcphub-client']==='native' && !req.headers.origin &&
+  typeof provided==='string'&&/^[a-f0-9]{64}$/.test(provided)&&
+  crypto.timingSafeEqual(Buffer.from(provided,'hex'),Buffer.from(CONTROL_TOKEN,'hex'));
+}
 function reply(res,code,obj,origin=null){
  const out=Buffer.from(JSON.stringify(obj));
  const headers={'Content-Type':'application/json; charset=utf-8','Content-Length':out.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'};
  if(origin){headers['Access-Control-Allow-Origin']=origin;headers.Vary='Origin';}
  res.writeHead(code,headers);res.end(out);
 }
-function view(){return {ok:true,tasks:db.tasks,attempts:db.attempts.slice(-30).reverse(),
+function historySummary(){
+ const counts={verified:0,skipped:0,unknown:0,other:0};
+ for(const a of db.attempts){
+  if(['verified','verified_manual'].includes(a.result))counts.verified++;
+  else if(['busy','deferred','skipped'].includes(a.result))counts.skipped++;
+  else if(a.result==='unknown')counts.unknown++;
+  else counts.other++;
+ }
+ return counts;
+}
+function view(){return {ok:true,tasks:db.tasks,attempts:db.attempts.slice(-100).reverse(),
+ historySummary:historySummary(),
  conversations:conversationStates(db.tasks),
- deliverySupported:true,deliveryReason:cdpOnline?'Playwright CDP подключён к личному Chrome.':'Ожидание Playwright CDP: '+(cdpLastError||'проверяем подключение'),
- extensionConnected:cdpOnline,extensionTransport:'Playwright CDP',extensionDiagnostic:null,extensionLastSeen:null,
- extensionVersion:'CDP',requiredExtensionVersion:'CDP',busyTask:db.tasks.find(t=>['checking','sending','verifying'].includes(t.status))?.id||'',serverTime:now()};}
+ deliverySupported:true,deliveryReason:!backendOnline?'Ожидание Playwright Extension AutoSend: '+(backendLastError||'проверяем подключение'):
+  browserOnline?'Выделенная группа AutoSend доступна; проверьте выбранный чат.':
+  'Выделенный Playwright backend запущен; выберите чат через расширение.',
+ extensionConnected:backendOnline&&browserOnline,extensionTransport:'Playwright MCP · расширение Chrome',
+ // Native client decodes this as a structured ChromePageDiagnostic, not a string.
+ extensionDiagnostic:null,extensionLastSeen:browserLastSeen,
+ extensionVersion:'Playwright Extension',requiredExtensionVersion:'Playwright Extension',busyTask:db.tasks.find(t=>['checking','sending','verifying'].includes(t.status))?.id||'',serverTime:now()};}
+async function previewTask(id){
+ if(workerBusy)return {ready:false,reason:'Браузер занят текущей операцией.',sendBlocked:true};
+ const t=find(id);
+ workerBusy=true;
+ try{
+  let health;
+  try{health=await probeBrowserHealth();}
+  catch(e){return {ready:false,chatFound:false,
+    reason:'Выделенный Playwright backend недоступен: '+String(e.message||e).slice(0,120),sendBlocked:true};}
+  if(!health.connected)return {ready:false,chatFound:false,reason:health.reason,sendBlocked:true};
+  const result=await checkPreview(t,observeExistingChat);
+  browserOnline=result.chatFound===true;
+  if(browserOnline)browserLastSeen=now();
+  return {...result,checkedAt:now()};
+ }finally{workerBusy=false;}
+}
 function operation(action,body){
  switch(action){
   case 'create':{
@@ -35,7 +76,7 @@ function operation(action,body){
   }
   case 'update':{
    const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка: сначала дождись результата.');
-   Object.assign(t,validateInput(body));delete t.watchdog;delete t.verification;pause(t);t.manual_once=false;t.safe_retry_count=0;t.last_error='';persist();return {task:t};
+   Object.assign(t,validateInput(body));t.schedule_revision=(t.schedule_revision||0)+1;delete t.watchdog;delete t.verification;pause(t);t.manual_once=false;t.safe_retry_count=0;t.last_error='';persist();return {task:t};
   }
   case 'start':{
    const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка.');
@@ -112,98 +153,35 @@ function expireAmbiguous(){
  }
  if(changed)persist();
 }
-// Watchdog observes only already-open ChatGPT conversations with scheduled tasks.
-// An explicit, stable connection-error banner is required for automatic reload.
-// Busy without such a banner is reported, but never interrupted automatically.
-let lastWatchdogCheck=0;
-let watchdogCursor=0;
-async function monitorStalledChats(){
+// Only explicit smart-continuation schedules need an observation between
+// deadlines. Regular intervals NEVER preempt their due time or reload Chrome.
+let lastContinuationCheck=0,continuationCursor=0;
+async function monitorContinuations(){
  if(workerBusy)return false;
- const candidates=db.tasks.filter(t=>canObserveTask(t,db.tasks));
+ const candidates=db.tasks.filter(t=>canObserveTask(t,db.tasks)&&t.schedule_mode==='after_response');
  if(!candidates.length)return false;
- const t=candidates[watchdogCursor++%candidates.length];
+ const t=candidates[continuationCursor++%candidates.length];
  workerBusy=true;
  try{
-  // Wait for a real MutationObserver event briefly before falling back to
-  // the regular health probe. Holding the shared Chrome lock is capped at
-  // 1000 ms, even while another agent is performing long-running work.
-  const probe=await observeExistingChat(t,{eventWaitMs:1000});
-  if(probe.status!=='ok'){
-   // Do not reset existing evidence or perform any navigation if we cannot
-   // observe the exact destination conversation.
-   return false;
-  }
-  const observed=probe.observation;
-  const continuationMarker=continuationOpportunity(t,observed);
-  if(continuationMarker){
-   t.continuationMarker=continuationMarker;
-   delete t.watchdog;
-   t.next_at=now();
-   t.last_error='Ответ остановлен: ChatGPT предлагает продолжение. Отправим заданное сообщение после проверки готовности.';
-   persist();
-   return true;
-  }
-  // A previously handled CTA must not be triggered again while the same
-  // user message remains visible. A new last user ID/receipt is a new event.
-  if(t.watchdog?.mode==='recovering'){
-   const check=recoveryObservation(t.watchdog,observed);
-   t.watchdog=check.next;
-   if(check.ready){
-    delete t.watchdog;
-    t.last_error='Соединение восстановлено; чат дважды подтвердил готовность.';
-    // A deferred busy slot has never clicked Send. The separate delivery
-    // preflight will require two fresh stable observations as well.
-    t.next_at=now();
-   }else{
-    t.last_error='Проверяем восстановление после обрыва; новые сообщения пока не отправляем.';
-   }
-   persist();
-   return true;
-  }
-  const decision=updateWatchdog(t.watchdog,observed);
-  if(decision.action==='ready'){
-   if(t.watchdog){
-    delete t.watchdog;
-    // If the chat became ready naturally, do not wait another full interval.
-    t.next_at=now();
-    t.last_error='';
-    persist();
-   }
-   return true;
-  }
-  if(decision.next)t.watchdog=decision.next;
-  if(decision.action==='reload'){
-   // Persist an attempt BEFORE navigation; crash must not cause an
-   // unbounded refresh loop. Navigation never types or sends messages.
-   t.watchdog=noteReload(t.watchdog);
-   persist();
-   const result=await reloadStalledChat(t);
-   t.watchdog.mode=result.status==='reloaded'?'recovering':'refresh-deferred';
-   t.last_error=result.status==='reloaded'
-     ?'Обнаружен устойчивый обрыв ChatGPT: обновили вкладку один раз, проверяем состояние.'
-     :'Перезагрузка отложена: '+(result.reason||'неподтверждённая ошибка');
-   persist();
-   return true;
-  }
-  const age=Math.floor((Date.now()-Date.parse(t.watchdog.lastProgressAt))/60000);
-  if(decision.action==='interrupted')
-   t.last_error='ChatGPT явно прервал ответ. Перепроверяем состояние и затем восстановим разговор, не нажимая Send до готовности.';
-  else if(decision.action==='suspected-stall')
-   t.last_error='Возможное зависание: '+age+' мин без видимого прогресса. Действующий ответ не прерываем без явной ошибки.';
-  // Rate-limit disk writes to meaningful state changes; hashes only, not DOM.
-  persist();
- }catch(e){
-  t.last_error='Наблюдение ChatGPT недоступно: '+String(e.message||e).slice(0,120);
-  persist();
- }finally{workerBusy=false;}
- return true;
+  const probe=await observeExistingChat(t,{eventWaitMs:0});
+  if(probe.status!=='ok')return false;
+  if(trackSmartContinuation(t,probe.observation)){persist();return true;}
+  return false;
+ }catch{return false;}
+ finally{workerBusy=false;}
 }
 function recordAttempt(t,result,error='',evidence=null){
  const proof=evidence||t.verification?.lastEvidence||null;
- db.attempts.push({id:crypto.randomUUID(),task_id:t.id,time:now(),
+ const finished=Date.now();
+ const started=Date.parse(t.last_attempt_at||'');
+ db.attempts.push({id:crypto.randomUUID(),task_id:t.id,time:new Date(finished).toISOString(),
    result,error,stage:t.delivery_stage||null,
+   slot_id:t.active_slot_id||t.last_slot_id||null,
+   scheduled_at:t.active_scheduled_at||t.last_scheduled_at||null,
+   started_at:t.last_attempt_at||null,
+   duration_ms:Number.isFinite(started)?Math.max(0,finished-started):null,
    diagnostic:proof?safeEvidence(proof):null});
- db.attempts=db.attempts.slice(-120);
+ db.attempts=db.attempts.slice(-500);
 }
 async function reconcilePending(){
  const t=db.tasks.find(x=>canReconcile(x));
@@ -240,9 +218,17 @@ async function reconcilePending(){
  }finally{workerBusy=false;}
  return true;
 }
-async function checkCdp(){
- try {const client=new LocalMcp();await client.connect();await client.tool('browser_tabs',{action:'list'});cdpOnline=true;cdpLastError='';}
- catch(e){cdpOnline=false;cdpLastError=String(e.message||e).slice(0,140);}
+// The periodic AutoSend readiness probe must not attach Chrome tabs. With
+// Playwright Extension a 'read-only' browser_tabs(list) can open a fresh
+// chrome-extension://.../connect.html and spawn another group every 30 seconds.
+async function checkExtensionBackend(){
+ // Passive port check only; never opens a Chrome tab or extension group.
+ try{
+  const health=await probeBrowserHealth();
+  backendOnline=health.connected;
+  backendLastError=health.reason;
+  if(!backendOnline)browserOnline=false;
+ }catch(e){backendOnline=false;browserOnline=false;backendLastError='Не удалось проверить локальный backend';}
 }
 let lastScheduledTaskId=null;
 async function runScheduled(){
@@ -251,16 +237,36 @@ async function runScheduled(){
  // calls themselves remain serialized by the shared Chrome MCP proxy.
  const t=nextDue(db.tasks,Date.now(),lastScheduledTaskId);
  if(!t)return false;
+ // If the dedicated backend is not running, leave the due slot pending.
+ const health=await probeBrowserHealth();
+ if(!health.connected){
+  if(t.last_error!==health.reason){t.last_error=health.reason;persist();}
+  return false;
+ }
  lastScheduledTaskId=t.id;
  workerBusy=true;
+ const scheduledAt=t.next_at||now();
+ const slotId=stableSlotId(t,scheduledAt);
+ const previous=safeSlotStatus(t,slotId);
+ if(previous){
+  // Never retry a slot already recorded, even if a client forced its due time.
+  if(['committed','unknown','checking'].includes(previous)){
+   finishUnknown(t,'Запуск уже выполнялся или его результат неизвестен. Повтор Send запрещён.');
+  }else rescheduleAfterAttempt(t);
+  recordAttempt(t,'skipped','Дублирующий идентификатор запланированного запуска заблокирован.');
+  persist();return true;
+ }
+ t.active_scheduled_at=scheduledAt;t.active_slot_id=slotId;
+ recordSlot(t,slotId,scheduledAt,'checking');
  t.status='checking';t.last_attempt_at=now();t.next_at=null;t.delivery_stage='preflight';persist();
  try {
   const result=await deliverViaPlaywright(t,async baseline=>{
    t.verification=verificationReceipt(baseline);
-   // ID is durable BEFORE click, and the proxy records the same operation
-   // before forwarding it to Playwright. Lost HTTP responses cannot replay it.
+   // ID is durable BEFORE click, and the scheduler guards the page click inside a single evaluation.
+   // Lost HTTP responses cannot trigger an automatic replay.
    const actionId='autosend:'+crypto.randomUUID();
    t.verification.actionId=actionId;
+   recordSlot(t,slotId,scheduledAt,'committed');
    t.status='sending';t.delivery_stage='click-committed';t.last_stage_at=now();persist();
    return actionId;
   });
@@ -272,9 +278,12 @@ async function runScheduled(){
    // network errors and ambiguous responses ALWAYS remain in verification.
    const oldActionId=t.verification.actionId;
    t.verification=null;
+   recordSlot(t,slotId,scheduledAt,'refused');
    t.status='scheduled';
    t.delivery_stage='guard-refused';
-   t.next_at=new Date(Date.now()+t.interval_seconds*1000).toISOString();
+   rescheduleAfterAttempt(t);
+   t.last_slot_id=slotId;t.last_scheduled_at=scheduledAt;
+   t.active_slot_id=null;t.active_scheduled_at=null;
    t.last_error=result.error||'Send отклонён проверкой; безопасно отложен.';
    t.last_action_id=oldActionId;
   } else if(t.verification || t.status==='sending' || result.status==='pending'){
@@ -287,7 +296,10 @@ async function runScheduled(){
    }
   } else {
    // Busy or uncertain page: no click occurred. Skip this slot, check next interval.
-   t.status='scheduled';t.next_at=new Date(Date.now()+t.interval_seconds*1000).toISOString();
+   recordSlot(t,slotId,scheduledAt,'skipped');
+   rescheduleAfterAttempt(t);
+   t.last_slot_id=slotId;t.last_scheduled_at=scheduledAt;
+   t.active_slot_id=null;t.active_scheduled_at=null;
    t.last_error=(
     result.reason==='busy'?'Агент занят · ':
     result.reason==='interrupted'?'Соединение прервано · ':
@@ -303,8 +315,11 @@ async function runScheduled(){
    scheduleNextCheck(t,'Проверка прервана',Date.now(),
     safeEvidence({code:'OBSERVATION_FAILED',clickCommitted:true,messageFound:false}));
   }else if(t.status==='checking'){
-   t.status='scheduled';t.next_at=new Date(Date.now()+t.interval_seconds*1000).toISOString();
-   t.last_error='Сбой до нажатия Send; новая попытка при следующем интервале.';
+   recordSlot(t,slotId,scheduledAt,'skipped');
+   rescheduleAfterAttempt(t);
+   t.last_slot_id=slotId;t.last_scheduled_at=scheduledAt;
+   t.active_slot_id=null;t.active_scheduled_at=null;
+   t.last_error='Сбой до нажатия Send; запуск пропущен без повторного клика.';
   }else{
    finishUnknown(t,'Нельзя безопасно определить исход попытки',
     safeEvidence({code:'OBSERVATION_FAILED',clickCommitted:true,messageFound:false}));
@@ -317,8 +332,8 @@ const server=http.createServer(async(req,res)=>{
  const host=req.headers.host;
  if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`].includes(host))
   return reply(res,403,{error:'Only local host'});
- if(req.headers['x-mcphub-client']!=='native' || req.headers.origin)
-  return reply(res,403,{error:'Only native client permitted'});
+ if(!authenticated(req))
+  return reply(res,403,{error:'Local control token required'});
  if(req.method==='GET' && req.url==='/api/status') return reply(res,200,view());
  if(req.method!=='POST' || req.url!=='/api/tasks')
   return reply(res,404,{error:'Not found'});
@@ -332,12 +347,13 @@ const server=http.createServer(async(req,res)=>{
    chunks.push(chunk);
   }
   const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if(body.action==='preview')return reply(res,200,{ok:true,...await previewTask(body.id)});
   return reply(res,200,{ok:true,...operation(body.action,body)});
  } catch(e) {
   return reply(res,400,{error:String(e.message||e).slice(0,500)});
  }
 });
-server.listen(PORT,'127.0.0.1',()=>console.log('McpGo AutoSend Playwright CDP API on 127.0.0.1:'+PORT));
+server.listen(PORT,'127.0.0.1',()=>console.log('McpGo AutoSend Playwright Extension API on 127.0.0.1:'+PORT));
 let schedulerTickRunning=false;
 async function schedulerTick(){
  if(schedulerTickRunning)return;
@@ -348,9 +364,9 @@ async function schedulerTick(){
   // during the same tick. Verifying chat A does NOT starve ready chat B.
   await reconcilePending();
   await runScheduled();
-  if(Date.now()-lastWatchdogCheck>=POLL_MS){
-   lastWatchdogCheck=Date.now();
-   await monitorStalledChats();
+  if(Date.now()-lastContinuationCheck>=15000){
+   lastContinuationCheck=Date.now();
+   await monitorContinuations();
   }
  } finally{schedulerTickRunning=false}
 }
@@ -360,5 +376,5 @@ const timer=setInterval(()=>{
    // Durable task/verification receipts are recovered by markUnknownOnBoot.
  });
 },CHECK_MS);timer.unref();
-const healthTimer=setInterval(()=>{void checkCdp();},30000);healthTimer.unref();void checkCdp();
+const healthTimer=setInterval(()=>{void checkExtensionBackend();},30000);healthTimer.unref();void checkExtensionBackend();
 process.on('SIGTERM',()=>{clearInterval(timer);clearInterval(healthTimer);server.close(()=>process.exit(0));setTimeout(()=>process.exit(1),5000).unref()});

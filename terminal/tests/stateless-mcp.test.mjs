@@ -6,6 +6,7 @@ import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {modernHeaders,modernParams,MODERN_PROTOCOL,SERVER_META_KEY} from '../../playwright/mcp-modern-protocol.mjs';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'mcpgo-mcp-test-'));
 const config=path.join(root,'config.json'),data=path.join(root,'jobs');
 const sparePort=()=>new Promise(resolve=>{
@@ -14,7 +15,8 @@ const sparePort=()=>new Promise(resolve=>{
 const port=await sparePort();
 const binary=fileURLToPath(new URL('../stateless_server.js',import.meta.url));
 const processMcp=spawn(process.execPath,[binary],{env:{...process.env,
- MCPGO_ONESHOT_PORT:String(port),MCPGO_ONESHOT_CONFIG:config,MCPGO_JOB_ROOT:data},
+ MCPGO_ONESHOT_PORT:String(port),MCPGO_ONESHOT_CONFIG:config,MCPGO_JOB_ROOT:data,
+ MCPGO_TERMINAL_SYNC_WAIT_MS:'750'},
  stdio:['ignore','pipe','pipe']});
 let stderr='';processMcp.stderr.on('data',b=>stderr+=b.toString().slice(-800));
 for(let i=0;i<70;i++){
@@ -33,20 +35,34 @@ after(async()=>{
  fs.rmSync(root,{recursive:true,force:true});
 });
 let sequence=0;
-async function tool(method,params){
- const res=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:
-  JSON.stringify({jsonrpc:'2.0',id:++sequence,method,params})});
+async function tool(method,params={}){
+ const wrapped=modernParams(params,'McpGoTests');
+ const res=await fetch(endpoint,{method:'POST',headers:modernHeaders(method,wrapped),body:
+  JSON.stringify({jsonrpc:'2.0',id:++sequence,method,params:wrapped})});
  const response=await res.json();
  assert.equal(res.status,200,JSON.stringify(response));
  assert.notEqual(response.result?.isError,true,JSON.stringify(response));
+ assert.equal(response.result?.resultType,'complete');
+ assert.equal(res.headers.get('mcp-session-id'),null);
  return method==='tools/call'?JSON.parse(response.result.content[0].text):response.result;
 }
-test('MCP initialize advertises version from bundled metadata, not a stale literal',async()=>{
- const init=await tool('initialize',{protocolVersion:'2025-06-18',
-  capabilities:{},clientInfo:{name:'McpGoTests',version:'1.0.0'}});
+test('Terminal supports modern stateless MCP alongside temporary existing ChatGPT compatibility',async()=>{
+ const discover=await tool('server/discover');
  const expected=JSON.parse(fs.readFileSync(fileURLToPath(new URL('../mcp-version.json',import.meta.url)),'utf8')).version;
- assert.equal(init.serverInfo.version,expected);
+ assert.deepEqual(discover.supportedVersions,[MODERN_PROTOCOL]);
+ assert.equal(discover._meta[SERVER_META_KEY].version,expected);
  assert.equal(expected,'1.3.0');
+ const old=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},
+   body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{}})});
+ assert.equal(old.status,200);assert.equal((await old.json()).result.protocolVersion,'2025-06-18');
+});
+test('modern MCP rejects session IDs without touching terminal state',async()=>{
+ const params=modernParams({},'McpGoTests');
+ const response=await fetch(endpoint,{method:'POST',headers:{...modernHeaders('tools/list',params),
+  'Mcp-Session-Id':'old-session-id'},body:JSON.stringify({jsonrpc:'2.0',id:456,
+  method:'tools/list',params})});
+ assert.equal(response.status,400);
+ assert.match((await response.json()).error.message,/Mcp-Session-Id/);
 });
 test('MCP advertises durability, watch, pagination and cancel tools',async()=>{
  const names=(await tool('tools/list')).tools.map(x=>x.name);
@@ -87,13 +103,56 @@ test('ordinary terminal_exec creates a durable operation ID and can be recovered
  assert.ok(recovery.operations.jobs.some(x=>x.job_id===first.job_id));
  assert.ok(Array.isArray(recovery.resources.locks));
 });
+test('terminal_exec promotes to an existing durable job instead of holding the MCP stream',async()=>{
+ const marker=path.join(root,'promoted-marker.txt');
+ const cmd='sleep 1.6; printf x >> '+JSON.stringify(marker);
+ const request={command:cmd,request_id:'promote-idempotent-001'};
+ const startedAt=Date.now();
+ const first=await tool('tools/call',{name:'terminal_exec',arguments:request});
+ assert.ok(Date.now()-startedAt<1500,'must not wait until command finishes');
+ assert.match(first.job_id,/^[a-f0-9]{48}$/);
+ assert.equal(first.wait_limit_ms,750);
+ assert.equal(first.job_timeout_ms,1200000);
+ assert.equal(first.result_ready,false);
+ assert.equal(first.promoted_to_job,true);
+ assert.equal(first.exit_code,null);
+ assert.match(first.note,/NOT cancelled/);
+ const duplicate=await tool('tools/call',{name:'terminal_exec',arguments:request});
+ assert.equal(duplicate.job_id,first.job_id);
+ assert.equal(duplicate.deduplicated,true);
+ let status=await tool('tools/call',{name:'job_status',arguments:{job_id:first.job_id}});
+ for(let i=0;i<20&&status.state!=='exited';i++){
+  await new Promise(resolve=>setTimeout(resolve,150));
+  status=await tool('tools/call',{name:'job_status',arguments:{job_id:first.job_id}});
+ }
+ assert.equal(status.state,'exited');
+ assert.equal(status.exit_code,0);
+ const final=await tool('tools/call',{name:'job_result',arguments:{job_id:first.job_id}});
+ assert.equal(final.result_ready,true);
+ assert.equal(fs.readFileSync(marker,'utf8'),'x','same request_id must not execute command twice');
+});
+test('explicit command timeout remains enforced after promotion',async()=>{
+ const first=await tool('tools/call',{name:'terminal_exec',arguments:{
+  command:'sleep 5',timeout_ms:1200,request_id:'promotion-timeout-001'}});
+ assert.equal(first.promoted_to_job,true);
+ assert.equal(first.job_timeout_ms,1200);
+ let status=await tool('tools/call',{name:'job_status',arguments:{job_id:first.job_id}});
+ for(let i=0;i<25&&!['exited','cancelled','launch_error'].includes(status.state);i++){
+  await new Promise(resolve=>setTimeout(resolve,150));
+  status=await tool('tools/call',{name:'job_status',arguments:{job_id:first.job_id}});
+ }
+ assert.equal(status.timed_out,true);
+ const final=await tool('tools/call',{name:'job_result',arguments:{job_id:first.job_id}});
+ assert.equal(final.result_ready,true);
+ assert.equal(final.timed_out,true);
+});
 test('lock contention refuses the second conflicting command but allows independent agent',async()=>{
  const resource_key='deploy:gafus-prod';
  const first=await tool('tools/call',{name:'job_start',arguments:{
   command:'sleep 2; printf release-done',resource_key,request_id:'deploy-lock-0001'}});
- const blocked=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},
-  body:JSON.stringify({jsonrpc:'2.0',id:++sequence,method:'tools/call',
-   params:{name:'terminal_exec',arguments:{command:'printf conflict',resource_key}}})});
+ const blockedParams=modernParams({name:'terminal_exec',arguments:{command:'printf conflict',resource_key}},'McpGoTests');
+ const blocked=await fetch(endpoint,{method:'POST',headers:modernHeaders('tools/call',blockedParams),
+  body:JSON.stringify({jsonrpc:'2.0',id:++sequence,method:'tools/call',params:blockedParams})});
  const blockedPayload=await blocked.json();
  assert.equal(blockedPayload.result.isError,true);
  assert.match(blockedPayload.result.content[0].text,/RESOURCE_BUSY/);
@@ -128,4 +187,40 @@ test('four independent jobs run concurrently without a global resource mutex',as
   }
   assert.fail('Independent job did not complete');
  }));
+});
+
+test('interactive PTY and local dashboard use the same MCP HTTP listener',async()=>{
+ const names=(await tool('tools/list')).tools.map(t=>t.name);
+ for(const name of ['terminal_create','terminal_send','terminal_read','terminal_interrupt','terminal_close'])
+  assert.ok(names.includes(name),name);
+ const dashboard=await fetch('http://127.0.0.1:'+port+'/');
+ assert.equal(dashboard.status,200);
+ assert.match(await dashboard.text(),/терминал/i);
+ const unauthorized=await fetch('http://127.0.0.1:'+port+'/api/sessions');
+ assert.equal(unauthorized.status,401);
+ const created=await tool('tools/call',{name:'terminal_create',arguments:{name:'unified-mcp-test'}});
+ // PTY occupancy prevents an idle-only restart of the unified listener.
+
+ assert.ok(created.session_id&&created.session_key);
+ const occupied=await (await fetch('http://127.0.0.1:'+port+'/health')).json();
+ assert.equal(occupied.interactive_sessions,1);
+ try{
+  await tool('tools/call',{name:'terminal_send',arguments:{session_id:created.session_id,
+   session_key:created.session_key,text:'printf \"MCPGO_UNIFIED_%s\" PTY',enter:true}});
+  let output='',since=0;
+  for(let i=0;i<50;i++){
+   const next=await tool('tools/call',{name:'terminal_read',arguments:{session_id:created.session_id,
+    session_key:created.session_key,since}});
+   since=next.next;output+=next.text;
+   if(output.includes('MCPGO_UNIFIED_PTY'))break;
+   await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  assert.match(output,/MCPGO_UNIFIED_PTY/);
+  const denied=await tool('tools/call',{name:'terminal_read',arguments:{session_id:created.session_id,
+   session_key:'wrong',since:0}}).catch(e=>String(e));
+  assert.match(String(denied),/SESSION_NOT_FOUND_OR_FORBIDDEN/);
+ }finally{
+  await tool('tools/call',{name:'terminal_close',arguments:{session_id:created.session_id,
+   session_key:created.session_key}});
+ }
 });

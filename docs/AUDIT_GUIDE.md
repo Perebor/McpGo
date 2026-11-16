@@ -8,12 +8,12 @@
 |---|---|---|
 | GUI entrypoint | `native/main.swift` | `@main`, `HubModel`, `SidebarLink` |
 | Локальное управление | `dashboard/server.mjs` | `groups`, `/api/action`, `launchctl` |
-| Интерактивная оболочка | `terminal/server.js` | `toolSchemas`, `createSession`, `performTool` |
+| Интерактивная оболочка | `terminal/interactive_runtime.cjs` | `toolSchemas`, `createSession`, `performTool` |
 | Одноразовые команды | `terminal/stateless_server.js` | `terminal_exec`, `spawn('/bin/zsh')` |
 | Длительные jobs | `terminal/job_runtime.js` | `startJob`, `summarize`, `logs` |
-| Браузерная отладка | `playwright/start.sh` | `--cdp-endpoint chrome` |
+| Браузерная отладка | `playwright/start.sh` | `--extension` |
 | Proxy policy | `playwright/restricted-proxy.mjs` | `UNSAFE`, `initializeOnce`, `warmupTabIndices` |
-| AutoSend executor | `autosend/cdp-delivery.mjs` | `classifyAgent`, `deliverViaPlaywright` |
+| AutoSend executor | `autosend/delivery.mjs` | `classifyAgent`, `deliverViaPlaywright` |
 | Scheduler states | `autosend/server.mjs` | `runScheduled`, `expireAmbiguous` |
 | Persistent tasks | `autosend/core.mjs` | `readState`, `writeState`, `markUnknownOnBoot` |
 | SQLite queue | `messaging/hub.py` | `CREATE TABLE`, `history`, `replace_agent` |
@@ -41,7 +41,7 @@ grep -R -n "127.0.0.1\|localhost" dashboard terminal autosend messaging playwrig
 
 ## 4. Идентифицируйте capability/permissions
 
-- `terminal/server.js`: session_id + session_key и PTY tool schemas.
+- `terminal/interactive_runtime.cjs`: session_id + session_key и PTY tool schemas.
 - `terminal/stateless_server.js`: private MCP path, command/timeout/body limits.
 - `dashboard/server.mjs`: проверка Origin и `X-MCP-Hub`.
 - `messaging/hub.py`: проверка Host/Origin/client header, role visibility.

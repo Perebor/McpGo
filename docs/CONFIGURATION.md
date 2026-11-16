@@ -8,7 +8,6 @@
 
 | Label | Точка входа | Назначение |
 |---|---|---|
-| `com.chatterminalhub.server` | `terminal/server.js` | Command server |
 | `com.chatterminalhub.oneshot` | `terminal/stateless_server.js` | OneShot/jobs |
 | `com.chatterminalhub.tunnel` | `~/Library/Application Support/ChatTerminalHub/run-tunnel.sh` | Secure terminal tunnel |
 | `com.mcphub.playwright.browser` | `launchers/browser.mjs` | Запуск Playwright MCP CDP |
@@ -31,9 +30,9 @@ launchctl print "gui/$(id -u)/com.chatterminalhub.tunnel"
 
 | Порт | Процесс | Endpoint |
 |---|---|---|
-| 12847 | Terminal command server | `127.0.0.1:12847/health` |
 | 12848 | Terminal OneShot/job server | `127.0.0.1:12848/health` |
-| 8931 | Playwright MCP | `127.0.0.1:8931/mcp` |
+| 8931 | Browser Playwright MCP | `127.0.0.1:8931/mcp` |
+| 8932 | AutoSend Playwright MCP Extension | `127.0.0.1:8932/mcp` |
 | 8940 | MCP proxy | `127.0.0.1:8940/mcp` |
 | 8969 | Dashboard | `127.0.0.1:8969/api/status` |
 | 8971 | Messaging | `127.0.0.1:8971/api/status` |
@@ -48,7 +47,8 @@ launchctl print "gui/$(id -u)/com.chatterminalhub.tunnel"
 ```text
 --host 127.0.0.1
 --port 8931
---cdp-endpoint chrome
+--extension
+--background
 --shared-browser-context
 --caps vision,devtools
 --block-service-workers
@@ -56,7 +56,7 @@ launchctl print "gui/$(id -u)/com.chatterminalhub.tunnel"
 --timeout-navigation 45000
 ```
 
-Папка результатов — `playwright/artifacts/shared`; временные и browser caches — в `playwright/.cache`. Подключение к Chrome невозможно, пока пользователь не разрешит remote debugging в самом Chrome.
+Папка результатов — `playwright/artifacts/shared`; временные и browser caches — в `playwright/.cache`. Подключение к Chrome требует официальное Playwright Extension и выбор разрешённой вкладки. Remote Debugging и CDP больше не нужны. AutoSend использует отдельный backend на порту 8932.
 
 `playwright/restricted-proxy.mjs` по умолчанию работает в режиме `shared`, переиспользует одну upstream MCP session, фильтрует `browser_run_code_unsafe` и ограничивает возможные имена инструментов по своему исходному коду.
 

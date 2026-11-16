@@ -19,8 +19,7 @@ macOS 14+, arm64 для нативной сборки, Xcode/macOS SDK, Node.js 
 
 | Служба | Назначение |
 |---|---|
-| com.chatterminalhub.server | Command server |
-| com.chatterminalhub.oneshot | OneShot / jobs |
+| com.chatterminalhub.oneshot | Unified Terminal MCP / PTY / OneShot / jobs |
 | com.chatterminalhub.tunnel | Secure MCP Terminal |
 | com.mcphub.playwright.browser | Playwright MCP CDP backend :8931 |
 | com.mcphub.playwright.proxy | Safe MCP proxy :8940 |
@@ -50,7 +49,6 @@ job_result. Не повторять команды с неизвестным р�
 ## Стандартная диагностика
 
 ```bash
-curl -fsS http://127.0.0.1:12847/health
 curl -fsS http://127.0.0.1:12848/health
 launchctl list | grep -E 'com.chatterminalhub|com.mcphub'
 launchctl print "gui/$(id -u)/com.chatterminalhub.tunnel"

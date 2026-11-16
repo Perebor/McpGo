@@ -1,0 +1,23 @@
+'use strict';
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'../..');
+test('Windows wizard exposes read-only browser compatibility and official update',()=>{
+ const html=fs.readFileSync(path.join(root,'windows/app/index.html'),'utf8');
+ const js=fs.readFileSync(path.join(root,'windows/app/renderer.js'),'utf8');
+ const main=fs.readFileSync(path.join(root,'windows/app/main.cjs'),'utf8');
+ const bridge=fs.readFileSync(path.join(root,'windows/app/onboarding.cjs'),'utf8');
+ const cli=fs.readFileSync(path.join(root,'windows/onboarding_cli.py'),'utf8');
+ assert.match(html,/id="browser-version-check"/);
+ assert.match(html,/id="browser-version-update"/);
+ assert.match(js,/onboard\('browser-check',\{browser\}\)/);
+ assert.match(js,/result.backgroundReady/);
+ assert.match(js,/browserUpdate\(\$\('browser'\).value\)/);
+ assert.match(main,/mcpgo:browser-update/);
+ assert.match(main,/https:\/\/www.google.com\/chrome\//);
+ assert.match(main,/https:\/\/www.microsoft.com\/edge/);
+ assert.match(bridge,/'browser-check'/);
+ assert.match(cli,/"browser-check"/);
+});

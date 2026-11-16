@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('mcpgo',Object.freeze({
  openUpdate:url=>ipcRenderer.invoke('mcpgo:open-update',url),
  openReleases:()=>ipcRenderer.invoke('mcpgo:open-releases'),
  docs:()=>ipcRenderer.invoke('mcpgo:docs'),
+ browserUpdate:browser=>ipcRenderer.invoke('mcpgo:browser-update',browser),
  serviceRead:(service,route)=>ipcRenderer.invoke('mcpgo:service-read',service,route),
  serviceAction:(service,route,body)=>ipcRenderer.invoke('mcpgo:service-action',service,route,body),
  onboard:(action,payload)=>ipcRenderer.invoke('mcpgo:onboard',action,payload),

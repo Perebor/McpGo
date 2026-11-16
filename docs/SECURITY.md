@@ -9,11 +9,11 @@ ChatGPT workspace / MCP client
       │
       ├── OpenAI Secure MCP tunnel → TerminalHub → shell под macOS user
       │
-      └── OpenAI Secure MCP tunnel → safe proxy → Playwright CDP → личный Chrome
+      └── OpenAI Secure MCP tunnel → safe proxy → Playwright Extension → личный Chrome
 
 Локальная McpGo.app → Dashboard → launchctl
                        ├── Messaging → локальная SQLite queue
-                       └── AutoSend → Playwright CDP → ChatGPT DOM
+                       └── AutoSend → отдельный Playwright Extension backend (8932) → ChatGPT DOM
 ```
 
 Публикация MCP-инструментов через туннель **не** означает выдачу прав на произвольные браузерные или терминальные операции всем подключённым клиентам. Назначение workspace, разрешения MCP, системные права macOS и ограничения конкретных инструментов определяют, какие действия допустимы.

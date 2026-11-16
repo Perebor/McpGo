@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.1",
+  "version": "2.1.0-preview.2",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -38,9 +38,8 @@
           "resource_locks.js",
           "resource_policy.js",
           "mcp-version.json",
-          "server.js",
+          "interactive_runtime.cjs",
           "pty_worker_win.js",
-          "stateful_bridge.cjs",
           "files_tools.cjs",
           "dashboard.html",
           "dashboard.js",
@@ -52,7 +51,16 @@
         "to": "mcpgo-runtime/playwright",
         "filter": [
           "action-guard.mjs",
-          "restricted-proxy.mjs"
+          "restricted-proxy.mjs",
+          "browser-session-manager.mjs",
+          "tab-lease-manager.mjs",
+          "agent-scope.mjs",
+          "portable-tab-identity.mjs",
+          "portable-agent-tabs.mjs",
+          "browser-workspace.mjs",
+          "workspace-response.mjs",
+          "mcp-modern-protocol.mjs",
+          "chatgpt-url.mjs"
         ]
       },
       {

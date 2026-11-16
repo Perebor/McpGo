@@ -21,7 +21,7 @@ TEMPLATES = ROOT / "launchagents"
 AGENTS = HOME / "Library/LaunchAgents"
 LOGS = HOME / "Library/Logs/McpGo"
 DATA = HOME / "Library/Application Support/McpGo"
-PORTS = (12847, 12848, 8931, 8940, 8969, 8971, 8972)
+PORTS = (12848, 8931, 8932, 8940, 8969, 8971, 8972)
 
 
 def existing_listener(port: int) -> bool:
@@ -166,6 +166,19 @@ def install() -> None:
             if result.returncode:
                 print(f"WARNING: {label} bootstrap failed; inspect launchctl and logs.",
                       file=sys.stderr)
+    # Upgrade existing installations: retire only a LaunchAgent owned by this
+    # exact McpGo root, never a foreign service at the legacy port.
+    old = AGENTS / "com.chatterminalhub.server.plist"
+    owner = installed_owner(old)
+    if owner == "this":
+        subprocess.run(["/bin/launchctl", "bootout", DOMAIN, str(old)],
+                       capture_output=True, timeout=10)
+        if subprocess.run(["/bin/launchctl", "print",
+                           f"{DOMAIN}/com.chatterminalhub.server"],
+                          capture_output=True, timeout=4).returncode == 0:
+            raise RuntimeError("Legacy terminal LaunchAgent is still loaded; do not remove its plist")
+        old.unlink()
+    # Older runtime data (including admin keys/jobs) is never deleted.
     print("McpGo user services installed. Browser and tunnel permissions require separate configuration.")
 
 

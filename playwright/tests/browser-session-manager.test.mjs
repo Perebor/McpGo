@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {BrowserSessionManager,BrowserReconnectError,SHARED_CLIENT,browserTransportFailed} from '../browser-session-manager.mjs';
+
+test('passive telemetry never starts connection and reveals no URL, tab title or tokens',()=>{
+ let now=1000;
+ const mgr=new BrowserSessionManager({now:()=>now});
+ mgr.markMcpReady();
+ const state=mgr.status();
+ assert.equal(state.mcp,'ready');
+ assert.equal(state.browser,'unknown');
+ assert.equal(state.attempts,0);
+ assert.equal(state.sessionName,SHARED_CLIENT);
+ assert.ok(!JSON.stringify(state).includes('token'));
+ assert.ok(!JSON.stringify(state).includes('http'));
+ mgr.beforeBrowserCall();
+ assert.equal(mgr.status().browser,'connecting');
+ assert.equal(mgr.status().attempts,1);
+ mgr.recordBrowserResult({status:200,body:Buffer.from('{"jsonrpc":"2.0","result":{"content":[]}}')});
+ assert.equal(mgr.status().browser,'connected');
+ assert.equal(mgr.status().attempts,1);
+ now=2000;
+ mgr.beforeBrowserCall();
+ assert.equal(mgr.status().attempts,1);
+});
+test('extension disconnect throttles repeated connects with bounded exponential backoff',()=>{
+ let now=0;
+ const mgr=new BrowserSessionManager({now:()=>now,minDelayMs:1000,maxDelayMs:3500});
+ const closed={status:200,body:Buffer.from('{"result":{"isError":true,"content":[{"type":"text","text":"Playwright extension did not connect"}]}}')};
+ assert.ok(browserTransportFailed(closed));
+ mgr.beforeBrowserCall();mgr.recordBrowserResult(closed);
+ assert.equal(mgr.status().browser,'degraded');
+ assert.equal(mgr.status().cooldownMs,1000);
+ assert.throws(()=>mgr.beforeBrowserCall(),BrowserReconnectError);
+ now=1000;mgr.beforeBrowserCall();mgr.recordBrowserResult(closed);
+ assert.equal(mgr.status().cooldownMs,2000);
+ now=3000;mgr.beforeBrowserCall();mgr.recordBrowserResult(closed);
+ assert.equal(mgr.status().cooldownMs,3500);
+ now=6500;mgr.beforeBrowserCall();
+ mgr.recordBrowserResult({status:200,body:Buffer.from('{"result":{"content":[]}}')});
+ assert.equal(mgr.status().browser,'connected');
+ assert.equal(mgr.status().cooldownMs,0);
+ assert.equal(mgr.status().failures,3);
+ assert.equal(mgr.status().attempts,4);
+});
+test('site errors and ambiguous 502 do not blacklist all subsequent browser actions',()=>{
+ const mgr=new BrowserSessionManager({now:()=>5000});
+ mgr.beforeBrowserCall();
+ mgr.recordBrowserResult({status:200,body:Buffer.from('{"result":{"isError":true,"content":[{"type":"text","text":"Element is not visible"}]}}')});
+ assert.equal(mgr.status().browser,'connected');
+ mgr.recordBrowserResult({status:502,body:Buffer.from('{"error":"action response lost"}')});
+ assert.equal(mgr.status().cooldownMs,0);
+});
+test('backend session expiration invalidates cached browser state',()=>{
+ const mgr=new BrowserSessionManager();
+ mgr.markMcpReady();
+ mgr.beforeBrowserCall();
+ mgr.recordBrowserResult({status:200,body:Buffer.from('{"result":{}}')});
+ mgr.markMcpUnavailable();
+ assert.equal(mgr.status().mcp,'unavailable');
+ assert.equal(mgr.status().browser,'unknown');
+ assert.equal(mgr.status().generation,1);
+});

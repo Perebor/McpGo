@@ -51,22 +51,22 @@ NATIVE = [
 # personal schedules, private Playwright profiles or working Chrome state.
 SOURCES = {
     "terminal": [
-        "server.js", "stateless_server.js", "stdio_mcp.js", "job_worker.js",
-        "job_runtime.js", "resource_locks.js", "resource_policy.js", "mcp-version.json", "pty_worker.py", "run-tunnel.sh",
+        "interactive_runtime.cjs", "stateless_server.js", "job_worker.js",
+        "job_runtime.js", "resource_locks.js", "resource_policy.js", "platform.js", "mcp-version.json", "pty_worker.py", "run-tunnel.sh",
         "restart-when-idle.sh", "dashboard.js", "dashboard.css", "dashboard.html",
         "doctor-tunnel.sh", "save-tunnel-key.sh",
     ],
     "messaging": ["start.mjs", "hub.py"],
-    "autosend": ["server.mjs", "core.mjs", "cdp-delivery.mjs",
+    "autosend": ["server.mjs", "core.mjs", "delivery.mjs", "browser-client.mjs", "browser-health.mjs", "preview-check.mjs", "schedule.mjs", "smart-continuation.mjs",
                  "chat-state.mjs", "guarded-send.mjs", "browser-events.mjs",
-                 "conversation-fsm.mjs", "stall-watchdog.mjs", "reconciliation.mjs"],
+                 "conversation-fsm.mjs", "stream-monitor.mjs", "reconciliation.mjs"],
     "dashboard": ["server.mjs", "mcp-health.mjs", "tunnel-recovery.mjs",
                   "tunnel-health.mjs", "mcp-versions.mjs", "index.html", "style.css", "app.js"],
     "launchers": ["browser.mjs", "tunnel.mjs"],
-    "onboarding": ["cli.py", "setup_engine.py", "runtime_provision.py"],
-    "scripts": ["setup_macos.py"],
-    "playwright": ["probe.mjs", "restricted-proxy.mjs", "action-guard.mjs", "patch-playwright.mjs",
-                   "package.json", "package-lock.json", "start.sh", "start-tunnel.sh"],
+    "onboarding": ["cli.py", "setup_engine.py", "browser_compat.py", "runtime_provision.py"],
+    "scripts": ["setup_macos.py", "upgrade_runtime.py"],
+    "playwright": ["probe.mjs", "restricted-proxy.mjs", "browser-session-manager.mjs", "chrome-profile.mjs", "tab-lease-manager.mjs", "agent-scope.mjs", "portable-tab-identity.mjs", "portable-agent-tabs.mjs", "browser-workspace.mjs", "workspace-response.mjs", "mcp-modern-protocol.mjs", "chatgpt-url.mjs", "action-guard.mjs", "patch-playwright.mjs",
+                   "package.json", "package-lock.json", "start.sh", "configure-extension.sh", "try-extension.sh", "start-tunnel.sh"],
 }
 
 
