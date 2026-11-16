@@ -15,7 +15,8 @@ test('autodetect selects only unambiguous official Chrome extension profile',()=
   };
   assert.equal(detectUniqueExtensionProfile({chromeRoot:folder}),null);
   install('Default');
-  assert.equal(detectUniqueExtensionProfile({chromeRoot:folder}),'Default');
+  assert.equal(detectUniqueExtensionProfile({chromeRoot:folder}),process.platform==='darwin'?'Default':null,
+    'automatic Chrome profile selection must be macOS-only');
   install('Profile 2');
   assert.equal(detectUniqueExtensionProfile({chromeRoot:folder}),null,'must not guess when multiple profiles contain the extension');
   assert.equal(detectUniqueExtensionProfile({chromeRoot:path.join(folder,'missing')}),null);

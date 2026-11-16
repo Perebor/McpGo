@@ -95,7 +95,7 @@
 | `playwright/tests/browser-session-manager.test.mjs` | 63 | `475d0b258c1a8018` |
 | `playwright/tests/browser-workspace.test.mjs` | 81 | `0681881a371e6754` |
 | `playwright/tests/chatgpt-url.test.mjs` | 28 | `6845b17c8bb8f6ec` |
-| `playwright/tests/chrome-profile.test.mjs` | 30 | `8054a86930079bfd` |
+| `playwright/tests/chrome-profile.test.mjs` | 31 | `b5910445516a0818` |
 | `playwright/tests/group-reuse.test.mjs` | 33 | `8a42bdbf75e1aa7c` |
 | `playwright/tests/mcp-modern-protocol.test.mjs` | 42 | `d3af10e0524a7cef` |
 | `playwright/tests/metadata-timeout.test.mjs` | 47 | `7d9d4086c136cd68` |
