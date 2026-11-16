@@ -10,7 +10,7 @@
 |---|---|---|
 | `com.chatterminalhub.oneshot` | `terminal/stateless_server.js` | OneShot/jobs |
 | `com.chatterminalhub.tunnel` | `~/Library/Application Support/ChatTerminalHub/run-tunnel.sh` | Secure terminal tunnel |
-| `com.mcphub.playwright.browser` | `launchers/browser.mjs` | Запуск Playwright MCP CDP |
+| `com.mcphub.playwright.browser` | `launchers/browser.mjs` | Запуск Playwright MCP через Extension |
 | `com.mcphub.playwright.proxy` | `playwright/restricted-proxy.mjs shared` | Safe proxy |
 | `com.mcphub.playwright.tunnel` | `launchers/tunnel.mjs` | Secure browser tunnel |
 | `com.mcphub.dashboard` | `dashboard/server.mjs` | Статус и control API |
@@ -67,7 +67,7 @@ launchctl print "gui/$(id -u)/com.chatterminalhub.tunnel"
 | `MCPHUB_AUTOSEND_PORT` | AutoSend HTTP bind | По умолчанию 8972 |
 | `MCPHUB_AUTOSEND_CHECK_MS` | Период опроса расписаний | По умолчанию 10000 мс |
 | `MCPHUB_AUTOSEND_STATE` | Путь файла расписаний | По умолчанию `~/Library/Application Support/MCPHub/AutoSend/tasks.json` |
-| `MCPHUB_PLAYWRIGHT_MCP_URL` | CDP delivery client | По умолчанию `http://127.0.0.1:8940/mcp` |
+| `MCPHUB_PLAYWRIGHT_MCP_URL` | Legacy browser MCP proxy endpoint | По умолчанию `http://127.0.0.1:8940/mcp` |
 | `MCPHUB_AUTOSEND_TEST_RETRY_MS` | Тестовые отложенные повторы | Только при `NODE_ENV=test` |
 | `MCPHUB_MESSAGE_DB` | Messaging SQLite | По умолчанию `messaging/data/messages.sqlite3` |
 | `CONTROL_PLANE_TUNNEL_ID` | Browser tunnel | ID туннеля или значение из `.cache/tunnel.id` |

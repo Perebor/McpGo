@@ -115,7 +115,7 @@ McpGo **не заменяет ChatGPT** и не предоставляет до�
 | [`native/`](native/) | Приложение SwiftUI/AppKit, окно, мастер, настройки |
 | [`windows/`](windows/) | Windows-оболочка Electron, адаптеры и тестовый установщик NSIS |
 | [`terminal/`](terminal/) | Терминал MCP, интерактивные сессии, команды, задания |
-| [`playwright/`](playwright/) | Управление Chrome, CDP, browser proxy |
+| [`playwright/`](playwright/) | Управление Chrome через официальный Playwright Extension и browser proxy |
 | [`autosend/`](autosend/) | Сообщения по расписанию, статусы и восстановление |
 | [`onboarding/`](onboarding/) | Мастер первого запуска, настройка MCP-туннелей |
 | [`dashboard/`](dashboard/) | Локальное управление службами и их статусом |
@@ -171,7 +171,7 @@ python3 scripts/build_release_dmg.py
 | **McpGo не появляется в ChatGPT** | Проверь поддержку пользовательских MCP в аккаунте/workspace, затем адреса подключений. [Быстрый старт](docs/GETTING_STARTED.md) |
 | **Не создаются MCP-туннели** | Проверь организацию и разрешения в OpenAI Platform. [Мастер подключения](docs/ONBOARDING.md) |
 | **Terminal/Browser не отвечают** | Посмотри статусы служб в McpGo и сделай безопасный MCP-вызов. [Диагностика](docs/OPERATIONS.md) |
-| **Chrome не показывает вкладки** | Проверь Chrome/CDP и запрошенные разрешения. [Браузер](docs/BROWSER.md) |
+| **Chrome не показывает вкладки** | Проверь Playwright Extension, его токен и разрешения Chrome. [Браузер](docs/BROWSER.md) |
 | **Долгое задание «зависло»** | Используй `job_status` / `job_logs`. Не повторяй автоматически действие с неясным исходом. [Надёжность](docs/RELIABILITY.md) |
 | **Не отправилось сообщение по таймеру** | Проверь URL чата и журнал отправок, прежде чем повторять. [AutoSend](docs/AUTOSEND.md) |
 | **После перезапуска Mac нет связи** | Проверь фоновые службы и туннели. [План восстановления](docs/TUNNEL_RECOVERY_PLAN.md) |
