@@ -39,6 +39,10 @@ jobs:
           python3 tools/generate_source_inventory.py --check
       - name: Node MCP regression
         run: |
+          # GitHub Linux images have no zsh dotfiles. Without this, interactive
+          # PTY tests hit zsh-newuser-install instead of executing their command.
+          # This changes only the ephemeral CI runner, never user shell settings.
+          if [ ! -e "$HOME/.zshrc" ]; then printf '# McpGo CI zsh initialized\n' > "$HOME/.zshrc"; fi
           (cd autosend && node --test tests/*.test.mjs)
           node --test dashboard/tests/*.test.mjs playwright/tests/*.test.mjs
           node --test terminal/tests/*.test.cjs terminal/tests/*.test.mjs
