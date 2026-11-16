@@ -50,6 +50,12 @@ test('bundle allowlists exact runtime files and not private local configuration'
   assert.equal(terminal.filter.includes(name)||playwright.filter.includes(name),false);
  assert.ok(app.build.files.every(x=>!x.includes('**/*')));
 });
+test('native verifier checks the exact built version and fails if installer is missing',()=>{
+ const source=fs.readFileSync(path.join(repo,'windows/verify-build.py'),'utf8');
+ assert.match(source,/windows\/package\.json/);
+ assert.match(source,/Expected Windows NSIS installer missing/);
+ assert.doesNotMatch(source,/McpGo Setup 2\.1\.0-preview\.1\.exe/);
+});
 test('Windows Electron window denies untrusted code execution and remote navigation',()=>{
  const main=fs.readFileSync(path.join(repo,'windows/app/main.cjs'),'utf8');
  const html=fs.readFileSync(path.join(repo,'windows/app/index.html'),'utf8');

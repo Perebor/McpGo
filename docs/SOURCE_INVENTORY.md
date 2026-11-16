@@ -184,13 +184,13 @@
 | `windows/tests/browser-agent-parity.test.cjs` | 41 | `ee3115a8dd8e92bd` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
-| `windows/tests/package.test.cjs` | 62 | `9430a80db2a30adb` |
+| `windows/tests/package.test.cjs` | 68 | `706922144a22bd25` |
 | `windows/tests/python-runtime.test.cjs` | 48 | `9ec42ea867eb3cc9` |
 | `windows/tests/runtime.test.cjs` | 83 | `3e895861c06aca10` |
 | `windows/tests/settings.test.cjs` | 122 | `fd68e57b4b0c2677` |
 | `windows/tests/supervisor.test.cjs` | 49 | `d389a79a607f9478` |
 | `windows/tests/updates.test.cjs` | 36 | `669ce88d7f88ea64` |
-| `windows/verify-build.py` | 75 | `a9a83b61140311b7` |
+| `windows/verify-build.py` | 80 | `c67722da30946910` |
 
 Всего файлов в выбранном source-only срезе: **185**.
 

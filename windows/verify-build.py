@@ -3,6 +3,8 @@
 from __future__ import annotations
 import argparse
 import hashlib
+import json
+import re
 import pathlib
 import struct
 import sys
@@ -59,15 +61,18 @@ def main():
         if file.name in forbidden or file.suffix in (".log",".db",".sqlite"):
             raise RuntimeError("Potential runtime user data packaged: "+str(file))
     print("Windows packaged runtime verified:",len([x for x in runtime.rglob("*") if x.is_file()]),"files")
-    installer=ROOT/"release/windows/McpGo Setup 2.1.0-preview.1.exe"
-    if installer.is_file():
-        # The NSIS bootstrapper is intentionally PE32/i386; the installed app
-        # and all bundled runtime executables are PE32+ x64 (checked above).
-        check_pe(installer,allowed_archs=(0x14c,0x8664))
-        digest=hashlib.sha256(installer.read_bytes()).hexdigest()
-        (installer.parent/(installer.name+".sha256")).write_text(
-            digest+"  "+installer.name+"\n",encoding="ascii")
-        print("Installer:",installer,"SHA256",digest)
+    version=json.loads((ROOT/"windows/package.json").read_text(encoding="utf-8"))["version"]
+    if not re.fullmatch(r"\d+\.\d+\.\d+-preview\.\d+", version):
+        raise RuntimeError("Invalid Windows preview version")
+    installer=ROOT/"release/windows"/f"McpGo Setup {version}.exe"
+    if not installer.is_file() or installer.is_symlink():
+        raise RuntimeError("Expected Windows NSIS installer missing: "+str(installer))
+    # NSIS bootstrapper uses PE32/i386; installed executables are PE32+ x64.
+    check_pe(installer,allowed_archs=(0x14c,0x8664))
+    digest=hashlib.sha256(installer.read_bytes()).hexdigest()
+    (installer.parent/(installer.name+".sha256")).write_text(
+        digest+"  "+installer.name+"\n",encoding="ascii")
+    print("Installer:",installer,"SHA256",digest)
 
 if __name__=="__main__":
     try:main()
