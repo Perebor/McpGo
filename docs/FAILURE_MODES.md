@@ -35,10 +35,10 @@
 
 | Сбой | Диагностика | Следующее действие |
 |---|---|---|
-| backend :8931 не слушает | `com.mcphub.playwright.browser`, Node stderr | Проверить `npm ci`, CDP флаги |
+| backend :8931 не слушает | `com.mcphub.playwright.browser`, Node stderr | Проверить занятость 8931 старым CDP-процессом и доступность Extension, не убивать чужие PID |
 | proxy :8940 не слушает | `com.mcphub.playwright.proxy`, `node --check` | Запустить proxy отдельно |
 | browser tunnel завершился | `com.mcphub.playwright.tunnel`, настройки | Проверить endpoint 8940 и tunnel association |
-| Chrome не разрешает CDP | `chrome://inspect/#remote-debugging` | Разрешить вручную |
+| Extension не подключается | Токен 0600, профиль Chrome и разрешения Extension | Установить из Chrome Web Store, сохранить токен через мастер, повторить проверку |
 | Многократные permission prompts | Shared session перезапускается | Проверить proxy/backend lifecycle |
 | Неверная вкладка | `browser_tabs(list)`, точный URL | Не выполнять запись, выбрать нужную |
 
@@ -66,7 +66,7 @@ stateDiagram-v2
 **Если agent busy:** это не поломка, расписание должно дождаться нового интервала.
 **Если page deferred:** проверить URL, login, editor, готовность DOM и состояние Chrome.
 **Если verifying:** только read-only наблюдение в том же чате до 180 секунд; Send не повторяется. **Если unknown:** **не** нажимать повтор и не включать расписание вслепую. Открыть точный чат и проверить наличие сообщения; после этого пользователь может изменить/переутвердить задание.
-**Если CDP недоступен:** проверить proxy 8940, Chrome remote debugging, потом `browser_tabs list`.
+**Если Extension недоступен:** проверить выбранный профиль Chrome, статус Extension, токен и backend 8931/AutoSend 8932, затем proxy 8940 и безопасный `browser_tabs list`.
 **Если вкладка сменила URL:** не отправлять; вернуться к выбору правильного адресата.
 
 ## 5. Messaging: база и роли
@@ -86,7 +86,7 @@ stateDiagram-v2
 
 - launchd user services стартуют при входе пользователя согласно конкретным plist.
 - Во сне Mac не способен гарантировать доставку сообщения в точный назначенный момент.
-- CDP связывается с живым Chrome instance; после logout/close браузерная сессия недоступна.
+- Extension работает с живым Chrome пользователя; после logout/close браузерная сессия недоступна.
 - После restart click-committed с валидным receipt возобновляет только `verifying`; без baseline остаётся `unknown`. Повторного Send нет в обоих случаях.
 - Не считать отсутствие автоматической отправки во сне багом без специально реализованного wakeup/remote worker.
 

@@ -1742,44 +1742,51 @@ struct OnboardingView: View {
                     "Playwright подключается к твоему открытому Google Chrome, а не создаёт отдельный профиль.")
             chromeVersionNotice
 
-            Text("1. Подключи Playwright к Chrome")
+            Text("1. Установи официальное расширение Playwright в Chrome")
+                .font(.system(size:13,weight:.semibold))
+                .foregroundStyle(Palette.ink)
+            Button {
+                guard let storeURL = URL(string:"https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm") else { return }
+                if let chrome=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.google.Chrome") {
+                    NSWorkspace.shared.open([storeURL],withApplicationAt:chrome,
+                                            configuration:NSWorkspace.OpenConfiguration()) { _, error in
+                        if let error {
+                            DispatchQueue.main.async {
+                                model.error="Не удалось открыть Chrome Web Store: "+error.localizedDescription
+                            }
+                        }
+                    }
+                } else {
+                    NSWorkspace.shared.open(storeURL)
+                }
+            } label: {
+                Label("Установить Playwright Extension · Chrome Web Store",
+                      systemImage:"arrow.down.circle")
+                    .font(.system(size:12,weight:.semibold))
+            }
+            Text("В Chrome Web Store нажми «Установить». Chrome попросит подтвердить доступ расширения к вкладкам. Без этого шага Browser MCP и AutoSend не смогут управлять браузером.")
+                .font(.system(size:12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal:false,vertical:true)
+            Text("2. Скопируй токен из расширения")
                 .font(.system(size:13,weight:.semibold))
                 .foregroundStyle(Palette.ink)
             if model.browserMode == "extension" {
-                Label("Режим Playwright Extension активен · вкладки MCPGO в фоне",
+                Label("Playwright Extension уже подключено · вкладки MCPGO в фоне",
                       systemImage:"checkmark.circle.fill")
                     .font(.system(size:12,weight:.semibold))
                     .foregroundStyle(Palette.online)
             } else {
-                Text("Открой значок Playwright Extension 0.5.0+ в панели Chrome, " +
-                     "скопируй PLAYWRIGHT_MCP_EXTENSION_TOKEN и вставь ниже. " +
-                     "Мастер проверит соединение до переключения работающего браузера. " +
-                     "Токен останется только на этом Mac.")
+                Text("Нажми значок Playwright Extension на панели Chrome → Manage clients → скопируй PLAYWRIGHT_MCP_EXTENSION_TOKEN и вставь ниже. Не отправляй токен в чат. Мастер сохранит его только на этом Mac и сначала проверит соединение.")
                     .font(.system(size:12))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal:false,vertical:true)
-                Button {
-                    guard let url=URL(string:"chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html"),
-                          let chrome=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.google.Chrome") else {
-                        model.error="Google Chrome не найден. Открой значок Playwright Extension вручную."
-                        return
-                    }
-                    NSWorkspace.shared.open([url],withApplicationAt:chrome,
-                                            configuration:NSWorkspace.OpenConfiguration()) { _, error in
-                        if let error {
-                            DispatchQueue.main.async {
-                                model.error="Не удалось открыть Playwright Extension: "+error.localizedDescription
-                            }
-                        }
-                    }
-                } label: {
-                    Label("Открыть Playwright Extension в Chrome",
-                          systemImage:"arrow.up.right.square")
-                        .font(.system(size:12,weight:.semibold))
-                }
                 SecureField("Токен Playwright Extension", text:$extensionToken)
                     .textContentType(.password)
                     .font(.system(size:12))
+                Text("3. Проверь доступ и включи Browser MCP")
+                    .font(.system(size:13,weight:.semibold))
+                    .foregroundStyle(Palette.ink)
                 Button {
                     let token = extensionToken
                     extensionToken = ""
@@ -1800,7 +1807,7 @@ struct OnboardingView: View {
             }
             Divider()
 
-            Text("2. Запусти локальные службы")
+            Text("4. Запусти локальные службы")
                 .font(.system(size:13,weight:.semibold))
                 .foregroundStyle(Palette.ink)
             HStack {

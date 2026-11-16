@@ -112,6 +112,6 @@ xcrun swiftc --version
 
 ## 10. Проверяемые выводы
 
-**Подтверждено:** текущий Node lockfile содержит три сторонних package entries, версия browser MCP закреплена; native код использует SwiftUI/AppKit; Python queue использует SQLite; браузер подключается через CDP.
+**Подтверждено:** текущий Node lockfile содержит три сторонних package entries, версия browser MCP закреплена; native код использует SwiftUI/AppKit; Python queue использует SQLite; браузер подключается через официальное Playwright Extension.
 
 **Не подтверждено:** безопасность всех транзитивных зависимостей, происхождение будущих установочных бинарников, поддерживаемые версии всех Chrome releases и полный cross-platform CI. Эти пункты остаются в [PUBLIC_RELEASE.md](PUBLIC_RELEASE.md).

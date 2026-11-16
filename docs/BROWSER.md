@@ -10,7 +10,7 @@
 
 ## Настройка расширения
 
-Установите Playwright Extension в Chrome/Edge и один раз разрешите клиенту `MCPGO` работать со своими вкладками. В macOS токен расширения хранится в `~/Library/Application Support/McpGo/playwright/extension-token`; configure: `bash playwright/configure-extension.sh` (только Extension). В Windows используется официальный Extension в выбранном Chrome/Edge.
+Установите [официальное Playwright Extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm) в Chrome/Edge через кнопку в мастере McpGo (Chrome Web Store; подтвердите разрешения в самом браузере) и один раз разрешите клиенту `MCPGO` работать со своими вкладками. В macOS токен расширения хранится в `~/Library/Application Support/McpGo/playwright/extension-token`; настройка через защищённое поле мастера или резервный CLI `bash playwright/configure-extension.sh` (запускайте интерактивно; после настройки через CLI перезапустите Browser MCP). В Windows используется официальный Extension в выбранном Chrome/Edge.
 
 У отдельного клиента AutoSend собственная группа. Чтобы задать расписание для разговора, сперва откройте его в браузере и выберите/переместите **одну** вкладку в группу AutoSend. После этого нажмите в McpGo «Проверить без отправки». AutoSend не создаёт и не перезагружает вкладки автоматически, даже когда нужная вкладка отсутствует.
 

@@ -53,6 +53,23 @@ class OnboardingSafetyTests(unittest.TestCase):
         self.assertIn("chatgpt-plugin-menu.png", (ROOT / "scripts/build_release_dmg.py").read_text())
         self.assertIn("chatgpt-server-form.png", (ROOT / "scripts/dev_preview_macos.sh").read_text())
 
+    def test_macos_wizard_installs_extension_from_official_store(self):
+        swift = (ROOT / "native/OnboardingView.swift").read_text()
+        self.assertIn("https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm", swift)
+        self.assertIn("Установить Playwright Extension", swift)
+        self.assertIn("PLAYWRIGHT_MCP_EXTENSION_TOKEN", swift)
+        self.assertIn('"activate-browser-extension"', swift)
+        self.assertNotIn('chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html', swift)
+
+    def test_bundled_offline_help_explains_extension_installation(self):
+        html = (ROOT / "assets/docs/index.html").read_text()
+        self.assertIn("chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm", html)
+        self.assertIn("PLAYWRIGHT_MCP_EXTENSION_TOKEN", html)
+        self.assertNotIn("chrome://inspect/#remote-debugging", html)
+        builder = (ROOT / "scripts/build_release_dmg.py").read_text()
+        self.assertIn('"configure-extension.sh"', builder)
+        self.assertIn('"assets/docs/index.html"', builder)
+
     def test_app_does_not_auto_bootstrap_other_installations(self):
         swift = (ROOT / "native/main.swift").read_text()
         self.assertIn('standardizedFileURL.path.hasPrefix(root + "/")', swift)

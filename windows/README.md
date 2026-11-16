@@ -31,7 +31,7 @@ outbound Secure MCP Tunnels forward the terminal and browser MCP endpoints.
    browser profile. The installer is per-user and needs no administrator rights.
 2. Open Chrome or Edge, install and approve the official Playwright MCP Browser
    Extension. Reuse the logged-in browser session; no isolated Chromium.
-   Copy `PLAYWRIGHT_MCP_EXTENSION_TOKEN` from the official extension's
+   Install the [official Playwright Extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm) with the button in the McpGo setup screen, then copy `PLAYWRIGHT_MCP_EXTENSION_TOKEN` from the official extension's
    **Manage clients** dialog and paste it into McpGo Settings → **Playwright
    Extension · token**. This token is encrypted through Windows safeStorage;
    only the fact that it is configured is shown in the UI. Without it both

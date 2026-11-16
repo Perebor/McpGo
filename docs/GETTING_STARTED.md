@@ -43,9 +43,9 @@ Restricted runtime key сохраняется в Keychain, администра�
 
 ## Playwright Extension (вместо CDP)
 
-1. Откройте **обычный Chrome** и установите [официальное Playwright Extension](https://playwright.dev/mcp/configuration/browser-extension) версии 0.5.0 или новее.
+1. Откройте **обычный Chrome** и установите [официальное Playwright Extension из Chrome Web Store](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm) версии 0.5.0 или новее.
 2. В панели Chrome откройте значок расширения и скопируйте `PLAYWRIGHT_MCP_EXTENSION_TOKEN` из его интерфейса. Не публикуйте токен в переписках или логах.
-3. В McpGo → «Первое подключение» → «Личный Chrome» вставьте токен в защищённое поле, нажмите «Проверить и включить фоновый режим». Мастер сначала подтвердит доступ, затем сохранит настройку локально.
+3. В McpGo → «Первое подключение» → «Личный Chrome» (или в блоке «Подключение MCP» для Windows) нажмите «Установить Playwright Extension», если расширения нет, затем вставьте токен в защищённое поле, нажмите «Проверить и включить фоновый режим». Мастер сначала подтвердит доступ, затем сохранит настройку локально.
 4. Запустите Browser MCP и соответствующий Secure MCP Tunnel. Подключите PlaywrightHub в ChatGPT и выполните безопасный `browser_tabs({action:"list"})`.
 5. Для AutoSend используется отдельная группа вкладок `MCPGO AutoSend`. Перед отправкой по расписанию выполните «Проверить без отправки» и убедитесь, что выбрана ровно одна нужная вкладка.
 

@@ -39,7 +39,7 @@ $('restart').addEventListener('click',async()=>{
  try{message('Перезапуск компонентов...');render(await window.mcpgo.restart());message('Запрос на перезапуск выполнен.')}
  catch(e){message(e.message,true)}
 });
-$('browser-docs').addEventListener('click',()=>window.mcpgo.docs().catch(e=>message(e.message,true)));
+$('browser-install-extension').addEventListener('click',()=>window.mcpgo.extensionStore().catch(e=>message(e.message,true)));
 
 async function checkBrowserCompatibility(){
  const browser=$('browser').value, indicator=$('browser-version'),update=$('browser-version-update');

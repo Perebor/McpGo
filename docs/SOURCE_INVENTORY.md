@@ -9,7 +9,7 @@
 | `native/InteractiveButtonStyle.swift` | 64 | `353622d1294660bc` |
 | `native/McpGoMark.svg` | 16 | `26a8d0fe7e1babda` |
 | `native/Messaging.swift` | 679 | `7a22813a0fa59f81` |
-| `native/OnboardingView.swift` | 2067 | `8330e7549ce95946` |
+| `native/OnboardingView.swift` | 2074 | `fac4733636affb3e` |
 | `native/ScheduledMessages.swift` | 1009 | `b0e761a0e5d2559c` |
 | `native/SkillsView.swift` | 213 | `1c4a2ff7fc51d11b` |
 | `native/TunnelHelp.swift` | 194 | `29f2160c400b0277` |
@@ -22,7 +22,7 @@
 | `onboarding/setup_engine.py` | 906 | `ad7b66f0bd756098` |
 | `onboarding/tests/test_runtime_provision.py` | 817 | `5fddfcf6a4c022af` |
 | `onboarding/tests/test_setup_engine.py` | 375 | `c12ac10295a4ef52` |
-| `scripts/build_release_dmg.py` | 421 | `6c6d299497a1b152` |
+| `scripts/build_release_dmg.py` | 421 | `389e395c023931c1` |
 | `scripts/dev_preview_macos.sh` | 250 | `5f1f46efcb882eb2` |
 | `scripts/dev_sync_playwright_seed.py` | 77 | `0701cceb1d99a9f9` |
 | `scripts/dev_sync_runtime.py` | 124 | `b44492a0ddb42821` |
@@ -72,7 +72,7 @@
 | `playwright/browser-workspace.mjs` | 76 | `3f0d0e65be642324` |
 | `playwright/chatgpt-url.mjs` | 27 | `3c421729cfd2ad73` |
 | `playwright/chrome-profile.mjs` | 29 | `67288fcf81e89ed0` |
-| `playwright/configure-extension.sh` | 30 | `48d12f5ab15d08ba` |
+| `playwright/configure-extension.sh` | 52 | `63a23cd1834a73f2` |
 | `playwright/configure-tunnel.sh` | 18 | `a1d5882c9ba25069` |
 | `playwright/mcp-modern-protocol.mjs` | 98 | `abcb0bfbbe990cd7` |
 | `playwright/patch-playwright.mjs` | 89 | `65925771e4df390a` |
@@ -155,36 +155,37 @@
 | `tests/test_browser_compat.py` | 61 | `bf6e5bbaf6796d89` |
 | `tests/test_browser_extension_setup.py` | 127 | `b09382440d6ef3b7` |
 | `tests/test_browser_launcher.py` | 42 | `83164b5bb4bd6880` |
+| `tests/test_configure_extension_script.py` | 126 | `f8210fc26a1d31d0` |
 | `tests/test_dev_sync_playwright_seed.py` | 59 | `13a2a5843d566568` |
 | `tests/test_dev_sync_runtime.py` | 93 | `074f4ac9373ee498` |
 | `tests/test_dmg_packaging.py` | 133 | `21650816401e2256` |
 | `tests/test_docs_release.py` | 66 | `e8443cd6e6add831` |
-| `tests/test_documentation.py` | 71 | `dff2b6d0b67b88ef` |
+| `tests/test_documentation.py` | 73 | `a17c225b3d5c9ac4` |
 | `tests/test_license.py` | 36 | `ae9ff572a78ee89f` |
-| `tests/test_onboarding_safety.py` | 86 | `b9ceb6c28d9a236f` |
+| `tests/test_onboarding_safety.py` | 103 | `c9cc4283994a09e4` |
 | `tests/test_runtime_upgrade.py` | 173 | `49ea7d92a456fb73` |
 | `tests/test_terminal_tunnel.py` | 85 | `dbff99ed62fcaebb` |
 | `tools/generate_source_inventory.py` | 73 | `e2ac17dd11701d9f` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
-| `windows/README.md` | 172 | `d04484867886c099` |
-| `windows/app/index.html` | 75 | `42a3f095e39510c8` |
+| `windows/README.md` | 172 | `3052c933e6c6993e` |
+| `windows/app/index.html` | 78 | `f4cc044b460d93e7` |
 | `windows/app/local-api.cjs` | 46 | `92cb6a96f192769c` |
-| `windows/app/main.cjs` | 104 | `9c2b1220cc7e1503` |
+| `windows/app/main.cjs` | 104 | `74e9910ad4a13268` |
 | `windows/app/onboarding.cjs` | 42 | `75897c6ed883a2a9` |
-| `windows/app/preload.cjs` | 21 | `c23cdc20d618a81e` |
-| `windows/app/renderer.js` | 223 | `f47942a07b05e15f` |
+| `windows/app/preload.cjs` | 21 | `3682a651f9b5ce9a` |
+| `windows/app/renderer.js` | 223 | `d3bde9a0afa55606` |
 | `windows/app/runtime.cjs` | 215 | `167fe658ea213588` |
 | `windows/app/settings.cjs` | 127 | `e46692e6bde2cb12` |
 | `windows/app/style.css` | 7 | `9a8800edb2a2537a` |
 | `windows/app/updates.cjs` | 54 | `09dc73bf45d81206` |
 | `windows/onboarding_cli.py` | 109 | `be0fc68907038745` |
-| `windows/package-lock.json` | 3682 | `a953ddd209b21108` |
-| `windows/package.json` | 146 | `f417986f55a35b38` |
+| `windows/package-lock.json` | 3682 | `b51563f1b603c2cd` |
+| `windows/package.json` | 146 | `905a4e5a57dc6861` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/browser-agent-parity.test.cjs` | 41 | `ee3115a8dd8e92bd` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
-| `windows/tests/package.test.cjs` | 68 | `706922144a22bd25` |
+| `windows/tests/package.test.cjs` | 82 | `66aa5f5245064305` |
 | `windows/tests/python-runtime.test.cjs` | 48 | `9ec42ea867eb3cc9` |
 | `windows/tests/runtime.test.cjs` | 83 | `3e895861c06aca10` |
 | `windows/tests/settings.test.cjs` | 122 | `fd68e57b4b0c2677` |
@@ -192,6 +193,6 @@
 | `windows/tests/updates.test.cjs` | 36 | `669ce88d7f88ea64` |
 | `windows/verify-build.py` | 80 | `c67722da30946910` |
 
-Всего файлов в выбранном source-only срезе: **185**.
+Всего файлов в выбранном source-only срезе: **186**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

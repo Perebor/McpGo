@@ -66,3 +66,17 @@ test('Windows Electron window denies untrusted code execution and remote navigat
  assert.match(html,/Content-Security-Policy/);
  assert.doesNotMatch(html,/<script[^>]+src="https?:/);
 });
+
+test('Windows first-run wizard links to the official Playwright Extension install page',()=>{
+ const html=fs.readFileSync(path.join(repo,'windows/app/index.html'),'utf8');
+ const renderer=fs.readFileSync(path.join(repo,'windows/app/renderer.js'),'utf8');
+ const preload=fs.readFileSync(path.join(repo,'windows/app/preload.cjs'),'utf8');
+ const main=fs.readFileSync(path.join(repo,'windows/app/main.cjs'),'utf8');
+ assert.match(html,/id="browser-install-extension"/);
+ assert.match(html,/Manage clients/);
+ assert.match(html,/PLAYWRIGHT_MCP_EXTENSION_TOKEN/);
+ assert.match(renderer,/window\.mcpgo\.extensionStore\(\)/);
+ assert.match(preload,/mcpgo:extension-store/);
+ assert.match(main,/chromewebstore\.google\.com\/detail\/playwright-extension\/mmlmfjhmonkocbjadbfplnigmagldckm/);
+ assert.doesNotMatch(main,/chrome-extension:\/\//);
+});

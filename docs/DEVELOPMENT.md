@@ -38,7 +38,7 @@ cd ../playwright
 node --check restricted-proxy.mjs
 ```
 
-Дополнительно: проверка HTTP status localhost 8969/8971/8972, loaded/running launchd, существующих CDP-вкладок, реальный `terminal_exec`/ `browser_tabs` из ChatGPT. Не считать успешный unit-test доказательством внешней доставки. E2E отправки делайте только в отдельный тестовый чат и с разрешения.
+Дополнительно: проверка HTTP status localhost 8969/8971/8972, loaded/running launchd, вкладок через Playwright Extension, реальный `terminal_exec`/ `browser_tabs` из ChatGPT. Не считать успешный unit-test доказательством внешней доставки. E2E отправки делайте только в отдельный тестовый чат и с разрешения.
 
 ## Рекомендованный цикл изменения
 
@@ -57,7 +57,7 @@ node --check restricted-proxy.mjs
 - [MIGRATION.md](MIGRATION.md) — ID, пути, совместимость.
 - [INTERFACES.md](INTERFACES.md) — порты, MCP, API, данные.
 - [OPERATIONS.md](OPERATIONS.md) — служебные проверки и восстановление.
-- Директории `autosend/`, `playwright/`, `messaging/`, `terminal/` содержат подробности реализаций и исторические заметки. Старые инструкции про отдельный Chromium, Chrome Extension и Native Messaging следует считать историческими, если они противоречат текущему CDP-коду.
+- Директории `autosend/`, `playwright/`, `messaging/`, `terminal/` содержат подробности реализаций и исторические заметки. Старые инструкции про отдельный Chromium, Chrome Extension и Native Messaging следует считать историческими, если они противоречат текущей реализации на Playwright Extension.
 
 ## Быстрая проверка SwiftUI без новой нотариализации
 

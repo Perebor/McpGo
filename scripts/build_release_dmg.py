@@ -395,7 +395,7 @@ def main() -> None:
         # A zero exit code alone doesn't guarantee that the submission was
         # Accepted. Check Apple's explicit decision before shipping.
         completed = command(["xcrun", "notarytool", "submit", str(dmg),
-                             "--keychain-profile", args.notary_profile, "--wait",
+                             "--keychain-profile", args.notary_profile, "--no-s3-acceleration", "--wait",
                              "--timeout", "25m", "--output-format", "json"],
                             timeout=1600, capture_output=True, text=True)
         decision = json.loads(completed.stdout)

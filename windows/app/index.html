@@ -46,13 +46,16 @@
 <div class="actions"><button type="button" class="minor" id="browser-version-check">Проверить версию</button>
 <button type="button" class="minor" id="browser-version-update" hidden>Обновить браузер</button></div>
 </div>
-<div class="group">
-<label for="playwright-token">Playwright Extension · токен подключения</label>
+<div class="group" aria-labelledby="playwright-extension-setup">
+<h4 id="playwright-extension-setup">Playwright Extension · настройка в 3 шага</h4>
+<p class="hint"><strong>1. Установи официальное Playwright Extension 0.5.0+ в Chrome или Edge.</strong> Нажми кнопку ниже и подтверди установку в магазине. Это обязательный шаг для Browser MCP и AutoSend, если хочешь управлять вкладками браузера.</p>
+<div class="actions"><button type="button" class="minor" id="browser-install-extension">1. Установить Playwright Extension</button></div>
+<label for="playwright-token">2. Скопируй токен из расширения</label>
+<p class="hint">Нажми значок расширения на панели браузера → Manage clients → скопируй PLAYWRIGHT_MCP_EXTENSION_TOKEN. Не отправляй токен в чат.</p>
 <input id="playwright-token" type="password" spellcheck="false" autocomplete="off"
- placeholder="Скопируй из официального Playwright Extension">
-<p class="hint" id="playwright-token-help">Токен шифруется средствами Windows. Пустое поле сохраняет предыдущий токен.
-AutoSend использует свою группу вкладок и никогда не открывает дубликаты автоматически.</p></div>
-<div class="actions"><button type="button" class="minor" id="browser-docs">Расширение Playwright</button><button type="submit" class="primary">Сохранить и подключить</button></div>
+ placeholder="Вставь PLAYWRIGHT_MCP_EXTENSION_TOKEN">
+<p class="hint" id="playwright-token-help">Токен шифруется средствами Windows. Если расширение уже настроено, оставь поле пустым — предыдущий токен сохранится. AutoSend использует собственную группу вкладок.</p></div>
+<div class="actions"><button type="submit" class="primary">3. Сохранить и подключить</button></div>
 </form></section>
 <section class="panel"><div class="heading"><h3>Сообщения по таймеру</h3><button class="minor" id="refresh-tasks" type="button">Обновить</button></div>
 <p class="hint">Создание задания не включает отправку. Перед стартом нужно проверить выбранный чат и нажать «Включить».</p>

@@ -76,7 +76,7 @@ ipcMain.handle('mcpgo:onboard',async(_event,action,payload)=>{
  }
  return result;
 });
-ipcMain.handle('mcpgo:docs',()=>shell.openExternal('https://github.com/microsoft/playwright-mcp'));
+ipcMain.handle('mcpgo:extension-store',()=>shell.openExternal('https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm'));
 ipcMain.handle('mcpgo:browser-update',(_event,browser)=>{
  const urls={chrome:'https://www.google.com/chrome/',msedge:'https://www.microsoft.com/edge'};
  if(!Object.hasOwn(urls,browser))throw Error('INVALID_BROWSER');
