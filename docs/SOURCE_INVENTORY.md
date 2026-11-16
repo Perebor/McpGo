@@ -164,7 +164,7 @@
 | `tests/test_license.py` | 36 | `ae9ff572a78ee89f` |
 | `tests/test_onboarding_safety.py` | 103 | `c9cc4283994a09e4` |
 | `tests/test_runtime_upgrade.py` | 173 | `49ea7d92a456fb73` |
-| `tests/test_terminal_tunnel.py` | 85 | `dbff99ed62fcaebb` |
+| `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
 | `tools/generate_source_inventory.py` | 73 | `e2ac17dd11701d9f` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
 | `windows/README.md` | 172 | `3052c933e6c6993e` |

@@ -1,6 +1,8 @@
 import pathlib
 import plistlib
 import subprocess
+import shutil
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -30,9 +32,12 @@ class TunnelLaunchAgentTests(unittest.TestCase):
         prefix = chr(36) + "{MCPGO_TUNNEL_CLIENT:"
         self.assertIn('exec "' + prefix, script)
         self.assertNotIn(chr(92) + prefix, script)
-        subprocess.run(["/bin/zsh", "-n", str(ROOT / "terminal/run-tunnel.sh")],
+        zsh = shutil.which("zsh")
+        self.assertIsNotNone(zsh, "zsh must be installed for tunnel syntax validation")
+        subprocess.run([zsh, "-n", str(ROOT / "terminal/run-tunnel.sh")],
                        check=True, capture_output=True, timeout=5)
 
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS LaunchAgent/launchctl")
     def test_owned_previous_runner_is_allowed_but_foreign_copy_is_blocked(self):
         import importlib.util
         import tempfile
