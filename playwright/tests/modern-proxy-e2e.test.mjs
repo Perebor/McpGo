@@ -72,11 +72,11 @@ for(let i=0;i<40;i++){
  catch{await new Promise(resolve=>setTimeout(resolve,50));}
 }
 function client(session=null,headers={}){
- let requestId=0;
+ let requestId=0,sessionValue=session;
  return {
   async send(method,params={},override={}){
    const body={jsonrpc:'2.0',id:++requestId,method,params:modernParams(params,'ChatGPT')};
-   if(session)body.params._meta['openai/session']=session;
+   if(sessionValue)body.params._meta['openai/session']=sessionValue;
    const outHeaders={...modernHeaders(method,body.params),...headers,...override};
    const res=await fetch(url,{method:'POST',headers:outHeaders,body:JSON.stringify(body),
      signal:AbortSignal.timeout(15000)});
@@ -85,6 +85,7 @@ function client(session=null,headers={}){
    return {status:res.status,result:first?JSON.parse(first):null,session:res.headers.get('mcp-session-id'),body:txt};
   },
   tool(name,args={}){return this.send('tools/call',{name,arguments:args})},
+  setSession(next){sessionValue=next},
  };
 }
 const payload=r=>{
@@ -128,6 +129,9 @@ test('tools/list returns a stable private cacheable catalog without a public ses
  assert.ok(list.result.result.tools.some(t=>t.name==='mcpgo_workspace'));
  assert.ok(!list.result.result.tools.some(t=>t.name==='browser_run_code_unsafe'));
  assert.equal(list.result.result.tools.find(t=>t.name==='browser_click').inputSchema.properties.workspace_id.type,'string');
+ assert.ok(list.result.result.tools.find(t=>t.name==='browser_click').inputSchema.required.includes('workspace_id'));
+ assert.ok(list.result.result.tools.find(t=>t.name==='browser_snapshot').inputSchema.required.includes('workspace_id'));
+ assert.ok(!list.result.result.tools.find(t=>t.name==='mcpgo_workspace').inputSchema.required?.includes('workspace_id'));
  const second=await a.send('tools/list');expectModern(second);
  assert.deepEqual(list.result.result.tools,second.result.result.tools,'catalog order deterministic');
 });
@@ -137,7 +141,9 @@ test('three concurrent sessions share ONE Chrome and isolate three browser works
  const ws=[];
  for(let i=0;i<clients.length;i++){
   const c=clients[i];
-  const created=await c.tool('browser_tabs',{action:'new'});expectModern(created);
+  const bootstrap=await c.tool('mcpgo_workspace');expectModern(bootstrap);
+  const id=bootstrap.result.result.structuredContent.workspace_id;
+  const created=await c.tool('browser_tabs',{action:'new',workspace_id:id});expectModern(created);
   ws.push(created.result.result.structuredContent.workspace_id);
   assert.match(ws[i],/^ws_[A-Za-z0-9_-]{32}$/);
   const navigated=await c.tool('browser_navigate',{url:`https://${names[i].toLowerCase()}.example`,workspace_id:ws[i]});
@@ -151,16 +157,49 @@ test('three concurrent sessions share ONE Chrome and isolate three browser works
  assert.equal(byTag.A,'https://a.example');assert.equal(byTag.B,'https://b.example');assert.equal(byTag.C,'https://c.example');
  const invalid=await clients[1].tool('browser_click',{target:'NO',workspace_id:ws[0]});
  assert.equal(invalid.status,409);
- assert.match(invalid.body,/WORKSPACE_STABLE_SCOPE_CONFLICT/);
+ assert.match(invalid.body,/WORKSPACE_CURRENT_AGENT_HAS_TABS/);
  const fresh=client('chat-A');
  const restored=await fresh.tool('mcpgo_workspace',{workspace_id:ws[0]});expectModern(restored);
  assert.equal(payload(restored).workspace_id,ws[0]);
  for(let i=0;i<clients.length;i++){
-  const listed=await clients[i].tool('mcpgo_tab_handle',{action:'list'});expectModern(listed);
+  const listed=await clients[i].tool('mcpgo_tab_handle',{action:'list',workspace_id:ws[i]});expectModern(listed);
   const owned=payload(listed).owned;
   assert.equal(owned.length,1);
-  const closed=await clients[i].tool('mcpgo_tab_action',{action:'close',tab_id:owned[0]});expectModern(closed);
+  const closed=await clients[i].tool('mcpgo_tab_action',{action:'close',tab_id:owned[0],workspace_id:ws[i]});expectModern(closed);
  }
+});
+test('rotating OpenAI per-request session cannot steal ownership; one workspace survives 20 operations',async()=>{
+ const a=client('session-rotated-0001');
+ const bootstrap=await a.tool('mcpgo_workspace');expectModern(bootstrap);
+ const workspaceId=bootstrap.result.result.structuredContent.workspace_id;
+ const created=await a.tool('browser_tabs',{action:'new',url:'https://owned-session.example',workspace_id:workspaceId});
+ expectModern(created);
+ assert.equal(created.result.result.structuredContent.workspace_id,workspaceId);
+ const missing=await a.tool('browser_snapshot',{});
+ assert.equal(missing.status,409);
+ assert.match(missing.body,/WORKSPACE_ID_REQUIRED/);
+ for(let i=0;i<20;i++){
+   a.setSession(`session-rotated-${i+2}`);
+   const value=i%2===0?
+     await a.tool('browser_snapshot',{workspace_id:workspaceId}):
+     await a.tool('browser_click',{target:`tick-${i}`,workspace_id:workspaceId});
+   expectModern(value);
+   assert.equal(value.result.result.structuredContent.workspace_id,workspaceId);
+ }
+ const separate=client('independent-client-session');
+ const separateWs=(await separate.tool('mcpgo_workspace')).result.result.structuredContent.workspace_id;
+ assert.notEqual(separateWs,workspaceId);
+ const denied=await separate.tool('browser_snapshot',{workspace_id:separateWs});
+ assert.equal(denied.status,409,'separate agent cannot act on first agent tab');
+ assert.match(denied.body,/TAB_OWNED_BY_ANOTHER_AGENT/);
+ assert.match(denied.body,/owner_scope=[a-f0-9]{10}/);
+ assert.match(denied.body,/requester_scope=[a-f0-9]{10}/);
+ assert.doesNotMatch(denied.body,/https:\/\/owned-session/);
+ const recovered=await a.tool('browser_snapshot',{workspace_id:workspaceId});expectModern(recovered);
+ const handles=payload(await a.tool('mcpgo_tab_handle',{action:'list',workspace_id:workspaceId}));
+ assert.equal(handles.owned.length,1);
+ const closed=await a.tool('mcpgo_tab_action',{action:'close',tab_id:handles.owned[0],workspace_id:workspaceId});
+ expectModern(closed);
 });
 test('without trusted conversation metadata, model must first request and reuse workspace_id',async()=>{
  const anonymous=client();

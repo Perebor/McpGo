@@ -26,8 +26,16 @@ fi
 echo 'First install the official Playwright Extension in Chrome:'
 echo 'https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm'
 echo 'Then click the extension icon -> Manage clients -> copy PLAYWRIGHT_MCP_EXTENSION_TOKEN.'
+# Disable TTY echo BEFORE printing the prompt: automated input can arrive
+# between the prompt and Bash read -s switching the terminal to silent mode.
+TTY_STATE="$(stty -g <&0)" || { echo 'Cannot secure terminal input.' >&2; exit 2; }
+stty -echo <&0 || { echo 'Cannot disable terminal echo.' >&2; exit 2; }
+restore_tty() { stty "$TTY_STATE" <&0 || :; }
+trap restore_tty EXIT
 printf 'Paste PLAYWRIGHT_MCP_EXTENSION_TOKEN (hidden): '
-IFS= read -r -s TOKEN || { printf '\n' >&2; echo 'No token entered.' >&2; exit 2; }
+IFS= read -r TOKEN || { printf '\n' >&2; echo 'No token entered.' >&2; exit 2; }
+restore_tty
+trap - EXIT
 printf '\n'
 # Accept the assignment copied from docs as well as the bare secret.
 TOKEN="${TOKEN#PLAYWRIGHT_MCP_EXTENSION_TOKEN=}"

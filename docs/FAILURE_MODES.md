@@ -41,6 +41,8 @@
 | Extension не подключается | Токен 0600, профиль Chrome и разрешения Extension | Установить из Chrome Web Store, сохранить токен через мастер, повторить проверку |
 | Многократные permission prompts | Shared session перезапускается | Проверить proxy/backend lifecycle |
 | Неверная вкладка | `browser_tabs(list)`, точный URL | Не выполнять запись, выбрать нужную |
+| `TAB_OWNED_BY_ANOTHER_AGENT` | Собственный `workspace_id` и псевдонимы scope в отказе | Повторить вызов со своим workspace, не захватывать чужую вкладку |
+| `WORKSPACE_ID_REQUIRED` | В новом MCP нет стабильного заголовка или забыли workspace | Сначала `mcpgo_workspace`, потом передавать `workspace_id` каждому browser tool |
 
 ## 4. AutoSend: состояния и меры
 

@@ -5,7 +5,7 @@ import {BrowserSessionManager,SHARED_CLIENT,BrowserReconnectError} from './brows
 import {validTabIndex,parseTabIndices} from './tab-lease-manager.mjs';
 import {PortableAgentTabs} from './portable-agent-tabs.mjs';
 import {AgentScopeRegistry,validScopeHint} from './agent-scope.mjs';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {BrowserWorkspaceRegistry} from './browser-workspace.mjs';
 import {attachWorkspace,decorateMcpToolResponse,withWorkspaceToolSchema} from './workspace-response.mjs';
 import {MODERN_PROTOCOL,validateModernRequest,normalizedConversationHint,
@@ -23,8 +23,8 @@ const [LISTEN_PORT,BACKEND_PORT] = [Number(process.env.MCPGO_PROXY_PORT||8940),N
 const MAX_BODY = 1024 * 1024;
 const MAX_RESPONSE = 8 * 1024 * 1024;
 // Reuse one backend MCP session for all short-lived client connections.
-// Chrome requires user confirmation on each new CDP attach, so preserving
-// the backend browser session prevents repeated security prompts.
+// Preserve the Extension backend across transient MCP transport reconnects;
+// re-attaching Chrome for each tool call disrupts browser continuity.
 let sharedSessionId = null;
 let cachedInit = null;
 let initPayload = null;
@@ -36,6 +36,20 @@ const agentTabs=new PortableAgentTabs();
 const tabLeases=agentTabs.leases;
 const agentScopes=new AgentScopeRegistry();
 const workspaces=new BrowserWorkspaceRegistry();
+// Only pseudonymous diagnostic aliases leave the proxy. Never log URLs,
+// browser content, workspace capabilities, conversation IDs or auth tokens.
+const scopeAlias=agent=>agent?
+  createHash('sha256').update(agent).digest('hex').slice(0,10):'unbound';
+function ownershipConflict(owner,caller,{mode='unknown',tool='unknown'}={}){
+  const message='TAB_OWNED_BY_ANOTHER_AGENT owner_scope='+scopeAlias(owner)+
+    ' requester_scope='+scopeAlias(caller)+' reason=workspace_mismatch'+
+    ' (reuse workspace_id from YOUR previous browser result; reassignment denied)';
+  console.warn('[McpGo ownership denied] owner_scope='+scopeAlias(owner)+
+    ' requester_scope='+scopeAlias(caller)+' scope_mode='+mode+
+    ' tool='+String(tool).replace(/[^A-Za-z0-9_-]/g,'').slice(0,50));
+  return message;
+}
+
 // No identifiers, arguments, URLs, or tokens are logged. Count wire formats only.
 const observedWireCalls={modern:0,legacy:0};
 const sessionInfo=()=>({...browserSession.status(),...agentTabs.status(),...agentScopes.status(),...workspaces.status(),browserQueue:browserQueueStatus(),
@@ -304,11 +318,11 @@ const inspectCall = payload => {
   return null;
 };
 const isToolsList = payload => (Array.isArray(payload) ? payload : [payload]).some(x => x?.method === 'tools/list');
-const stripTools = message => {
+const stripTools = (message,{requireWorkspace=false}={}) => {
   if (!message || typeof message !== 'object') return message;
-  if (Array.isArray(message)) return message.map(stripTools);
+  if (Array.isArray(message)) return message.map(item=>stripTools(item,{requireWorkspace}));
   if (Array.isArray(message.result?.tools)) {
-    message.result.tools = message.result.tools.filter(t => !UNSAFE.has(t.name)).map(withWorkspaceToolSchema);
+    message.result.tools = message.result.tools.filter(t => !UNSAFE.has(t.name)).map(t=>withWorkspaceToolSchema(t,{requireWorkspace}));
     if(!message.result.tools.some(t=>t.name===ACTION_STATUS_TOOL.name))message.result.tools.push(ACTION_STATUS_TOOL);
     if(!message.result.tools.some(t=>t.name===SESSION_STATUS_TOOL.name))message.result.tools.push(SESSION_STATUS_TOOL);
     if(!message.result.tools.some(t=>t.name===TAB_LEASE_TOOL.name))message.result.tools.push(TAB_LEASE_TOOL);
@@ -316,19 +330,19 @@ const stripTools = message => {
     if(!message.result.tools.some(t=>t.name===STABLE_TAB_ACTION_TOOL.name))message.result.tools.push(STABLE_TAB_ACTION_TOOL);
     if(!message.result.tools.some(t=>t.name===AGENT_SCOPE_STATUS_TOOL.name))message.result.tools.push(AGENT_SCOPE_STATUS_TOOL);
     if(!message.result.tools.some(t=>t.name===WORKSPACE_TOOL.name))message.result.tools.push(WORKSPACE_TOOL);
-    message.result.tools=message.result.tools.map(withWorkspaceToolSchema);
+    message.result.tools=message.result.tools.map(t=>withWorkspaceToolSchema(t,{requireWorkspace}));
   }
   return message;
 };
-const filterResponse = (raw, contentType) => {
+const filterResponse = (raw, contentType,{requireWorkspace=false}={}) => {
   const source = raw.toString('utf8');
   if (contentType.includes('text/event-stream')) {
     return Buffer.from(source.replace(/^data:\s*(\{[^\r\n]*\})\r?$/gm, (line, obj) => {
-      try { return 'data: ' + JSON.stringify(stripTools(JSON.parse(obj))); }
+      try { return 'data: ' + JSON.stringify(stripTools(JSON.parse(obj),{requireWorkspace})); }
       catch { return line; }
     }), 'utf8');
   }
-  return Buffer.from(JSON.stringify(stripTools(JSON.parse(source))), 'utf8');
+  return Buffer.from(JSON.stringify(stripTools(JSON.parse(source),{requireWorkspace})), 'utf8');
 };
 const error = (res, status, reason, id = null, rpcCode=null) => {
   const body = JSON.stringify({jsonrpc:'2.0', id,
@@ -514,10 +528,14 @@ const server = http.createServer(async (req,res) => {
     if(res.mcpModern){
       const hint=normalizedConversationHint(req.headers,data?.params?._meta);
       if(hint){
-        // Transport-independent conversation scope. No MCP session minted.
+        // openai/session may be per-request, not per ChatGPT conversation.
+        // Only an explicit x-mcpgo-* header is an immutable stable scope.
+        const explicitStable=!!(req.headers['x-mcpgo-agent-id']||
+          req.headers['x-mcpgo-conversation-id']);
         const scopeHeaders={...req.headers,
           'x-mcpgo-conversation-id':req.headers['x-mcpgo-conversation-id']||hint};
         scope=agentScopes.resolve(scopeHeaders);
+        if(!explicitStable&&!scope.error)scope={...scope,mode:'observed'};
       }else{
         const requested=data?.params?.arguments?.workspace_id;
         const known=requested?workspaces.lookup(requested):null;
@@ -553,6 +571,12 @@ const server = http.createServer(async (req,res) => {
       const requested=argumentsValue.workspace_id;
       if(requested!==undefined && typeof requested!=='string')
         return error(res,400,'Invalid workspace_id',data?.id??null);
+      // Never silently create a new identity because openai/session rotated.
+      // The agent must carry its workspace capability across all tool calls.
+      if(res.mcpModern&&scope.mode==='observed'&&!requested&&
+         data.params?.name!==WORKSPACE_TOOL.name&&
+         !['mcpgo_browser_status','mcpgo_action_status'].includes(data.params?.name))
+        return error(res,409,'WORKSPACE_ID_REQUIRED: openai/session is not a stable conversation identity; call mcpgo_workspace once and pass workspace_id in every subsequent browser tool call',data.id);
       const result=workspaces.resolve(scope.agent,scope.mode,requested,
         {hasOwnedTabs:!!scope.agent&&agentTabs.owned(scope.agent).length>0});
       if(result.error)return error(res,409,result.error,data?.id??null);
@@ -633,7 +657,7 @@ const server = http.createServer(async (req,res) => {
           const item=agentTabs.identities.resolve(args.tab_id);
           if(!item)return error(res,409,'TAB_HANDLE_STALE_OR_AMBIGUOUS',data?.id??null);
           const owner=agentTabs.owner(args.tab_id);
-          if(owner&&owner!==agent)return error(res,409,'TAB_OWNED_BY_ANOTHER_AGENT',data?.id??null);
+          if(owner&&owner!==agent)return error(res,409,ownershipConflict(owner,agent,{mode:scope.mode,tool:name}),data?.id??null);
           return sendLocalTool(res,data.id,{tab_id:item.id,index_hint:item.index,current:item.current},clientSid,workspaceId);
         }
         if(args.action==='claim'){
@@ -672,7 +696,7 @@ const server = http.createServer(async (req,res) => {
         const entry=agentTabs.identities.resolve(args.tab_id);
         if(!entry)return error(res,409,'TAB_HANDLE_STALE_OR_AMBIGUOUS',data?.id??null);
         const owner=agentTabs.owner(args.tab_id);
-        if(owner&&owner!==agent)return error(res,409,'TAB_OWNED_BY_ANOTHER_AGENT',data?.id??null);
+        if(owner&&owner!==agent)return error(res,409,ownershipConflict(owner,agent,{mode:scope.mode,tool:name}),data?.id??null);
         if(args.action==='close'&&owner!==agent)return error(res,409,'TAB_LEASE_REQUIRED',data?.id??null);
         effectiveName='browser_tabs';effectiveArgs={action:args.action,index:entry.index};
         forwardedBody=Buffer.from(JSON.stringify({...dispatchData,params:{...dispatchData.params,
@@ -705,7 +729,7 @@ const server = http.createServer(async (req,res) => {
       if(!validTabIndex(tabs.index))return error(res,400,'Invalid tab index',data?.id??null);
       if(!preTab)return error(res,409,'TAB_HANDLE_STALE_OR_AMBIGUOUS',data?.id??null);
       const owner=agentTabs.owner(preTab);
-      if(owner&&owner!==agent)return error(res,409,'TAB_OWNED_BY_ANOTHER_AGENT',data?.id??null);
+      if(owner&&owner!==agent)return error(res,409,ownershipConflict(owner,agent,{mode:scope.mode,tool:name}),data?.id??null);
       if(tabs.action==='close'&&agent&&!owner)return error(res,409,'TAB_LEASE_REQUIRED',data?.id??null);
     }
     if(isBrowserCall&&effectiveName!=='browser_tabs'&&(agent||tabLeases.count())){
@@ -730,7 +754,10 @@ const server = http.createServer(async (req,res) => {
         if(!snapshot.currentHandle)
           return error(res,503,'Current tab identity cannot be verified',data?.id??null);
         const decision=agentTabs.allowed(agent,snapshot.currentHandle);
-        if(!decision.ok)return error(res,409,decision.reason,data?.id??null);
+        if(!decision.ok)return error(res,409,
+          decision.reason==='TAB_OWNED_BY_ANOTHER_AGENT'?
+            ownershipConflict(agentTabs.owner(snapshot.currentHandle),agent,{mode:scope.mode,tool:name}):
+            decision.reason,data?.id??null);
         if(agent && !agentTabs.owner(snapshot.currentHandle)){
           const claimed=agentTabs.claim(agent,snapshot.currentHandle);
           if(!claimed.ok)return error(res,409,claimed.reason,data?.id??null);
@@ -814,7 +841,7 @@ const server = http.createServer(async (req,res) => {
     if(isToolsList(data)&&upstream.status===200){
       try{
         const sourceType=String(upstream.headers['content-type']||'application/json');
-        const filtered=filterResponse(upstream.body,sourceType);
+        const filtered=filterResponse(upstream.body,sourceType,{requireWorkspace:res.mcpModern});
         const output=res.mcpModern?modernizeResponse(filtered,sourceType,{cache:true}):filtered;
         res.writeHead(200,{'content-type':sourceType,
           ...(!res.mcpModern?{'mcp-session-id':clientSid}:{}),

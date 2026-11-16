@@ -88,7 +88,7 @@ export function modernizeResponse(raw,contentType,{cache=false}={}){
 }
 export function discoverResult({serverInfo=SERVER_INFO,instructions}={}){
  return {resultType:'complete',supportedVersions:[MODERN_PROTOCOL],capabilities:{tools:{}},
-   instructions:instructions||'Each browser action belongs to a McpGo workspace. Reuse workspace_id from every tool result; without a ChatGPT conversation identity, call mcpgo_workspace first.',
+   instructions:instructions||'McpGo tab isolation: first call mcpgo_workspace to obtain workspace_id; always include that SAME workspace_id in every browser tool call (tabs/new, snapshot, navigate, click, evaluate), even in the same chat. openai/session may rotate between calls. Never use a workspace_id from another agent.',
    ttlMs:0,cacheScope:'private',_meta:{[SERVER_META_KEY]:serverInfo}};
 }
 export function stripModernParams(data){

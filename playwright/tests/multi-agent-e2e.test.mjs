@@ -265,3 +265,33 @@ test('legacy MCP reconnect keeps conversation workspace and never hands its tab 
  await alien.close();
  await second.close();
 });
+
+
+test('legacy reconnects without conversation headers need an explicit workspace capability, not an inferred owner',async()=>{
+ const first=client();await first.init();
+ const opened=await first.tool('browser_tabs',{action:'new',url:'https://legacy-explicit-workspace.example/test'});
+ assert.equal(opened.status,200,JSON.stringify(opened.result));
+ const workspaceId=opened.result.result.structuredContent.workspace_id;
+ const handle=payload(await first.tool('mcpgo_tab_handle',{action:'list',workspace_id:workspaceId})).owned[0];
+ assert.ok(handle);
+ await first.close();
+ let latest=null;
+ for(let i=0;i<20;i++){
+  latest=client();await latest.init();
+  const resumed=await latest.tool('mcpgo_workspace',{workspace_id:workspaceId});
+  assert.equal(resumed.status,200,JSON.stringify(resumed.result));
+  assert.equal(resumed.result.result.structuredContent.workspace_id,workspaceId);
+  const snapshot=await latest.tool('browser_snapshot',{workspace_id:workspaceId});
+  assert.equal(snapshot.status,200,JSON.stringify(snapshot.result));
+  assert.equal(snapshot.result.result.structuredContent.workspace_id,workspaceId);
+  if(i<19)await latest.close();
+ }
+ const attacker=client();await attacker.init();
+ const forbidden=await attacker.tool('mcpgo_tab_action',{action:'select',tab_id:handle});
+ assert.equal(forbidden.status,409);
+ assert.match(JSON.stringify(forbidden.result),/TAB_OWNED_BY_ANOTHER_AGENT/);
+ await attacker.close();
+ const closed=await latest.tool('mcpgo_tab_action',{action:'close',tab_id:handle,workspace_id:workspaceId});
+ assert.equal(closed.status,200,JSON.stringify(closed.result));
+ await latest.close();
+});

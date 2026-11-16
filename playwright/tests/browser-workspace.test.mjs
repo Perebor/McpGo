@@ -64,6 +64,10 @@ test('JSON tool result and strict tool schemas support workspace_id without modi
  const schema=withWorkspaceToolSchema({name:'browser_tabs',description:'Tabs',inputSchema:{type:'object',properties:{action:{type:'string'}},required:['action'],additionalProperties:false}});
  assert.equal(schema.inputSchema.properties.workspace_id.type,'string');
  assert.deepEqual(schema.inputSchema.required,['action']);
+ const mandatory=withWorkspaceToolSchema(schema,{requireWorkspace:true});
+ assert.deepEqual(mandatory.inputSchema.required,['action','workspace_id']);
+ assert.deepEqual(withWorkspaceToolSchema(mandatory,{requireWorkspace:true}),mandatory);
+ assert.ok(!withWorkspaceToolSchema({name:'mcpgo_workspace',inputSchema:{type:'object',properties:{}}},{requireWorkspace:true}).inputSchema.required?.includes('workspace_id'));
  assert.equal(schema.inputSchema.additionalProperties,false);
  assert.deepEqual(withWorkspaceToolSchema(schema),schema);
  const schemaWithOutput=withWorkspaceToolSchema({name:'browser_snapshot',

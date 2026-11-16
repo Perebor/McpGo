@@ -64,7 +64,10 @@ export class BrowserWorkspaceRegistry {
     if(!currentAgent||mode==='legacy')return {error:'WORKSPACE_REQUIRES_MCP_SESSION'};
     if(mode==='stable')return {error:'WORKSPACE_STABLE_SCOPE_CONFLICT'};
     if(hasOwnedTabs)return {error:'WORKSPACE_CURRENT_AGENT_HAS_TABS'};
-    if(mode!=='transport'&&mode!=='workspace')return {error:'WORKSPACE_SCOPE_UNSUPPORTED'};
+    // OpenAI per-request session hints may rotate within one conversation.
+    // Allow an explicit high-entropy workspace capability to resume safely.
+    if(mode!=='transport'&&mode!=='workspace'&&mode!=='observed')
+      return {error:'WORKSPACE_SCOPE_UNSUPPORTED'};
     return {...target,resumed:true,oldAgent:currentAgent};
   }
   adopt(oldAgent,newAgent){

@@ -252,10 +252,12 @@ class SetupEngineTests(unittest.TestCase):
         source=(Path(__file__).parents[2]/"native/OnboardingView.swift").read_text()
         self.assertIn('withBundleIdentifier:"com.google.Chrome"',source)
         self.assertIn('withApplicationAt:chrome',source)
-        # A normal https:// Chrome download may use the default browser; only
-        # chrome:// and chrome-extension:// deep links must force Google Chrome.
-        deep_links=source[source.index('chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html'):]
-        self.assertNotIn('NSWorkspace.shared.open(url)',deep_links)
+        # The official store must open explicitly in Google Chrome where
+        # extension permissions are granted; do not launch the obsolete
+        # chrome-extension:// status page that was never a valid installer.
+        self.assertIn('https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm',source)
+        self.assertIn('withApplicationAt:chrome',source)
+        self.assertNotIn('chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/status.html',source)
 
     def test_readonly_browser_mcp_probe_parses_sse_and_checks_real_result(self):
         import http.server
