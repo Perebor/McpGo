@@ -65,7 +65,7 @@
 | `terminal/tests/platform.test.cjs` | 44 | `640becf3dc739b69` |
 | `terminal/tests/resource-locks.test.cjs` | 47 | `183d0b37ff502f1c` |
 | `terminal/tests/resource-policy.test.cjs` | 27 | `ff465931e3fb420c` |
-| `terminal/tests/stateless-mcp.test.mjs` | 226 | `98ffa34cfecf4b13` |
+| `terminal/tests/stateless-mcp.test.mjs` | 241 | `ff895759e6dca770` |
 | `playwright/action-guard.mjs` | 96 | `a60816800a69c071` |
 | `playwright/agent-scope.mjs` | 76 | `c537f626aa0b2331` |
 | `playwright/browser-session-manager.mjs` | 114 | `005b3f1998417f04` |

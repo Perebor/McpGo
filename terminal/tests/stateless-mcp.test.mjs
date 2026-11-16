@@ -189,7 +189,22 @@ test('four independent jobs run concurrently without a global resource mutex',as
  }));
 });
 
-test('interactive PTY and local dashboard use the same MCP HTTP listener',async()=>{
+// The native macOS zsh PTY runs the user's interactive startup environment.
+// Ubuntu CI has system-wide zsh compinit prompts that can steal terminal input;
+// Windows exercises its own ConPTY tests. Keep the real PTY test on macOS.
+test('unified listener advertises PTY tools and local dashboard without creating a shell',async()=>{
+ const names=(await tool('tools/list')).tools.map(t=>t.name);
+ for(const name of ['terminal_create','terminal_send','terminal_read','terminal_interrupt','terminal_close'])
+   assert.ok(names.includes(name),name);
+ const dashboard=await fetch('http://127.0.0.1:'+port+'/');
+ assert.equal(dashboard.status,200);
+ assert.match(await dashboard.text(),/терминал/i);
+ const unauthorized=await fetch('http://127.0.0.1:'+port+'/api/sessions');
+ assert.equal(unauthorized.status,401);
+});
+
+test('interactive PTY and local dashboard use the same MCP HTTP listener',
+  {skip:process.platform!=='darwin'?'native macOS PTY test':false},async()=>{
  const names=(await tool('tools/list')).tools.map(t=>t.name);
  for(const name of ['terminal_create','terminal_send','terminal_read','terminal_interrupt','terminal_close'])
   assert.ok(names.includes(name),name);
