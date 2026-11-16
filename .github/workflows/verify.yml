@@ -9,7 +9,10 @@ permissions:
 
 jobs:
   verify:
-    runs-on: macos-15
+    # Run cross-platform tests on available Linux hosts: macOS runner queues
+    # can leave every push untested. Native SwiftUI is separately checked
+    # by the signed macOS release builder and optional manual workflow.
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +43,20 @@ jobs:
           node --check dashboard/server.mjs
           node --check autosend/server.mjs
           node --check playwright/restricted-proxy.mjs
+      - name: Launcher and installer syntax
+        run: |
+          bash -n scripts/launch-macos.sh playwright/start.sh playwright/start-tunnel.sh
+          python3 -m py_compile scripts/setup_macos.py onboarding/cli.py onboarding/setup_engine.py
+          python3 -c "import plistlib; plistlib.load(open('native/Info.plist','rb')); print('Info.plist OK')"
+
+  # Mac-only SwiftUI compilation can be requested explicitly. Normal pushes
+  # remain verified even while hosted macOS capacity is unavailable.
+  macos-ui-typecheck:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
       - name: SwiftUI compile check
         run: |
           xcrun swiftc -parse-as-library -typecheck \
@@ -48,8 +65,3 @@ jobs:
             native/main.swift native/Messaging.swift native/TunnelSettings.swift \
             native/TunnelHelp.swift native/InteractiveButtonStyle.swift \
             native/SkillsView.swift native/ScheduledMessages.swift native/OnboardingView.swift
-      - name: Launcher and installer syntax
-        run: |
-          bash -n scripts/launch-macos.sh playwright/start.sh playwright/start-tunnel.sh
-          python3 -m py_compile scripts/setup_macos.py onboarding/cli.py onboarding/setup_engine.py
-          plutil -lint native/Info.plist
