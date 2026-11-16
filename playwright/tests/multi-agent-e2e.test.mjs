@@ -236,3 +236,32 @@ test('owned tab is restored even if the active tab has duplicate URLs',async()=>
  assert.equal(owned.current,true);
  await owner.close();await other.close();
 });
+
+test('legacy MCP reconnect keeps conversation workspace and never hands its tab to another chat',async()=>{
+ const headers={'x-mcpgo-conversation-id':'legacy-conversation-reconnect-123'};
+ const first=client(headers);await first.init();
+ const opened=await first.tool('browser_tabs',{action:'new',url:'https://legacy-reconnect.example/chat'});
+ assert.equal(opened.status,200,JSON.stringify(opened.result));
+ const workspace=opened.result.result.structuredContent.workspace_id;
+ const owned=payload(await first.tool('mcpgo_tab_handle',{action:'list'})).owned;
+ assert.equal(owned.length,1);
+ await first.close();
+ // Some ChatGPT clients reconnect for the next tool call, even inside the same chat.
+ const second=client(headers);await second.init();
+ const resumed=await second.tool('mcpgo_workspace',{});
+ assert.equal(resumed.status,200,JSON.stringify(resumed.result));
+ assert.equal(resumed.result.result.structuredContent.workspace_id,workspace);
+ const clickedAgain=await second.tool('browser_click',{target:'legacy-reconnect'});
+ assert.equal(clickedAgain.status,200,JSON.stringify(clickedAgain.result));
+ assert.equal(clicked.at(-1).url,'https://legacy-reconnect.example/chat');
+ // Different conversation identities must remain isolated across transport sessions.
+ const alien=client({'x-mcpgo-conversation-id':'legacy-conversation-other-456'});
+ await alien.init();
+ const forbidden=await alien.tool('mcpgo_tab_action',{action:'select',tab_id:owned[0]});
+ assert.equal(forbidden.status,409,JSON.stringify(forbidden.result));
+ assert.match(JSON.stringify(forbidden.result),/TAB_OWNED_BY_ANOTHER_AGENT/);
+ const alienWorkspace=await alien.tool('mcpgo_workspace',{});
+ assert.notEqual(alienWorkspace.result.result.structuredContent.workspace_id,workspace);
+ await alien.close();
+ await second.close();
+});

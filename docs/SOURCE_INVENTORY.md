@@ -101,7 +101,7 @@
 | `playwright/tests/metadata-timeout.test.mjs` | 47 | `7d9d4086c136cd68` |
 | `playwright/tests/modern-proxy-e2e.test.mjs` | 188 | `c08a96a0fe24588f` |
 | `playwright/tests/modern-strict-cutover.test.mjs` | 78 | `a2b7f0b9852c66a0` |
-| `playwright/tests/multi-agent-e2e.test.mjs` | 238 | `f2107b18d51d4b7c` |
+| `playwright/tests/multi-agent-e2e.test.mjs` | 267 | `b02464303bb26e0d` |
 | `playwright/tests/portable-tab-identity.test.mjs` | 42 | `91750e2d24731a10` |
 | `playwright/tests/session-recovery.test.mjs` | 144 | `64eee54c47a09cca` |
 | `playwright/tests/tab-lease-manager.test.mjs` | 31 | `38bfc0997c631755` |
