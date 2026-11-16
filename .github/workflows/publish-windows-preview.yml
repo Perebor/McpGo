@@ -1,0 +1,92 @@
+name: Publish verified Windows preview
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful Windows preview CI run ID holding the unsigned installer'
+        type: string
+        required: true
+      expected_sha:
+        description: '40-character Git commit SHA of the CI build to publish'
+        type: string
+        required: true
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact successful Windows CI source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          CI_RUN: ${{ inputs.run_id }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN" =~ ^[0-9]{5,16}$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git merge-base --is-ancestor "$EXPECTED_SHA" HEAD
+          gh api "repos/$GH_REPO/actions/runs/$CI_RUN" --jq '{status,conclusion,head_sha,head_repository:.head_repository.full_name,name}' > /tmp/verified-ci.json
+          jq -e --arg sha "$EXPECTED_SHA" --arg repo "$GH_REPO" '
+            .status=="completed" and .conclusion=="success" and
+            .head_sha==$sha and .head_repository==$repo and .name=="Windows preview"
+          ' /tmp/verified-ci.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: McpGo-Windows-unsigned-preview
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: windows-artifact
+      - name: Audit unsigned installer, create normalized asset and SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,re,struct
+          version=json.loads(Path('windows/package.json').read_text())['version']
+          assert re.fullmatch(r'\d+\.\d+\.\d+-preview\.\d+',version), 'Invalid Windows preview version'
+          source=Path('windows-artifact')/f'McpGo Setup {version}.exe'
+          assert source.is_file() and not source.is_symlink(), 'CI installer missing'
+          assert source.stat().st_size > 80_000_000, 'Installer unexpectedly small'
+          with source.open('rb') as stream:
+              header=stream.read(4096)
+          assert header[:2]==b'MZ', 'Not an executable'
+          offset=struct.unpack_from('<I',header,0x3c)[0]
+          assert header[offset:offset+4]==b'PE\x00\x00', 'Invalid PE header'
+          assert struct.unpack_from('<H',header,offset+4)[0] in (0x14c,0x8664), 'Unexpected NSIS architecture'
+          dest=Path('release-assets')/f'McpGo.Setup.{version}.exe'
+          dest.parent.mkdir(exist_ok=True)
+          source.replace(dest)
+          digest=hashlib.file_digest(dest.open('rb'),'sha256').hexdigest()
+          (dest.parent/(dest.name+'.sha256')).write_text(f'{digest}  {dest.name}\n')
+          print(f'Verified {dest.name}: {dest.stat().st_size} bytes, SHA-256 {digest}')
+          PY
+      - name: Publish unsigned preview from exact audited CI artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./windows/package.json').version")"
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to overwrite an existing installer" >&2
+            exit 1
+          fi
+          gh release create "$tag" \
+            "release-assets/McpGo.Setup.$version.exe" \
+            "release-assets/McpGo.Setup.$version.exe.sha256" \
+            --prerelease --latest=false \
+            --title "McpGo Windows $version — Playwright workspace fix" \
+            --notes "Experimental unsigned Windows 11 x64 installer. Playwright Extension setup and MCP workspace ownership fixes. Download the .exe and matching .sha256. The binary was audited by the exact successful Windows CI run specified for this workflow. Microsoft SmartScreen or organizational policies may block unsigned binaries; do not disable system protections."
+          gh release view "$tag" --json isDraft,isPrerelease,assets,url \
+            --jq '{isDraft,isPrerelease,url,assets:[.assets[]|{name,size}]}'
