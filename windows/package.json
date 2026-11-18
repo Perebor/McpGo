@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.4",
+  "version": "2.1.0-preview.5",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -132,6 +132,7 @@
       "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
+      "include": "assets/onboarding-installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
