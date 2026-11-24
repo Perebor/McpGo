@@ -38,6 +38,7 @@ jobs:
             .status=="completed" and .conclusion=="success" and
             .head_sha==$sha and .head_repository==$repo and .name=="Windows preview"
           ' /tmp/verified-ci.json
+          git checkout --detach "$EXPECTED_SHA"
       - uses: actions/download-artifact@v4
         with:
           name: McpGo-Windows-unsigned-preview
@@ -82,11 +83,11 @@ jobs:
             echo "Release $tag already exists; refusing to overwrite an existing installer" >&2
             exit 1
           fi
-          gh release create "$tag" \
+          gh release create "$tag" --target "$(git rev-parse HEAD)" \
             "release-assets/McpGo.Setup.$version.exe" \
             "release-assets/McpGo.Setup.$version.exe.sha256" \
             --prerelease --latest=false \
-            --title "McpGo Windows $version — Надёжность подключения" \
-            --notes "Experimental unsigned Windows 11 x64 installer. Improved first-time setup recovery, connection health and Playwright performance. Download the .exe and matching .sha256. The binary was audited by the exact successful Windows CI run specified for this workflow. Microsoft SmartScreen or organizational policies may block unsigned binaries; do not disable system protections."
+            --title "McpGo Windows $version — Мастер подключения" \
+            --notes "Experimental unsigned Windows 11 x64 installer. Seven-step onboarding based on macOS, original setup screenshots, ChatGPT plugin connection and Windows diagnostics. Download the .exe and matching .sha256. The binary was audited by the exact successful Windows CI run specified for this workflow. Microsoft SmartScreen or organizational policies may block unsigned binaries; do not disable system protections."
           gh release view "$tag" --json isDraft,isPrerelease,assets,url \
             --jq '{isDraft,isPrerelease,url,assets:[.assets[]|{name,size}]}'

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('mcpgo',Object.freeze({
  copyConnectionTest:()=>ipcRenderer.invoke('mcpgo:copy-connection-test'),
  verifyConnection:()=>ipcRenderer.invoke('mcpgo:verify-connection'),
  recoverTunnel:name=>ipcRenderer.invoke('mcpgo:recover-tunnel',name),
+ guideLink:kind=>ipcRenderer.invoke('mcpgo:guide-link',kind),
+ copyTunnel:name=>ipcRenderer.invoke('mcpgo:copy-tunnel',name),
  onboard:(action,payload)=>ipcRenderer.invoke('mcpgo:onboard',action,payload),
  exportDiagnostics:()=>ipcRenderer.invoke('mcpgo:export-diagnostics'),
  onStatus:callback=>{

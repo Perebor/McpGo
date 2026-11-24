@@ -1,7 +1,8 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {app,BrowserWindow,Tray,Menu,ipcMain,safeStorage,nativeImage,shell,dialog,clipboard}=require('electron');
-const {Runtime,assertTunnelId}=require('./runtime.cjs');
+const {Runtime,assertTunnelId,runtimePaths,terminalEndpoint}=require('./runtime.cjs');
+const {checkTunnelDoctor}=require('./wizard-doctor.cjs');
 const {readSkill,textForChat}=require('./skills.cjs');
 const {localRequest}=require('./local-api.cjs');
 const {onboarding}=require('./onboarding.cjs');
@@ -54,6 +55,17 @@ function openWindow(){
  window.on('close',event=>{if(!quitting){event.preventDefault();window.hide()}});
 }
 ipcMain.handle('mcpgo:status',()=>publicStatus());
+const guideLinks=Object.freeze({chrome:'https://www.google.com/chrome/',organization:'https://platform.openai.com/settings/organization/general',workspace:'https://chatgpt.com/#settings',admin:'https://platform.openai.com/settings/organization/admin-keys',roles:'https://platform.openai.com/settings/organization/people/roles',tunnels:'https://platform.openai.com/settings/organization/tunnels','api-keys':'https://platform.openai.com/settings/organization/api-keys',plugins:'https://chatgpt.com/plugins'});
+ipcMain.handle('mcpgo:guide-link',(_event,kind)=>{
+ if(!Object.hasOwn(guideLinks,kind))throw Error('INVALID_GUIDE_LINK');
+ return shell.openExternal(guideLinks[kind]);
+});
+ipcMain.handle('mcpgo:copy-tunnel',(_event,name)=>{
+ if(!['terminal','browser'].includes(name))throw Error('INVALID_TUNNEL_NAME');
+ const current=publicStatus();
+ clipboard.writeText(assertTunnelId(name==='terminal'?current.terminal?.id:current.browserTunnel?.id));
+ return true;
+});
 ipcMain.handle('mcpgo:copy-connection-test',()=>{
  clipboard.writeText('Проверь McpGo именно из этого чата: вызови Terminal с безвредной командой echo MCPGO_OK и Playwright: сначала mcpgo_workspace, затем browser_tabs(action=list) с возвращённым workspace_id. Не открывай и не закрывай вкладки. Сообщи отдельно, какие вызовы реально прошли, какие отсутствуют или завершились ошибкой. Не заменяй проверку предположением.');
  return true;
@@ -118,9 +130,9 @@ ipcMain.handle('mcpgo:service-action',(_event,service,route,body)=>localRequest(
 ipcMain.handle('mcpgo:onboard',(_event,action,payload)=>{
  const run=settingsSaveTail.then(async()=>{
  register(payload);diag('windows.ui.onboard.requested',{action,keys:Object.keys(payload||{})});
- if(!['status','connection-preflight','browser-check','provision','runtime-auto','runtime-projects','discover','runtime-inspect','runtime-recover-key','verify-remote'].includes(action))
+ if(!['status','connection-preflight','browser-check','provision','runtime-auto','runtime-projects','discover','runtime-inspect','runtime-recover-key','verify-remote','import','doctor','chatgpt-instructions','dismiss'].includes(action))
   throw Error('UNSUPPORTED_ONBOARDING_ACTION');
- if(['provision','runtime-auto','runtime-recover-key'].includes(action)&&payload?.confirmed!==true)
+ if(['provision','runtime-auto','runtime-recover-key','import','chatgpt-instructions','dismiss'].includes(action)&&payload?.confirmed!==true)
   throw Error('EXPLICIT_CONFIRMATION_REQUIRED');
  const root=runtime.resourceRoot;
  let terminal,browser;
@@ -135,6 +147,18 @@ ipcMain.handle('mcpgo:onboard',(_event,action,payload)=>{
   browser=assertTunnelId(local.tunnels?.browser?.id);
   if(terminal===browser)throw Error('DUPLICATE_TUNNEL_ID');
  }
+ if(action==='doctor'){
+  const paths=runtimePaths(root,app.getPath('userData'));
+  const checks={};
+  for(const name of ['terminal','browser']){
+   try{
+    const credential=await settings.credential(name==='terminal'?'terminal':'browserTunnel');
+    const url=name==='terminal'?terminalEndpoint(paths.config):'http://127.0.0.1:8940/mcp';
+    checks[name]=await checkTunnelDoctor({client:paths.tunnelClient,credential,url});
+   }catch{checks[name]={ready:false,reason:'Локальная конфигурация или ключ недоступны.'}}
+  }
+  return {checks,note:'Doctor проверяет транспорт, а не вызов плагина ChatGPT.'};
+ }
  const result=await onboarding({action,payload,root,userData:app.getPath('userData'),
   python:path.join(root,'python','python.exe')});
  if(action==='connection-preflight'){
@@ -147,8 +171,14 @@ ipcMain.handle('mcpgo:onboard',(_event,action,payload)=>{
    throw Error('RUNTIME_KEY_MISSING');
   await settings.save({terminal:{id:terminal,key:result.runtimeKey},
     browserTunnel:{id:browser,key:result.runtimeKey}});
+  let remoteVerified=false;
+  try{
+   const verification=await onboarding({action:'verify-remote',payload:{runtimeKey:result.runtimeKey},root,
+    userData:app.getPath('userData'),python:path.join(root,'python','python.exe')});
+   remoteVerified=verification.verified?.terminal===true&&verification.verified?.browser===true;
+  }catch{diag('windows.onboarding.remote_verification_failed')}
   await runtime.restart();publish();
-  return {ok:true,configured:true};
+  return {ok:true,configured:true,remoteVerified};
  }
  return result;
  });

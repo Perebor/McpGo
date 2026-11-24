@@ -3,7 +3,7 @@ const path=require('node:path');
 const {spawn}=require('node:child_process');
 const {record,register,scrub}=require('./diagnostics.cjs');
 const ACTIONS=new Set(['status','connection-preflight','browser-check','discover','provision','import','runtime-projects',
-  'runtime-inspect','runtime-auto','runtime-recover-key','verify-remote','doctor','export-diagnostics']);
+  'runtime-inspect','runtime-auto','runtime-recover-key','verify-remote','chatgpt-instructions','dismiss','export-diagnostics']);
 async function onboarding({action,payload,root,userData,python}){
  if(!ACTIONS.has(action))throw Error('UNSUPPORTED_ONBOARDING_ACTION');
  if(!payload||typeof payload!=='object'||Array.isArray(payload))throw Error('INVALID_ONBOARDING_INPUT');

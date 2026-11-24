@@ -20,6 +20,37 @@ def check_pe(file:pathlib.Path,allowed_archs=(0x8664,))->None:
     arch=struct.unpack_from("<H",head,offset+4)[0]
     if arch not in allowed_archs:raise RuntimeError("Unexpected PE architecture: "+str(file))
 
+def verify_onboarding_asar(archive:pathlib.Path)->None:
+    # ASAR header is a Chromium pickle containing the JSON file tree.
+    # Compare the packaged images with the original macOS guide, not a copy.
+    with archive.open("rb") as stream:
+        prefix=stream.read(8)
+        if len(prefix)!=8 or struct.unpack_from("<I",prefix)[0]!=4:
+            raise RuntimeError("Invalid ASAR header")
+        header_size=struct.unpack_from("<I",prefix,4)[0]
+        if not 8<=header_size<=16*1024*1024:
+            raise RuntimeError("Invalid ASAR header size")
+        header=stream.read(header_size)
+        json_size=struct.unpack_from("<I",header,4)[0]
+        tree=json.loads(header[8:8+json_size])
+        def read_entry(name):
+            entry=tree
+            for part in name.split("/"):
+                entry=entry["files"][part]
+            if entry.get("unpacked") or "offset" not in entry:
+                raise RuntimeError("Onboarding file not stored in ASAR: "+name)
+            stream.seek(8+header_size+int(entry["offset"]))
+            return stream.read(entry["size"])
+        for image in sorted((ROOT/"assets/onboarding").glob("*.png")):
+            if read_entry("app/onboarding-images/"+image.name)!=image.read_bytes():
+                raise RuntimeError("Packaged onboarding image mismatch: "+image.name)
+        html=read_entry("app/index.html").decode("utf8")
+        if sorted(re.findall(r'data-wizard-page="([0-6])"',html))!=list("0123456"):
+            raise RuntimeError("Seven-step wizard missing from packaged app")
+        if not read_entry("app/wizard-doctor.cjs"):
+            raise RuntimeError("Windows onboarding diagnostics missing")
+    print("Verified packaged seven-step wizard and original onboarding images")
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--directory",default=str(ROOT/"release/windows/win-unpacked"))
@@ -52,6 +83,7 @@ def main():
     if not (runtime/"onboarding_cli.py").is_file():missing.append("onboarding_cli.py")
     if not (base/"resources/app.asar").is_file():missing.append("app.asar")
     if missing:raise RuntimeError("Missing packaged inputs:\n"+"\n".join(missing))
+    verify_onboarding_asar(base/"resources/app.asar")
     check_pe(base/"McpGo.exe")
     for name in ("node/node.exe","python/python.exe","tunnel/tunnel-client.exe"):
         check_pe(runtime/name)

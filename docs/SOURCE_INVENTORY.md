@@ -185,25 +185,28 @@
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
 | `windows/README.md` | 194 | `fcc58f81019227ed` |
 | `windows/app/diagnostics.cjs` | 62 | `f2c012db7dac4e6e` |
-| `windows/app/index.html` | 107 | `bc0890c56382fc1c` |
+| `windows/app/index.html` | 106 | `6b0655332b8960e5` |
 | `windows/app/local-api.cjs` | 46 | `92cb6a96f192769c` |
-| `windows/app/main.cjs` | 199 | `ad3ea0aaee242807` |
-| `windows/app/onboarding.cjs` | 63 | `1d4dcb0961147f60` |
-| `windows/app/preload.cjs` | 29 | `ed580b02f8c560d7` |
-| `windows/app/renderer.js` | 453 | `0002180d243ec57b` |
+| `windows/app/main.cjs` | 229 | `18da2848df6b79e7` |
+| `windows/app/onboarding.cjs` | 63 | `bdd55607e178d03b` |
+| `windows/app/preload.cjs` | 31 | `e292e58fdcac2f8c` |
+| `windows/app/renderer.js` | 602 | `aa947acbeb1ca07e` |
 | `windows/app/runtime.cjs` | 499 | `424e82ca05a15be7` |
 | `windows/app/settings.cjs` | 129 | `0c7cf71254ce19a7` |
 | `windows/app/skills.cjs` | 21 | `de7909af66e28156` |
-| `windows/app/style.css` | 147 | `c6d64edb75d3e456` |
+| `windows/app/style.css` | 160 | `fb839b597d10b459` |
 | `windows/app/updates.cjs` | 54 | `09dc73bf45d81206` |
-| `windows/onboarding_cli.py` | 138 | `9e1f145d18a916bb` |
-| `windows/package-lock.json` | 3682 | `be59953ed4b9478c` |
-| `windows/package.json` | 159 | `2e1fb932b4c3b5ae` |
+| `windows/app/wizard-doctor.cjs` | 15 | `18016e0c400ee70b` |
+| `windows/onboarding_cli.py` | 141 | `ff9d2814a868423a` |
+| `windows/package-lock.json` | 3682 | `b06140765ad74a33` |
+| `windows/package.json` | 160 | `78e8313e317e6e13` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
 | `windows/tests/diagnostics.test.cjs` | 41 | `067b0b874c1ae6cc` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
+| `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
+| `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
 | `windows/tests/package.test.cjs` | 84 | `2adedcaf3f3a6a46` |
 | `windows/tests/python-runtime.test.cjs` | 48 | `9ec42ea867eb3cc9` |
 | `windows/tests/runtime.test.cjs` | 157 | `64fad290003c06fe` |
@@ -212,8 +215,8 @@
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 62 | `97f221e8d2723fef` |
 | `windows/tests/updates.test.cjs` | 36 | `669ce88d7f88ea64` |
-| `windows/verify-build.py` | 85 | `f13639fa98771100` |
+| `windows/verify-build.py` | 117 | `f40b9da766c1957e` |
 
-Всего файлов в выбранном source-only срезе: **207**.
+Всего файлов в выбранном source-only срезе: **210**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

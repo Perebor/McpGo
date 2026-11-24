@@ -28,7 +28,7 @@ from diagnostics import event, register_secrets, log_exception, environment_snap
 
 ACTIONS={"status","connection-preflight","browser-check","discover","provision","import","runtime-projects",
          "runtime-inspect","runtime-auto","runtime-recover-key",
-         "verify-remote","doctor","export-diagnostics"}
+         "verify-remote","chatgpt-instructions","dismiss","export-diagnostics"}
 
 class WindowsSetup(SetupEngine):
     def __init__(self):
@@ -67,6 +67,8 @@ class WindowsSetup(SetupEngine):
                 "tunnels":{name:{"id":item.get("id",""),"remoteVerified":bool(item.get("remoteVerified"))}
                            for name,item in state.get("tunnels",{}).items() if name in ("terminal","browser")},
                 "pending":state.get("pending"),
+                "chatgptInstructionsViewed":bool(state.get("chatgptInstructionsViewed")),
+                "wizardDismissed":bool(state.get("wizardDismissed")),
                 "runtimeProvision":{"status":str(journal.get("status",""))[:64],
                                     "pending":str(journal.get("pending") or "")[:64],
                                     "keyRecoveryAttempted":bool(journal.get("keyRecoveryAttempted")),
@@ -113,7 +115,8 @@ def main():
                  "runtime-auto":engine.runtime_auto,
                  "runtime-recover-key":engine.runtime_recover_key,
                  "verify-remote":engine.verify_remote,
-                 "doctor":engine.doctor}
+                 "chatgpt-instructions":engine.note_chatgpt,
+                 "dismiss":engine.dismiss}
         if action=="export-diagnostics":
             result=export_zip(payload.get("destination", ""))
         elif action=="browser-check":

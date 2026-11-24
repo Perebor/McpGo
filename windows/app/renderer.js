@@ -147,6 +147,7 @@ function render(data) {
   else if(!data.terminal?.configured||!data.browserTunnel?.configured)navigate('onboarding');
  }
  lastOverview=data;
+ syncWizardIds(data);
  updateSummary(data.status||{},data.readiness||{});
  const diagnostic=$('connection-diagnostic'),r=data.readiness||{};
  if(diagnostic)diagnostic.textContent=[
@@ -246,6 +247,113 @@ void checkBrowserCompatibility();
 
 
 const wizard=$('wizard-status');
+let wizardStep=0,wizardTouched=false,wizardBusy=false;
+function showWizardStep(step,manual=true){
+ if(manual&&wizardBusy)return;
+ wizardStep=Math.max(0,Math.min(6,step));
+ if(manual)wizardTouched=true;
+ for(const page of document.querySelectorAll('[data-wizard-page]'))page.hidden=Number(page.dataset.wizardPage)!==wizardStep;
+ for(const button of document.querySelectorAll('[data-wizard-step]')){
+  if(Number(button.dataset.wizardStep)===wizardStep)button.setAttribute('aria-current','step');
+  else button.removeAttribute('aria-current');
+ }
+ $('wizard-progress').textContent='Шаг '+(wizardStep+1)+' из 7';
+ $('wizard-back').disabled=wizardStep===0;
+ $('wizard-next').hidden=wizardStep===6;
+ $('wizard-confirm-plugins').disabled=!(lastOverview?.terminal?.configured&&lastOverview?.browserTunnel?.configured);
+}
+function wizardMode(importing){
+ $('wizard-create-mode').setAttribute('aria-pressed',String(!importing));
+ $('wizard-import-mode').setAttribute('aria-pressed',String(importing));
+ $('wizard-account-create').hidden=importing;$('wizard-account-import').hidden=!importing;
+ $('wizard-tunnel-create').hidden=importing;
+ if(importing)$('admin-key').value='';
+}
+function syncWizardIds(data){
+ for(const [name,field] of [['terminal','terminal'],['browser','browserTunnel']]){
+  const id=data?.[field]?.id||'';
+  const input=$('wizard-'+name+'-id');
+  if(id&&(!input.value||document.activeElement!==input&&input.value===input.dataset.savedId))input.value=id;
+  input.dataset.savedId=id;
+  $('wizard-plugin-'+name).textContent=id||'—';
+  $('wizard-copy-'+name).disabled=!id;
+ }
+ $('wizard-confirm-plugins').disabled=!(data?.terminal?.configured&&data?.browserTunnel?.configured);
+}
+for(const button of document.querySelectorAll('[data-wizard-step]'))button.onclick=()=>showWizardStep(Number(button.dataset.wizardStep));
+for(const button of document.querySelectorAll('[data-guide-link]'))button.onclick=()=>window.mcpgo.guideLink(button.dataset.guideLink).catch(e=>wizard.textContent=e.message);
+$('wizard-back').onclick=()=>showWizardStep(wizardStep-1);
+$('wizard-next').onclick=()=>showWizardStep(wizardStep+1);
+$('wizard-create-mode').onclick=()=>wizardMode(false);
+$('wizard-import-mode').onclick=()=>wizardMode(true);
+showWizardStep(0,false);
+async function wizardAction(fn){
+ if(wizardBusy)return;
+ wizardBusy=true;
+ const controls=[...document.querySelectorAll('[data-wizard-page] button')];
+ const prior=controls.map(button=>button.disabled);
+ controls.forEach(button=>button.disabled=true);
+ try{await fn()}catch(e){wizard.textContent=e.message}
+ finally{wizardBusy=false;controls.forEach((button,i)=>button.disabled=prior[i]);if(lastOverview)syncWizardIds(lastOverview)}
+}
+$('wizard-import-tunnels').onclick=()=>wizardAction(async()=>{
+ const terminalId=$('wizard-terminal-id').value.trim(),browserId=$('wizard-browser-id').value.trim();
+ if(!window.confirm('Подключить два указанных Tunnel ID?'))return;
+ await window.mcpgo.onboard('import',{terminalId,browserId,confirmed:true});
+ $('terminal-id').value=terminalId;$('browser-id').value=browserId;
+ wizard.textContent='Tunnel ID сохранены в мастере. Введи Runtime API Key.';
+});
+$('wizard-save-runtime').onclick=()=>wizardAction(async()=>{
+ const terminalId=$('wizard-terminal-id').value.trim(),browserId=$('wizard-browser-id').value.trim();
+ const key=$('wizard-runtime-key').value.trim();
+ if(!key.startsWith('sk-'))throw Error('Введи действительный Runtime API Key.');
+ if(terminalId===browserId)throw Error('Нужны два разных Tunnel ID.');
+ if(!window.confirm('Сохранить указанные туннели и Runtime API Key?'))return;
+ const current=await window.mcpgo.onboard('status',{});
+ if(current.tunnels?.terminal?.id!==terminalId||current.tunnels?.browser?.id!==browserId)
+  await window.mcpgo.onboard('import',{terminalId,browserId,confirmed:true});
+ await window.mcpgo.onboard('verify-remote',{runtimeKey:key});
+ const result=await window.mcpgo.save({terminal:{id:terminalId,key},browserTunnel:{id:browserId,key}});
+ $('wizard-runtime-key').value='';$('admin-key').value='';
+ $('terminal-id').value=terminalId;$('browser-id').value=browserId;
+ render(result);wizard.textContent='Ключ сохранён.';showWizardStep(3,false);
+});
+$('wizard-start-services').onclick=()=>wizardAction(async()=>{
+ const result=await window.mcpgo.restart();render(result);
+ $('wizard-services-status').textContent='Запуск запрошен. Готовность проверяется отдельно.';
+ showWizardStep(4,false);
+});
+$('wizard-install-extension').onclick=()=>window.mcpgo.extensionStore().catch(e=>wizard.textContent=e.message);
+$('wizard-activate-extension').onclick=()=>wizardAction(async()=>{
+ const token=$('wizard-extension-token').value.trim();
+ if(!token&&!lastOverview?.playwrightExtension?.configured)throw Error('Вставь токен расширения.');
+ if(token){const result=await window.mcpgo.save({browser:$('browser').value,playwrightExtension:{token}});$('wizard-extension-token').value='';render(result)}
+ const result=await window.mcpgo.verifyConnection();render(result);
+ $('wizard-browser-status').textContent=result.readiness?.chrome===true?'Доступ к вкладкам подтверждён.':'Доступ к вкладкам пока не подтверждён.';
+ if(result.readiness?.chrome===true)showWizardStep(5,false);
+});
+async function wizardVerify(){
+ const result=await window.mcpgo.verifyConnection();render(result);
+ $('wizard-browser-status').textContent=result.readiness?.chrome===true?'Вкладки доступны.':'Доступ к вкладкам не подтверждён.';
+ wizard.textContent='Проверка локального соединения выполнена. ChatGPT проверяется отдельно.';
+}
+$('wizard-verify-local').onclick=()=>wizardAction(wizardVerify);
+$('wizard-final-local').onclick=()=>wizardAction(wizardVerify);
+$('wizard-copy-terminal').onclick=()=>window.mcpgo.copyTunnel('terminal').then(()=>wizard.textContent='Tunnel ID скопирован.').catch(e=>wizard.textContent=e.message);
+$('wizard-copy-browser').onclick=()=>window.mcpgo.copyTunnel('browser').then(()=>wizard.textContent='Tunnel ID скопирован.').catch(e=>wizard.textContent=e.message);
+$('wizard-confirm-plugins').onclick=()=>wizardAction(async()=>{
+ await window.mcpgo.onboard('chatgpt-instructions',{confirmed:true});
+ wizard.textContent='Инструкция подтверждена. Выполни реальный тест из ChatGPT.';
+ showWizardStep(6,false);
+});
+$('wizard-doctor').onclick=()=>wizardAction(async()=>{
+ const result=await window.mcpgo.onboard('doctor',{});
+ wizard.textContent=['Terminal: '+(result.checks?.terminal?.ready?'готов':result.checks?.terminal?.reason||'не подтверждён'),'Browser: '+(result.checks?.browser?.ready?'готов':result.checks?.browser?.reason||'не подтверждён'),result.note].join(' · ');
+});
+$('wizard-copy-test').onclick=()=>window.mcpgo.copyConnectionTest().then(()=>wizard.textContent='Вставь скопированный тест в нужный чат ChatGPT.').catch(e=>wizard.textContent=e.message);
+$('wizard-dismiss').onclick=()=>wizardAction(async()=>{
+ await window.mcpgo.onboard('dismiss',{confirmed:true});navigate('overview');
+});
 async function resumeWizard(){
  try{
   const data=await window.mcpgo.onboard('status',{});
@@ -255,6 +363,15 @@ async function resumeWizard(){
    if(id&&!$(field).value)$(field).value=id;
   }
   const key=data.runtimeProvision||{},saved=current.terminal?.configured&&current.browserTunnel?.configured;
+  syncWizardIds(current);
+  for(const name of ['terminal','browser']){
+   const field=$('wizard-'+name+'-id');
+   if(!field.value&&data.tunnels?.[name]?.id)field.value=data.tunnels[name].id;
+  }
+  if(!wizardTouched&&!data.wizardDismissed){
+   if(saved){navigate('onboarding');showWizardStep(data.chatgptInstructionsViewed?6:current.playwrightExtension?.configured?5:4,false)}
+   else if(data.tunnels?.terminal?.id&&data.tunnels?.browser?.id)showWizardStep(2,false);
+  }
   if(['key-issuing','key-issued','recovery-key-issuing','key-recovery-rejected'].includes(key.status)&&!saved){
    wizard.textContent='Ключ ранее выпускался, но не подтверждён локально. Проверь созданные ресурсы и восстанови ключ; не создавай новый проект.';
   }else if(data.pending||key.pending){
@@ -271,10 +388,11 @@ $('verify-connection').onclick=async()=>{
  const button=$('verify-connection');button.disabled=true;
  try{
   wizard.textContent='Проверяем сеть, локальное хранилище и подключение браузера…';
-  const [preflight,connection]=await Promise.all([
-   window.mcpgo.onboard('connection-preflight',{}),window.mcpgo.verifyConnection()]);
+  const [preflight,connection,browser]=await Promise.all([
+   window.mcpgo.onboard('connection-preflight',{}),window.mcpgo.verifyConnection(),window.mcpgo.onboard('browser-check',{browser:$('browser').value})]);
+  $('wizard-browser-check').textContent=browser.message||browser.detail||'Проверка версии браузера выполнена.';
   render(connection);
-  wizard.textContent=preflight.message+' '+(preflight.secureStorage?'Шифрование Windows доступно.':'Защищённое хранилище Windows недоступно.');
+  $('wizard-preflight').textContent=preflight.message+' '+(preflight.secureStorage?'Шифрование Windows доступно.':'Защищённое хранилище Windows недоступно.');
  }
  catch(e){wizard.textContent=e.message}finally{button.disabled=false}
 };
@@ -285,22 +403,51 @@ $('export-diagnostics').onclick=async()=>{
  }catch(e){wizard.textContent='Не удалось экспортировать диагностику: '+e.message}
 };
 async function runWizard(action,data){
- const buttons=[$('create-tunnels'),$('create-runtime'),$('inspect-runtime'),$('recover-runtime')];
- buttons.forEach(b=>b.disabled=true);
+ if(wizardBusy)throw Error('Дождись завершения текущей операции.');
+ wizardBusy=true;
+ const buttons=[...document.querySelectorAll('[data-wizard-page] button')];
+ const prior=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
  try{return await window.mcpgo.onboard(action,data)}
  catch(e){wizard.textContent=e.message;throw e}
- finally{buttons.forEach(b=>b.disabled=false)}
+ finally{wizardBusy=false;buttons.forEach((b,i)=>b.disabled=prior[i]);if(lastOverview)syncWizardIds(lastOverview)}
 }
+$('wizard-discover').onclick=async()=>{
+ if(!$('admin-key').value)return wizard.textContent='Введите ключ администратора';
+ try{
+  const result=await runWizard('discover',{adminKey:$('admin-key').value,organizationId:$('organization-id').value.trim(),workspaceId:$('workspace-id').value.trim()});
+  const box=$('wizard-discovered');box.replaceChildren();box.hidden=false;
+  if(!result.tunnels?.length){box.textContent='Туннели не найдены.';return}
+  for(const tunnel of result.tunnels){
+   const row=document.createElement('div');row.className='actions';
+   const label=document.createElement('span');label.textContent=tunnel.name+' · '+tunnel.id;row.append(label);
+   for(const service of ['terminal','browser']){
+    const button=document.createElement('button');button.className='minor';button.type='button';button.textContent=service==='terminal'?'Для Terminal':'Для Browser';
+    button.onclick=()=>{$('wizard-'+service+'-id').value=tunnel.id;wizard.textContent='Tunnel ID выбран. Подтверди импорт.'};row.append(button);
+   }box.append(row);
+  }
+ }catch{}
+};
+$('wizard-load-projects').onclick=async()=>{
+ if(!$('admin-key').value)return wizard.textContent='Введите ключ администратора';
+ try{
+  const result=await runWizard('runtime-projects',{adminKey:$('admin-key').value});
+  const select=$('wizard-project');select.replaceChildren(new Option('Создать проект McpGo',''));
+  for(const project of result.projects||[])select.append(new Option(project.name,project.id));
+  wizard.textContent=result.projects?.length?'Выбери существующий проект или создай новый.':'Подходящих проектов не найдено.';
+ }catch{}
+};
 $('create-tunnels').onclick=async()=>{
  if(!$('admin-key').value)return wizard.textContent='Введите ключ администратора';
  if(!$('organization-id').value.trim()&&!$('workspace-id').value.trim())
   return wizard.textContent='Укажите Organization ID либо Workspace ID';
  wizard.textContent='Создание туннелей...';
  try{
+  if(!window.confirm('Создать два туннеля в указанной организации или workspace?'))return;
   const r=await runWizard('provision',{adminKey:$('admin-key').value,confirmed:true,
    organizationId:$('organization-id').value.trim(),workspaceId:$('workspace-id').value.trim()});
   $('terminal-id').value=r.tunnels.terminal;
   $('browser-id').value=r.tunnels.browser;
+  $('wizard-terminal-id').value=r.tunnels.terminal;$('wizard-browser-id').value=r.tunnels.browser;
   wizard.textContent='Туннели созданы. Можно выдать Runtime Key.';
  }catch{}
 };
@@ -308,11 +455,13 @@ $('create-runtime').onclick=async()=>{
  if(!$('admin-key').value)return wizard.textContent='Введите ключ администратора';
  wizard.textContent='Выпуск Runtime Key...';
  try{
-  await runWizard('runtime-auto',{adminKey:$('admin-key').value,confirmed:true,createProject:true});
+  const projectId=$('wizard-project').value;
+  if(!window.confirm(projectId?'Выпустить Runtime Key в выбранном проекте?':'Создать отдельный проект McpGo и выпустить Runtime Key?'))return;
+  const outcome=await runWizard('runtime-auto',{adminKey:$('admin-key').value,confirmed:true,createProject:!projectId,projectId});
   $('admin-key').value='';
   const r=await window.mcpgo.status();
   $('terminal-id').value=r.terminal.id;$('browser-id').value=r.browserTunnel.id;
-  render(r);wizard.textContent='Туннели подключаются. Ключ сохранён.';
+  render(r);wizard.textContent=outcome.remoteVerified?'Tunnel ID проверены. Ключ сохранён.':'Ключ сохранён. OpenAI пока не подтвердил Tunnel ID; проверь соединение.';showWizardStep(3,false);
  }catch{}
 };
 $('inspect-runtime').onclick=async()=>{
@@ -334,7 +483,7 @@ $('recover-runtime').onclick=async()=>{
   $('admin-key').value='';
   const r=await window.mcpgo.status();
   $('terminal-id').value=r.terminal.id;$('browser-id').value=r.browserTunnel.id;
-  render(r);wizard.textContent='Новый ключ сохранён. Проверяем соединение.';
+  render(r);wizard.textContent='Новый ключ сохранён. Проверяем соединение.';showWizardStep(3,false);
  }catch{}
 };
 function element(tag,text){

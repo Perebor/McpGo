@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.7",
+  "version": "2.1.0-preview.8",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -25,6 +25,7 @@
       "app/*.html",
       "app/*.css",
       "app/logo.png",
+      "app/onboarding-images/*.png",
       "package.json"
     ],
     "extraResources": [

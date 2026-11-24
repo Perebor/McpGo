@@ -49,6 +49,14 @@ jobs:
           node --check windows/app/preload.cjs
           node --check terminal/stateless_server.js
           node --check terminal/interactive_runtime.cjs
+      - name: Seven-step wizard browser acceptance (mock IPC)
+        shell: pwsh
+        run: |
+          $chrome = Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe'
+          if (!(Test-Path $chrome)) { throw "Chrome missing from runner" }
+          $env:MCPGO_WIZARD_CHROME = $chrome
+          node --test windows/tests/onboarding-ui.test.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Assemble unsigned NSIS preview
         shell: pwsh
         working-directory: windows
