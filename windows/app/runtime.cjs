@@ -128,9 +128,12 @@ class Runtime {
     const e=this.healthEvidence||{},now=Date.now(),running=name=>this.entries.get(name)?.child?.exitCode===null;
     const key=['terminal','terminalTunnel','browser','proxy','browserTunnel'].map(n=>this.entries.get(n)?.child?.pid||0).join(':');
     const data=e.key===key?e:{};
+    const browserPid=this.entries.get('browser')?.child?.pid;
+    const failure=this.browserVerificationFailure;
+    const failureAt=Number.isInteger(browserPid)&&browserPid>0&&failure?.pid===browserPid?failure.at:null;
     return {
       terminal:connectionHealth.evaluate({running:running('terminal')&&running('terminalTunnel'),mcp:data.t,tunnel:data.tt,checkedAt:data.checkedAt,lastCallAt:data.th?.lastSuccessfulCallAt},now),
-      browser:connectionHealth.evaluate({running:running('browser')&&running('proxy')&&running('browserTunnel'),mcp:data.b,tunnel:data.bt,checkedAt:data.checkedAt,browser:connectionHealth.browserEvidence(data.bh,now,this.browserVerificationFailure?.pid===this.entries.get('browser')?.child?.pid?this.browserVerificationFailure.at:null)},now)
+      browser:connectionHealth.evaluate({running:running('browser')&&running('proxy')&&running('browserTunnel'),mcp:data.b,tunnel:data.bt,checkedAt:data.checkedAt,browser:connectionHealth.browserEvidence(data.bh,now,failureAt)},now)
     };
   }
   readinessState(){

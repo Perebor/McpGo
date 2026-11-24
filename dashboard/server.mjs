@@ -180,7 +180,7 @@ async function collectHealth(terminal,browser,force=false){
     const now=Date.now();
     healthEvidence={key,checkedAt:now,tm,bm,tt,bt,th,bh};
     healthHistory.observe('terminal',connectionHealth.evaluate({running:terminal.every(x=>x.running),mcp:tm,tunnel:tt,checkedAt:now,lastCallAt:th?.lastSuccessfulCallAt},now),now);
-    healthHistory.observe('browser',connectionHealth.evaluate({running:browser.every(x=>x.running),mcp:bm,tunnel:bt,checkedAt:now,browser:connectionHealth.browserEvidence(bh,now,browserVerificationFailure?.pid===browser[0].pid?browserVerificationFailure.at:null)},now),now);
+    healthHistory.observe('browser',connectionHealth.evaluate({running:browser.every(x=>x.running),mcp:bm,tunnel:bt,checkedAt:now,browser:connectionHealth.browserEvidence(bh,now,browserVerificationFailure && browser[0].pid && browserVerificationFailure.pid===browser[0].pid?browserVerificationFailure.at:null)},now),now);
     return healthEvidence;
   })();
   try{return await healthFlight}finally{healthFlight=null}
@@ -197,7 +197,7 @@ async function status() {
   const now=Date.now();
   const health={
     terminal:connectionHealth.evaluate({running:terminal.every(x=>x.running),mcp:evidence.tm,tunnel:evidence.tt,checkedAt:evidence.checkedAt,lastCallAt:evidence.th?.lastSuccessfulCallAt},now),
-    browser:connectionHealth.evaluate({running:browser.every(x=>x.running),mcp:evidence.bm,tunnel:evidence.bt,checkedAt:evidence.checkedAt,browser:connectionHealth.browserEvidence(browserSession,now,browserVerificationFailure?.pid===browser[0].pid?browserVerificationFailure.at:null)},now)
+    browser:connectionHealth.evaluate({running:browser.every(x=>x.running),mcp:evidence.bm,tunnel:evidence.bt,checkedAt:evidence.checkedAt,browser:connectionHealth.browserEvidence(browserSession,now,browserVerificationFailure && browser[0].pid && browserVerificationFailure.pid===browser[0].pid?browserVerificationFailure.at:null)},now)
   };
   for(const [channel,value] of Object.entries(health))healthHistory.observe(channel,value,now);
   const keyDir=path.join(os.homedir(),'Library','Application Support','McpGo','playwright');

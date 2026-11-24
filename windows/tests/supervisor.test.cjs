@@ -59,3 +59,33 @@ test('foreign listener blocks launch without spawning or retrying',async t=>{
  assert.equal(agent.entries.get('terminal').child,null);
  assert.equal(agent.entries.get('terminal').timer,null);
 });
+
+// Exercise the same publication callback as Electron main.cjs on fresh start,
+// service changes, restart and before-quit, with no browser token or tunnel.
+test('fresh-install readiness publication and shutdown do not throw',async t=>{
+ const dir=directory(t);const published=[];
+ let agent;
+ agent=new Runtime({resourceRoot:dir,userData:path.join(dir,'user'),
+  nodeExecutable:path.join(dir,'missing-node'),portProbe:async()=>false,credentials:async()=>null,
+  onChange:()=>published.push(agent.readinessState())});
+ t.after(()=>agent.stop());
+ assert.equal(agent.readinessState().connectionHealth.browser.state,'stopped');
+ assert.doesNotThrow(()=>agent.stop());
+ await agent.start();
+ assert.ok(published.length>0);
+ await agent.restart();
+ assert.doesNotThrow(()=>agent.stop());
+ assert.equal(published.at(-1).connectionHealth.browser.state,'stopped');
+ assert.equal(published.at(-1).chrome,null);
+});
+test('missing browser child and stale failure record never dereference null',t=>{
+ const dir=directory(t);const agent=new Runtime({resourceRoot:dir,userData:dir,nodeExecutable:process.execPath,credentials:async()=>null});
+ for(const failure of [null,{}, {pid:123,at:Date.now()}]){
+  agent.browserVerificationFailure=failure;
+  for(const child of [undefined,null,{exitCode:null}]){
+   agent.entries.set('browser',{child});
+   assert.doesNotThrow(()=>agent.readinessState());
+  }
+ }
+ agent.entries.clear();assert.doesNotThrow(()=>agent.stop());
+});

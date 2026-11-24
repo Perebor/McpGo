@@ -35,7 +35,7 @@
 | `dashboard/index.html` | 13 | `abcfaf3e6af6898a` |
 | `dashboard/mcp-health.mjs` | 28 | `79b28524adf6908c` |
 | `dashboard/mcp-versions.mjs` | 18 | `b57249e67fd7ad71` |
-| `dashboard/server.mjs` | 361 | `d7f1b85d6e13891e` |
+| `dashboard/server.mjs` | 361 | `39111db9bf193f9a` |
 | `dashboard/style.css` | 1 | `b72439eb34f8ee3e` |
 | `dashboard/tests/connection-health.test.mjs` | 72 | `2184d63ba4ce0f44` |
 | `dashboard/tests/mcp-health.test.mjs` | 36 | `541bd7e1766aeb42` |
@@ -191,14 +191,14 @@
 | `windows/app/onboarding.cjs` | 63 | `1d4dcb0961147f60` |
 | `windows/app/preload.cjs` | 29 | `ed580b02f8c560d7` |
 | `windows/app/renderer.js` | 453 | `0002180d243ec57b` |
-| `windows/app/runtime.cjs` | 496 | `f5c992cbb32e849b` |
+| `windows/app/runtime.cjs` | 499 | `424e82ca05a15be7` |
 | `windows/app/settings.cjs` | 129 | `0c7cf71254ce19a7` |
 | `windows/app/skills.cjs` | 21 | `de7909af66e28156` |
 | `windows/app/style.css` | 147 | `c6d64edb75d3e456` |
 | `windows/app/updates.cjs` | 54 | `09dc73bf45d81206` |
 | `windows/onboarding_cli.py` | 138 | `9e1f145d18a916bb` |
-| `windows/package-lock.json` | 3682 | `d685d0b74d62e634` |
-| `windows/package.json` | 159 | `089fd95b27b1bb02` |
+| `windows/package-lock.json` | 3682 | `be59953ed4b9478c` |
+| `windows/package.json` | 159 | `2e1fb932b4c3b5ae` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
@@ -209,7 +209,7 @@
 | `windows/tests/runtime.test.cjs` | 157 | `64fad290003c06fe` |
 | `windows/tests/settings.test.cjs` | 122 | `fd68e57b4b0c2677` |
 | `windows/tests/skills.test.cjs` | 41 | `afb59e0397546192` |
-| `windows/tests/supervisor.test.cjs` | 61 | `989ee41ce824645f` |
+| `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 62 | `97f221e8d2723fef` |
 | `windows/tests/updates.test.cjs` | 36 | `669ce88d7f88ea64` |
 | `windows/verify-build.py` | 85 | `f13639fa98771100` |
