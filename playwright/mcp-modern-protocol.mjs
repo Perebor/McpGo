@@ -4,6 +4,7 @@
  * originally supplied by the legacy upstream as an SSE data frame.
  */
 import {createHash} from 'node:crypto';
+import {transformMcpResponse} from './mcp-response.mjs';
 
 export const MODERN_PROTOCOL='2026-07-28';
 export const SERVER_INFO={name:'McpGo-Browser',version:'1.0.0'};
@@ -78,13 +79,7 @@ export function modernizeMessage(message,{cache=false,serverInfo=SERVER_INFO}={}
    _meta:{...(result._meta||{}),[SERVER_META_KEY]:serverInfo}}};
 }
 export function modernizeResponse(raw,contentType,{cache=false}={}){
- const source=Buffer.isBuffer(raw)?raw.toString('utf8'):String(raw);
- if(String(contentType).includes('text/event-stream')){
-  return Buffer.from(source.replace(/^data:\s*(\{[^\r\n]*\})\r?$/gm,(line,s)=>{
-    try{return 'data: '+JSON.stringify(modernizeMessage(JSON.parse(s),{cache}));}catch{return line;}
-  }));
- }
- return Buffer.from(JSON.stringify(modernizeMessage(JSON.parse(source),{cache})));
+ return transformMcpResponse(raw,contentType,message=>modernizeMessage(message,{cache}));
 }
 export function discoverResult({serverInfo=SERVER_INFO,instructions}={}){
  return {resultType:'complete',supportedVersions:[MODERN_PROTOCOL],capabilities:{tools:{}},

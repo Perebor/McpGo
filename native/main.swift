@@ -118,6 +118,67 @@ struct MCPRecoveryState: Decodable {
     let terminal:RecoveryChannelState?
     let playwright:RecoveryChannelState?
 }
+struct ConnectionChannel: Decodable {
+    let state: String
+    let reason: String?
+    let checkedAt: Double?
+    let mcp: Bool
+    let tunnel: String
+    let browser: String?
+    let lastBrowserAt: Double?
+    let lastCallAt: Double?
+    func fresh(_ now: Date = Date()) -> Bool {
+        guard let checkedAt else { return false }
+        let age = now.timeIntervalSince1970 - checkedAt / 1000
+        return age >= 0 && age <= 30
+    }
+    var ready: Bool {
+        guard fresh(), state == "ready" else { return false }
+        if browser != nil {
+            guard let lastBrowserAt else { return false }
+            let age = Date().timeIntervalSince1970 - lastBrowserAt / 1000
+            return age >= 0 && age <= 300
+        }
+        return true
+    }
+    var detail: String {
+        guard fresh() else { return "Нет актуальной проверки" }
+        switch reason {
+        case "SERVICE_STOPPED": return "Служба остановлена"
+        case "LOCAL_MCP_UNAVAILABLE": return "Локальный MCP не отвечает"
+        case "TUNNEL_AUTH": return "Требуется авторизация туннеля"
+        case "TUNNEL_DOWN": return "Туннель не отвечает"
+        case "TUNNEL_STARTING": return "Туннель не готов"
+        case "TUNNEL_THROTTLED": return "Ограничение запросов OpenAI"
+        case "TUNNEL_UNMONITORED": return "Туннель не проверяется"
+        case "BROWSER_CONNECTION_FAILED": return "Нет связи с Chrome Extension"
+        case "BROWSER_NOT_RECENTLY_VERIFIED": return "Доступ к вкладкам давно не проверялся"
+        case "BROWSER_TELEMETRY_UNAVAILABLE": return "Нет телеметрии браузера"
+        default: return ready ? "Локальная готовность подтверждена" : "Соединение не подтверждено"
+        }
+    }
+    var tunnelLabel: String {
+        guard fresh() else { return "Не проверено" }
+        switch tunnel {
+        case "ready": return "Туннель готов"
+        case "auth": return "Авторизация"
+        case "throttled": return "Лимит запросов"
+        case "starting": return "Подключается"
+        case "down": return "Нет связи"
+        default: return "Не подтверждён"
+        }
+    }
+}
+struct ConnectionHealthState: Decodable {
+    let terminal: ConnectionChannel
+    let browser: ConnectionChannel
+}
+struct ConnectionEvent: Decodable {
+    let channel: String
+    let state: String
+    let reason: String?
+    let at: Double
+}
 struct HubState: Decodable {
     let installationRoot:String?
     let busy:Bool
@@ -125,6 +186,8 @@ struct HubState: Decodable {
     let playwright:BrowserState
     let mcpVersions:MCPVersionState?
     let recovery:MCPRecoveryState?
+    let connectionHealth: ConnectionHealthState?
+    let connectionHistory: [ConnectionEvent]?
 }
 struct ActionResult: Decodable { let ok:Bool?; let error:String? }
 
@@ -134,13 +197,19 @@ struct ActionResult: Decodable { let ok:Bool?; let error:String? }
     @Published var error: String?
     @Published var notice: String?
     @Published var updated: Date?
+    @Published var healthClock = Date()
+    private var refreshing = false
     private let base=URL(string:"http://127.0.0.1:8969")!
     private let root=McpGoPaths.root
     private var poller:Timer?
     private var triedBootstrap=false
     init() {
         poller=Timer.scheduledTimer(withTimeInterval:4, repeats:true){ [weak self] _ in
-            Task { @MainActor in guard let self, !self.busy else { return }; await self.refresh() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.healthClock = Date()
+                if !self.busy { await self.refresh() }
+            }
         }
         Task { await refresh() }
     }
@@ -165,6 +234,9 @@ struct ActionResult: Decodable { let ok:Bool?; let error:String? }
         print("McpGo dashboard bootstrap checked: \(svc)")
     }
     func refresh() async {
+        guard !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
         do {
             var req=URLRequest(url:base.appendingPathComponent("api/status"))
             req.cachePolicy = .reloadIgnoringLocalCacheData; req.timeoutInterval=4
@@ -178,13 +250,13 @@ struct ActionResult: Decodable { let ok:Bool?; let error:String? }
                 return
             }
             state=incoming
-            updated=Date(); error=nil; triedBootstrap=false
+            healthClock=Date(); updated=healthClock; error=nil; triedBootstrap=false
         } catch {
+            state=nil
             self.error="Локальная служба не отвечает. Откройте «Первое подключение», чтобы завершить настройку и запустить службы."
             if !triedBootstrap {
                 triedBootstrap=true; startDashboard()
-                try? await Task.sleep(for:.milliseconds(700))
-                await refresh()
+                // Retry on the next timer tick instead of recursive polling.
             }
         }
     }
@@ -269,7 +341,7 @@ private struct StatusPill: View {
                 .fill(up ? Palette.online : partial ? Palette.warning : Palette.quiet)
                 .frame(width: 7, height: 7)
                 .shadow(color: up ? Palette.online.opacity(0.35) : .clear, radius: 5)
-            Text(up ? "Активен" : partial ? "Частично" : "Отключён")
+            Text(up ? "Локально готов" : partial ? "Не подтверждён" : "Нет данных / отключён")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(up ? Palette.online : partial ? Palette.warning : Palette.muted)
         }
@@ -623,11 +695,11 @@ private struct DashboardView: View {
 
     private var terminalOn: Bool {
         guard let t=model.state?.terminal else {return false}
-        return t.oneshot.running && t.tunnel.running
+        return t.oneshot.running && t.tunnel.running && model.state?.connectionHealth?.terminal.fresh(model.healthClock) == true && model.state?.connectionHealth?.terminal.ready == true
     }
     private var browserOn: Bool {
         guard let p=model.state?.playwright else {return false}
-        return p.browser.running && p.backend && p.proxy.running && p.proxyReady && (p.mcpReady == true) && p.tunnel.running
+        return p.browser.running && p.backend && p.proxy.running && p.proxyReady && p.tunnel.running && model.state?.connectionHealth?.browser.fresh(model.healthClock) == true && model.state?.connectionHealth?.browser.ready == true
     }
     private var activeCount: Int { (terminalOn ? 1 : 0) + (browserOn ? 1 : 0) }
     private func recoveryTitle(_ channel: RecoveryChannelState?) -> String? {
@@ -650,24 +722,33 @@ private struct DashboardView: View {
                 ServiceLine(id:"t\($0.offset)",name:$0.element,up:false,status:"Ожидание")
             }
         }
+        let h=model.state?.connectionHealth?.terminal
+        let mcp = h?.fresh(model.healthClock) == true && h?.mcp == true
+        let tunnel = h?.fresh(model.healthClock) == true && h?.tunnel == "ready"
         return [
-            ServiceLine(id:"oneshot", name:"Terminal MCP · PTY / Jobs", up:t.oneshot.running, status:t.oneshot.running ? "Работает" : "Остановлен"),
-            ServiceLine(id:"terminal-tunnel", name:"Secure MCP tunnel", up:t.tunnel.running, status:t.tunnel.running ? "Процесс запущен" : "Остановлен")
+            ServiceLine(id:"oneshot", name:"Terminal MCP · PTY / Jobs", up:t.oneshot.running && mcp, status:!t.oneshot.running ? "Остановлен" : mcp ? "MCP готов" : "Не подтверждён", caution:t.oneshot.running && !mcp),
+            ServiceLine(id:"terminal-tunnel", name:"Secure MCP tunnel", up:t.tunnel.running && tunnel, status:t.tunnel.running ? h?.tunnelLabel ?? "Не проверено" : "Остановлен", caution:t.tunnel.running && !tunnel)
         ]
     }
     private var browserParts: [ServiceLine] {
         guard let p=model.state?.playwright else {
-            return ["Google Chrome CDP · 8931", "Safe proxy · 8940", "Secure MCP tunnel"].enumerated().map {
+            return ["Chrome Extension · 8931", "Safe proxy · 8940", "Secure MCP tunnel"].enumerated().map {
                 ServiceLine(id:"p\($0.offset)",name:$0.element,up:false,status:"Ожидание")
             }
         }
+        let h=model.state?.connectionHealth?.browser
+        let recent = h?.fresh(model.healthClock) == true
+        let age = h?.lastBrowserAt.map { Date().timeIntervalSince1970 - $0/1000 }
+        let browser = recent && h?.browser == "ready" && (age.map { $0 >= 0 && $0 <= 300 } ?? false)
+        let mcp = recent && h?.mcp == true
+        let tunnel = recent && h?.tunnel == "ready"
         return [
-            ServiceLine(id:"browser", name:"Google Chrome CDP · 8931", up:p.backend && p.browser.running,
-                        status:p.backend ? "Порт открыт" : "Остановлен", caution:p.browser.running && !p.backend),
-            ServiceLine(id:"proxy", name:"Safe proxy · 8940", up:p.proxyReady && p.proxy.running && p.mcpReady == true,
-                        status:!p.proxyReady ? "Остановлен" : (p.mcpReady == true ? "MCP работает" : "MCP недоступен"), caution:p.proxy.running && p.mcpReady != true),
-            ServiceLine(id:"browser-tunnel", name:"Secure MCP tunnel", up:p.tunnel.running,
-                        status:!p.configured ? "Не настроен" : p.tunnel.running ? "Процесс запущен" : "Остановлен", caution:!p.configured)
+            ServiceLine(id:"browser", name:"Chrome Extension · 8931", up:p.browser.running && browser,
+                        status:!p.browser.running ? "Остановлен" : browser ? "Подключено" : h?.browser == "failed" ? "Нет связи" : "Не подтверждено", caution:p.browser.running && !browser),
+            ServiceLine(id:"proxy", name:"Safe proxy · 8940", up:p.proxy.running && mcp,
+                        status:!p.proxy.running ? "Остановлен" : mcp ? "MCP готов" : "Не подтверждён", caution:p.proxy.running && !mcp),
+            ServiceLine(id:"browser-tunnel", name:"Secure MCP tunnel", up:p.tunnel.running && tunnel,
+                        status:!p.configured ? "Не настроен" : p.tunnel.running ? h?.tunnelLabel ?? "Не проверено" : "Остановлен", caution:!p.configured || (p.tunnel.running && !tunnel))
         ]
     }
 
@@ -728,7 +809,7 @@ private struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Локальные подключения")
                                 .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Palette.ink)
-                            Text(activeCount == 2 ? "Все системы работают" : activeCount == 1 ? "Одна система активна" : "Подключения остановлены")
+                            Text(activeCount == 2 ? "Локальная готовность подтверждена" : activeCount == 1 ? "Одна система готова" : "Нет подтверждённых подключений")
                                 .font(.system(size: 11.5)).foregroundStyle(Palette.muted)
                         }
                         Spacer(minLength: 8)
@@ -757,19 +838,65 @@ private struct DashboardView: View {
                     ServicePanel(name:"Терминал", sub:"Локальный MCP  ·  Команды и задачи Mac", symbol:"terminal", group:"terminal",
                                  components:terminalParts, up:terminalOn,
                                  partial:(t.map{$0.oneshot.running || $0.tunnel.running} ?? false),
-                                 footnote:"Автозапуск при входе в macOS",
+                                 footnote:model.state?.connectionHealth?.terminal.detail ?? "Нет актуальной проверки",
                                  mcpVersion:model.state?.mcpVersions?.terminal ??
                                      McpGoPaths.installedMCPVersion("terminal/mcp-version.json"),
                                  recoveryStatus:recoveryTitle(model.state?.recovery?.terminal))
 
                     let p=model.state?.playwright
-                    ServicePanel(name:"Playwright", sub:"Личный Google Chrome  ·  CDP", symbol:"globe", group:"playwright",
+                    ServicePanel(name:"Playwright", sub:"Личный Google Chrome · Extension", symbol:"globe", group:"playwright",
                                  components:browserParts, up:browserOn,
                                  partial:(p.map{$0.browser.running || $0.proxy.running || $0.tunnel.running} ?? false),
-                                 footnote:"Запускается вручную по необходимости",
+                                 footnote:model.state?.connectionHealth?.browser.detail ?? "Нет актуальной проверки",
                                  mcpVersion:model.state?.mcpVersions?.playwright ??
                                      McpGoPaths.installedMCPVersion("playwright/node_modules/@playwright/mcp/package.json"),
                                  recoveryStatus:recoveryTitle(model.state?.recovery?.playwright))
+
+                    VStack(alignment:.leading,spacing:8) {
+                        Text("Доступность в конкретном чате подтверждается только вызовом инструмента из этого чата.")
+                            .font(.system(size:11)).foregroundStyle(Palette.muted)
+                        HStack {
+                            ActionButton(title:"Проверить локально",symbol:"checkmark.shield",kind:"normal",disabled:model.busy || model.state == nil) {
+                                Task { await model.perform("verify-connection",group:"system") }
+                            }
+                            ActionButton(title:"Terminal Tunnel",symbol:"arrow.clockwise",kind:"normal",disabled:model.busy || model.state == nil) {
+                                Task { await model.perform("recover-tunnel",group:"terminal") }
+                            }
+                            ActionButton(title:"Browser Tunnel",symbol:"arrow.clockwise",kind:"normal",disabled:model.busy || model.state == nil) {
+                                Task { await model.perform("recover-tunnel",group:"playwright") }
+                            }
+                        }
+                        Button("Скопировать тест для ChatGPT") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("Проверь McpGo именно из этого чата: вызови Terminal с безвредной командой echo MCPGO_OK и Playwright: сначала mcpgo_workspace, затем browser_tabs(action=list) с возвращённым workspace_id. Не открывай и не закрывай вкладки. Сообщи отдельно, какие вызовы реально прошли, какие отсутствуют или завершились ошибкой. Не заменяй проверку предположением.",forType:.string)
+                            model.notice = "Вставь скопированный тест в нужный чат ChatGPT."
+                        }
+                        .font(.system(size:12))
+                        if let h=model.state?.connectionHealth {
+                            if let stamp=h.terminal.checkedAt {
+                                Text("Последняя локальная проверка: " + Date(timeIntervalSince1970:stamp/1000).formatted())
+                                    .font(.system(size:11)).foregroundStyle(Palette.muted)
+                            }
+                            if let stamp=h.terminal.lastCallAt {
+                                Text("Последний успешный Terminal MCP-вызов: " + Date(timeIntervalSince1970:stamp/1000).formatted())
+                                    .font(.system(size:11)).foregroundStyle(Palette.muted)
+                            }
+                            if let stamp=h.browser.lastBrowserAt {
+                                Text("Последний успешный браузерный вызов: " + Date(timeIntervalSince1970:stamp/1000).formatted())
+                                    .font(.system(size:11)).foregroundStyle(Palette.muted)
+                            }
+                        }
+                        DisclosureGroup("История состояния подключений") {
+                            ForEach(Array((model.state?.connectionHistory ?? []).suffix(8).reversed().enumerated()),id:\.offset) { _, event in
+                                Text(Date(timeIntervalSince1970:event.at/1000).formatted() + " · " + (event.channel=="terminal" ? "Terminal" : "Playwright") + " · " + (event.reason ?? event.state))
+                                    .font(.system(size:11)).foregroundStyle(Palette.muted)
+                                    .frame(maxWidth:.infinity,alignment:.leading)
+                            }
+                        }
+                        .font(.system(size:12))
+                    }
+                    .padding(14)
+                    .background(Palette.panel,in:RoundedRectangle(cornerRadius:12))
 
                     HStack(spacing: 8) {
                         if model.busy {

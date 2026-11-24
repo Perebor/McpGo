@@ -5,12 +5,13 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from setup_engine import SetupEngine, SetupError
+from setup_engine import SetupEngine, SetupError, onboarding_mutation_lock
 from diagnostics import event, register_secrets, log_exception, environment_snapshot, export_zip
 
 ACTIONS = {
     'status': lambda e,d: e.status_without_secrets(),
     'preflight': lambda e,d: e.preflight(),
+    'connection-preflight': lambda e,d: e.connection_preflight(d),
     'discover': lambda e,d: e.discover(d),
     'provision': lambda e,d: e.provision(d),
     'import': lambda e,d: e.import_tunnels(d),
@@ -47,7 +48,9 @@ def main() -> int:
             raise SetupError('Ожидается JSON-объект.')
         register_secrets(payload)
         event('cli.request', action=action, payload=payload, bytes=len(raw))
-        result = ACTIONS[sys.argv[1]](SetupEngine(), payload)
+        engine = SetupEngine()
+        with onboarding_mutation_lock(engine, action):
+            result = ACTIONS[sys.argv[1]](engine, payload)
         event('cli.success', action=action, result=result)
         print(json.dumps({'ok': True, 'result': result}, ensure_ascii=False))
         return 0

@@ -7,7 +7,7 @@ import {modernHeaders,modernParams,MODERN_PROTOCOL,SERVER_META_KEY} from '../mcp
 
 const proxyFile=fileURLToPath(new URL('../restricted-proxy.mjs',import.meta.url));
 const pages=[{uid:1,url:'https://start.example'}];let nextId=2,currentId=1,upstreamSid='backend-1';
-const clicked=[];let upstreamInitializes=0;
+const clicked=[],tabOperations=[],toolCalls=[];let upstreamInitializes=0;
 const tabsText=()=>`### Result\n${pages.map((t,i)=>`- ${i}: ${t.uid===currentId?'(current) ':''}[Test](${t.url})`).join('\n')}`;
 const response=(id,result)=>'event: message\ndata: '+JSON.stringify({jsonrpc:'2.0',id,result})+'\n\n';
 const browser=http.createServer(async(req,res)=>{
@@ -26,12 +26,14 @@ const browser=http.createServer(async(req,res)=>{
  }
  if(data.method==='tools/call'){
   const name=data.params?.name,args=data.params?.arguments||{};
+  toolCalls.push({name,args});
   if(data.params?._meta)throw Error('MODERN_META_LEAKED_TO_LEGACY_PLAYWRIGHT');
   if(Object.hasOwn(args,'workspace_id')){
     res.writeHead(400);return res.end('WORKSPACE_ID_LEAKED_TO_PLAYWRIGHT');
   }
   let result=tabsText();
   if(name==='browser_tabs'){
+    tabOperations.push(args.action);
     if(args.action==='new'){
       const tab={uid:nextId++,url:args.url||'about:blank'};pages.push(tab);currentId=tab.uid;
       result=tabsText();
@@ -128,6 +130,9 @@ test('tools/list returns a stable private cacheable catalog without a public ses
  assert.ok(upstreamInitializes>=1);
  assert.ok(list.result.result.tools.some(t=>t.name==='mcpgo_workspace'));
  assert.ok(!list.result.result.tools.some(t=>t.name==='browser_run_code_unsafe'));
+ assert.ok(!list.result.result.tools.some(t=>t.name==='browser_close'));
+ assert.ok(list.result.result.tools.some(t=>t.name==='mcpgo_inspect_page'));
+ assert.ok(list.result.result.tools.find(t=>t.name==='mcpgo_inspect_page').inputSchema.required.includes('workspace_id'));
  assert.equal(list.result.result.tools.find(t=>t.name==='browser_click').inputSchema.properties.workspace_id.type,'string');
  assert.ok(list.result.result.tools.find(t=>t.name==='browser_click').inputSchema.required.includes('workspace_id'));
  assert.ok(list.result.result.tools.find(t=>t.name==='browser_snapshot').inputSchema.required.includes('workspace_id'));
@@ -224,4 +229,77 @@ test('wrong modern version and HTTP routing headers fail closed',async()=>{
  const invalidBodyMeta=await fetch(url,{method:'POST',headers:modernHeaders('tools/list'),body:JSON.stringify({jsonrpc:'2.0',id:12,method:'tools/list',params:{_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28'}}})});
  assert.equal(invalidBodyMeta.status,400);
  assert.equal((await invalidBodyMeta.json()).error.code,-32021);
+});
+
+test('local tool fields are available to structured-only clients',async()=>{
+ const browserClient=client('diagnostic-regression');
+ const workspace=await browserClient.tool('mcpgo_workspace');expectModern(workspace);
+ const workspaceId=workspace.result.result.structuredContent.workspace_id;
+ const status=await browserClient.tool('mcpgo_agent_status',{workspace_id:workspaceId});expectModern(status);
+ assert.equal(typeof payload(status).automaticIsolation,'boolean');
+ assert.deepEqual(status.result.result.structuredContent,{...payload(status),workspace_id:workspaceId});
+});
+
+test('numeric tab actions need only one fresh list before dispatch',async()=>{
+ const browserClient=client('numeric-tab-regression');
+ const workspace=await browserClient.tool('mcpgo_workspace');expectModern(workspace);
+ const workspaceId=workspace.result.result.structuredContent.workspace_id;
+ const url='https://numeric.example/';
+ expectModern(await browserClient.tool('browser_tabs',{action:'new',url,workspace_id:workspaceId}));
+ const index=pages.findIndex(page=>page.url===url);assert.notEqual(index,-1);
+ for(const action of ['select','close']){
+  const start=tabOperations.length;
+  expectModern(await browserClient.tool('browser_tabs',{action,index,workspace_id:workspaceId}));
+  const ops=tabOperations.slice(start);
+  assert.deepEqual(ops.slice(0,ops.indexOf(action)+1),['list',action]);
+ }
+});
+
+test('100 warm browser snapshots reuse initialized Playwright without probing its tools catalog',async()=>{
+ const c=client('mcpgo-hot-path');
+ const w=await c.tool('mcpgo_workspace');expectModern(w);
+ const workspaceId=w.result.result.structuredContent.workspace_id;
+ expectModern(await c.tool('browser_tabs',{action:'new',url:'https://hot-path.example/',workspace_id:workspaceId}));
+ const before=await fetch(`http://127.0.0.1:${proxyPort}/healthz`).then(r=>r.json());
+ for(let n=0;n<100;n++)expectModern(await c.tool('browser_snapshot',{workspace_id:workspaceId}));
+ const after=await fetch(`http://127.0.0.1:${proxyPort}/healthz`).then(r=>r.json());
+ assert.equal(after.performance.upstream.catalog,before.performance.upstream.catalog,
+  'already initialized session must not tools/list on each snapshot');
+ assert.equal(after.performance.commands.snapshot.count>=100,true);
+ assert.ok(after.performance.commands.snapshot.p95Ms!==null);
+ assert.equal(after.performance.upstream.total>before.performance.upstream.total,true);
+});
+
+test('three simultaneous safe read requests recover one expired upstream session',async()=>{
+ const before=upstreamInitializes;
+ upstreamSid='backend-new-'+Date.now();
+ const outcomes=await Promise.all(Array.from({length:3},(_,i)=>client('recover-'+i).send('tools/list')));
+ for(const response of outcomes)expectModern(response);
+ assert.equal(upstreamInitializes,before+1,'concurrent recovery must share one initialization');
+});
+
+test('context-efficient inspection never bypasses per-workspace tab guard and blocks browser_close',async()=>{
+ const c=client('quality-read-test');
+ const workspace=await c.tool('mcpgo_workspace');expectModern(workspace);
+ const workspaceId=workspace.result.result.structuredContent.workspace_id;
+ expectModern(await c.tool('browser_tabs',{action:'new',url:'https://quality-read.example/',workspace_id:workspaceId}));
+ const find=await c.tool('mcpgo_inspect_page',{strategy:'find',query:'Publish',maxResults:3,workspace_id:workspaceId});
+ expectModern(find);
+ assert.equal(toolCalls.at(-1).name,'browser_find');
+ assert.deepEqual(toolCalls.at(-1).args,{text:'Publish',maxResults:3});
+ const verify=await c.tool('mcpgo_inspect_page',{strategy:'verify',expectedText:'Saved',timeoutSeconds:3,workspace_id:workspaceId});
+ expectModern(verify);
+ assert.equal(toolCalls.at(-1).name,'browser_wait_for');
+ assert.deepEqual(toolCalls.at(-1).args,{text:'Saved',time:3});
+ const before=toolCalls.length;
+ const invalid=await c.tool('mcpgo_inspect_page',{query:'test',regex:'pattern',workspace_id:workspaceId});
+ assert.equal(invalid.status,400);
+ assert.equal(toolCalls.length,before,'bad inspection never reached Playwright');
+ const forbidden=await c.tool('browser_close',{workspace_id:workspaceId});
+ assert.equal(forbidden.status,403);
+ const diagnostic=await c.tool('mcpgo_browser_status',{workspace_id:workspaceId});
+ expectModern(diagnostic);
+ assert.ok(Array.isArray(diagnostic.result.result.structuredContent.recentFailures));
+ assert.ok(diagnostic.result.result.structuredContent.recentFailures.every(x=>
+   !JSON.stringify(x).includes('https://quality-read.example/')));
 });

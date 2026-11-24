@@ -154,6 +154,12 @@ def _rotate(directory: Path):
 
 def event(name: str, **details):
     """Never propagate logger failures into provisioning or run user secrets to disk."""
+    if os.environ.get("MCPGO_ONBOARDING_PROGRESS") == "1":
+        try:
+            sys.stderr.write("MCPGO_PROGRESS " + re.sub(r"[^A-Za-z0-9._:-]", "", str(name))[:120] + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
     try:
         directory = log_dir()
         with _lock(directory):

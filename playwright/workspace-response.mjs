@@ -4,6 +4,7 @@
  * Do not modify initializations, notifications, errors, screenshots or pages.
  */
 import {validWorkspaceId} from './browser-workspace.mjs';
+import {transformMcpResponse} from './mcp-response.mjs';
 const intro=id=>`### McpGo browser workspace\nworkspace_id: ${id}\nREQUIRED: pass this SAME workspace_id in EVERY subsequent browser call (including snapshots); never reuse another agent workspace_id.`;
 export const workspaceParameter={type:'string',description:'REQUIRED for every browser action: use the private workspace_id obtained from mcpgo_workspace or your last browser tool result. Do not copy a workspace_id from another chat or agent.'};
 const BOOTSTRAP_TOOL_NAMES=new Set(['mcpgo_workspace','mcpgo_browser_status','mcpgo_action_status']);
@@ -41,18 +42,6 @@ function amendMessage(message,workspaceId){
   return message;
 }
 export function decorateMcpToolResponse(raw,contentType,workspaceId){
-  const input=Buffer.isBuffer(raw)?raw.toString('utf8'):String(raw);
-  if(!validWorkspaceId(workspaceId))return Buffer.from(input);
-  if(input.trimStart().startsWith('{')){
-    const message=JSON.parse(input);
-    return Buffer.from(JSON.stringify(amendMessage(message,workspaceId)));
-  }
-  if(String(contentType).includes('text/event-stream')){
-    const output=input.replace(/^data: (\{[^\r\n]*\})\r?$/gm,(line,value)=>{
-      try{return 'data: '+JSON.stringify(amendMessage(JSON.parse(value),workspaceId));}
-      catch{return line;}
-    });
-    return Buffer.from(output);
-  }
-  throw Error('Unrecognized MCP response format');
+ if(!validWorkspaceId(workspaceId))return Buffer.from(raw);
+ return transformMcpResponse(raw,contentType,message=>amendMessage(message,workspaceId));
 }

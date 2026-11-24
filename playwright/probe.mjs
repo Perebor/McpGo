@@ -79,7 +79,7 @@ try {
       arguments:{action:'list',...(external?{workspace_id:workspaceId}:{})}});
     const content=(tabs?.result?.content||[]).map(x=>x.text||'').join(' ');
     if (tabs?.error || tabs?.result?.isError || /extension did not connect|Invalid token|timed out/i.test(content))
-      throw Error('CDP Playwright не подключился к вкладкам личного Chrome');
+      throw Error('Playwright Extension не подключилось к вкладкам личного браузера');
     if (!content.includes('### Result')) throw Error('Browser tab list missing');
     console.log('CHROME_CDP_TABS=PASS');
   }

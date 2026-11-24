@@ -22,11 +22,11 @@ if hasattr(sys.stderr, "reconfigure"):
 ROOT=pathlib.Path(os.environ.get("MCPGO_RESOURCE_ROOT",
     str(pathlib.Path(__file__).resolve().parents[1]))).resolve()
 sys.path.insert(0,str(ROOT/"onboarding"))
-from setup_engine import SetupEngine,SetupError
+from setup_engine import SetupEngine,SetupError,onboarding_mutation_lock
 from browser_compat import browser_check
 from diagnostics import event, register_secrets, log_exception, environment_snapshot, export_zip, instrument_public_methods
 
-ACTIONS={"status","browser-check","discover","provision","import","runtime-projects",
+ACTIONS={"status","connection-preflight","browser-check","discover","provision","import","runtime-projects",
          "runtime-inspect","runtime-auto","runtime-recover-key",
          "verify-remote","doctor","export-diagnostics"}
 
@@ -60,6 +60,18 @@ class WindowsSetup(SetupEngine):
             raise SetupError("Onboarding state belongs to a different installation.")
         return value
 
+    def status_without_secrets(self):
+        state=self.read_state()
+        journal=state.get("runtimeProvision") or {}
+        return {"phase":state.get("phase","preflight"),
+                "tunnels":{name:{"id":item.get("id",""),"remoteVerified":bool(item.get("remoteVerified"))}
+                           for name,item in state.get("tunnels",{}).items() if name in ("terminal","browser")},
+                "pending":state.get("pending"),
+                "runtimeProvision":{"status":str(journal.get("status",""))[:64],
+                                    "pending":str(journal.get("pending") or "")[:64],
+                                    "keyRecoveryAttempted":bool(journal.get("keyRecoveryAttempted")),
+                                    "keyExpiresAt":journal.get("keyExpiresAt")}}
+
     def write_state(self,state):
         if self.store.is_symlink() or self.store.parent.is_symlink():
             raise SetupError("Unsafe onboarding state.")
@@ -92,6 +104,7 @@ def main():
         engine=WindowsSetup()
         action=sys.argv[1]
         methods={"status":engine.status_without_secrets,
+                 "connection-preflight":engine.connection_preflight,
                  "discover":engine.discover,
                  "provision":engine.provision,
                  "import":engine.import_tunnels,
@@ -107,7 +120,8 @@ def main():
             browser=payload.get("browser", "chrome")
             result=browser_check(browser)
         else:
-            result=methods[action]() if action=="status" else methods[action](payload)
+            with onboarding_mutation_lock(engine, action):
+                result=methods[action]() if action=="status" else methods[action](payload)
         event("windows.cli.success",action=action,result=result)
         print(json.dumps({"ok":True,"result":result},ensure_ascii=False))
         return 0

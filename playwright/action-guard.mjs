@@ -19,7 +19,8 @@ export const ACTION_ID_RE=/^[a-zA-Z0-9._:-]{8,128}$/;
 export function isMutatingTool(name,args={}){
  if(name==='browser_tabs')return args?.action!=='list';
  return !new Set([
-  'browser_snapshot','browser_take_screenshot',
+  'browser_snapshot','browser_take_screenshot','browser_find',
+  'browser_wait_for','mcpgo_inspect_page',
   'browser_console_messages','browser_network_requests',
  ]).has(name);
 }

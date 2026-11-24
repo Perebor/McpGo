@@ -4,7 +4,7 @@
   "private": true,
   "description": "Isolated local Playwright MCP, not part of the application workspace",
   "dependencies": {
-    "@playwright/mcp": "0.0.85"
+    "@playwright/mcp": "0.0.86"
   },
   "scripts": {
     "postinstall": "node patch-playwright.mjs"

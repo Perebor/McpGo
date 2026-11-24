@@ -122,17 +122,6 @@ test('proxy exposes read-only action status and blocks duplicate POST',async()=>
  assert.equal(status.status,200);
  assert.match(status.text,/completed/);
 });
-test('a lost backend response stays unknown and does not dispatch again',async()=>{
- const id='browser-action-unknown-000002';
- const response=await call('tools/call',{name:'browser_click',arguments:{target:'abort'}},id);
- assert.equal(response.status,502);
- const prior=clickCount;
- const duplicate=await call('tools/call',{name:'browser_click',arguments:{target:'abort'}},id);
- assert.equal(duplicate.status,409);
- assert.equal(clickCount,prior);
- const receipt=await call('tools/call',{name:'mcpgo_action_status',arguments:{request_id:id}});
- assert.match(receipt.text,/unknown/);
-});
 test('shared browser tool calls are serialized across concurrent clients',async()=>{
  maxActive=0;
  const requests=Array.from({length:4},(_,i)=>
@@ -167,4 +156,20 @@ test('expected URL scope protects browser click from another client switching ta
   'url-guard-correct-0001',correct);
  assert.equal(accepted.status,200,accepted.text);
  assert.equal(clickCount,before+1);
+});
+
+test('a lost backend response stays unknown and does not dispatch again',async()=>{
+ const id='browser-action-unknown-000002';
+ const response=await call('tools/call',{name:'browser_click',arguments:{target:'abort'}},id);
+ assert.equal(response.status,503);
+ const prior=clickCount;
+ const duplicate=await call('tools/call',{name:'browser_click',arguments:{target:'abort'}},id);
+ assert.equal(duplicate.status,503);
+ assert.match(duplicate.text,/OUTCOME_UNKNOWN/);
+ assert.equal(clickCount,prior);
+ const receipt=await call('tools/call',{name:'mcpgo_action_status',arguments:{request_id:id}});
+ assert.match(receipt.text,/unknown/);
+ const health=await fetch(base.replace('/mcp','/healthz')).then(r=>r.json());
+ assert.equal(health.browserQueue.quarantined,true);
+ assert.equal(health.lastOutcome,'outcome_unknown');
 });

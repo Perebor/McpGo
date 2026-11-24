@@ -1,7 +1,141 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const message=(value,failed=false)=>{const m=$('message');m.textContent=value;m.style.color=failed?'#f7a5a5':'#8cbea4'};
+const sectionInfo=Object.freeze({
+ overview:['CONTROL CENTER','Сервисы MCP','Управление подключениями ChatGPT на этом компьютере'],
+ onboarding:['GETTING STARTED','Первое подключение','Мастер настройки и безопасного подключения сервисов'],
+ messages:['AGENT MESSAGING','Связь агентов','Локальный обмен сообщениями между агентами'],
+ settings:['TUNNEL SETTINGS','Настройки туннелей','Ключи, браузер и автозапуск Windows'],
+ skills:['AGENT SKILLS','Навыки инструментов','Готовые инструкции для инструментов и агентов McpGo'],
+ autosend:['SCHEDULED MESSAGES','Сообщения по таймеру','Расписания для продолжения работы в ChatGPT'],
+ updates:['RELEASES','Обновления','Версии McpGo и проверка новых выпусков']
+});
+let activeSection='overview';
+function navigate(section,focus=false){
+ const page=sectionInfo[section];
+ if(!page)return;
+ activeSection=section;
+ document.body.dataset.activeSection=section;
+ document.body.dataset.navReady='true';
+ $('page-kicker').textContent=page[0];
+ $('page-title').textContent=page[1];
+ $('page-description').textContent=page[2];
+ for(const element of document.querySelectorAll('[data-section]'))
+  element.hidden=element.dataset.section!==section;
+ for(const button of document.querySelectorAll('[data-nav]')){
+  const active=button.dataset.nav===section;
+  button.classList.toggle('is-active',active);
+  if(active)button.setAttribute('aria-current','page');
+  else button.removeAttribute('aria-current');
+ }
+ $('workspace').scrollTop=0;
+ if(section==='skills')void loadSkill(selectedSkill);
+ if(focus)$('workspace').focus({preventScroll:true});
+}
+for(const button of document.querySelectorAll('[data-nav]'))
+ button.addEventListener('click',()=>navigate(button.dataset.nav,true));
+for(const button of document.querySelectorAll('[data-open]'))
+ button.addEventListener('click',()=>window.mcpgo.openLocation(button.dataset.open)
+  .catch(error=>message(error.message,true)));
+navigate('overview');
+// Keep selected skill local; the main process accepts only four fixed resource IDs.
+let selectedSkill='terminalhub-operations',skillRequest=0;
+async function loadSkill(id){
+ const item=document.querySelector('[data-skill="'+id+'"]');
+ if(!item)return;
+ selectedSkill=id;
+ const sequence=++skillRequest;
+ $('skill-title').textContent=item.querySelector('strong').textContent;
+ $('skill-path').textContent=id+'/SKILL.md';
+ $('skill-content').textContent='Читаем инструкцию…';
+ $('skills-feedback').textContent='Чтение локального SKILL.md';
+ for(const button of document.querySelectorAll('[data-skill]')){
+  const selected=button.dataset.skill===id;
+  button.classList.toggle('is-selected',selected);
+  button.setAttribute('aria-pressed',String(selected));
+ }
+ try{
+  const result=await window.mcpgo.skillRead(id);
+  if(sequence!==skillRequest)return;
+  $('skill-content').textContent=result.content;
+  $('skills-feedback').textContent='Локальный навык · Без автоматического выполнения команд';
+ }catch(error){
+  if(sequence!==skillRequest)return;
+  $('skill-content').textContent='Не удалось прочитать SKILL.md.';
+  $('skills-feedback').textContent=error.message;
+ }
+}
+for(const button of document.querySelectorAll('[data-skill]'))
+ button.addEventListener('click',()=>void loadSkill(button.dataset.skill));
+for(const [id,mode] of [['skill-copy-chat','chat'],['skill-copy-raw','raw']]){
+ $(id).addEventListener('click',async()=>{
+  const button=$(id);button.disabled=true;
+  try{
+   await window.mcpgo.skillCopy(selectedSkill,mode);
+   $('skills-feedback').textContent=mode==='chat'?
+    'Навык скопирован. Вставьте его в нужный чат ChatGPT.':'Содержимое SKILL.md скопировано.';
+  }catch(error){$('skills-feedback').textContent=error.message}
+  finally{button.disabled=false}
+ });
+}
+$('skill-open').addEventListener('click',()=>window.mcpgo.skillOpen(selectedSkill)
+ .catch(error=>{$('skills-feedback').textContent=error.message}));
+function updateSummary(status,readiness={}){
+ const h=readiness.connectionHealth||{};
+ const fresh=c=>Number.isFinite(c?.checkedAt)&&Date.now()>=c.checkedAt&&Date.now()-c.checkedAt<=30000;
+ const terminal=fresh(h.terminal)&&h.terminal.state==='ready';
+ const browser=fresh(h.browser)&&h.browser.state==='ready'&&Date.now()-h.browser.lastBrowserAt<=300000;
+ const count=Number(terminal)+Number(browser);
+ $('active-count').textContent=String(count);
+ $('summary-count').textContent=count+' / 2';
+ $('summary-message').textContent=count===2?'Локальная готовность подтверждена':
+  count===1?'Одна система готова':'Нет подтверждённого подключения';
+ $('connection-dot').classList.toggle('is-online',count>0);
+ for(const [id,ready,parts] of [
+  ['terminal-pill',terminal,[status.terminal,status.terminalTunnel]],
+  ['browser-pill',browser,[status.browser,status.proxy,status.browserTunnel]]
+ ]){
+  const pill=$(id),partial=parts.some(value=>value==='running');
+  const health=id==='terminal-pill'?h.terminal:h.browser;
+  pill.textContent=ready?'Локально готов':health?.state==='auth'?'Авторизация':partial?'Не подтверждено':'Остановлен';
+  pill.classList.toggle('is-running',ready);
+  pill.classList.toggle('is-partial',!ready&&partial);
+ }
+}
+$('refresh-status').addEventListener('click',async()=>{
+ const button=$('refresh-status');button.disabled=true;
+ try{render(await window.mcpgo.status());message('Состояние локальных сервисов обновлено.')}
+ catch(error){message(error.message,true)}
+ finally{button.disabled=false}
+});
+
+const message=(value,failed=false)=>{const m=$('message');m.textContent=value;m.style.color=failed?'#ff8a92':'#a1aaba'};
 let initialized=false;
+let lastOverview=null;
+const healthLabels={ready:'Готов',down:'Недоступен',starting:'Ожидание',auth:'Ошибка авторизации',throttled:'Ограничение запросов',unmonitored:'Не проверяется',unknown:'Не подтверждён',failed:'Ошибка'};
+const reasonLabels={SERVICE_STOPPED:'Служба остановлена',HEALTH_STALE:'Данные устарели',LOCAL_MCP_UNAVAILABLE:'MCP не отвечает',TUNNEL_AUTH:'Ошибка авторизации',TUNNEL_DOWN:'Туннель не отвечает',TUNNEL_STARTING:'Туннель не готов',TUNNEL_UNMONITORED:'Нет проверки туннеля',TUNNEL_THROTTLED:'Ограничение запросов',BROWSER_CONNECTION_FAILED:'Нет связи с расширением',BROWSER_NOT_RECENTLY_VERIFIED:'Браузер давно не проверялся',BROWSER_TELEMETRY_UNAVAILABLE:'Нет данных браузера'};
+function renderConnection(data){
+ const h=data.readiness?.connectionHealth||{};
+ for(const [id,c] of [['terminal-health-detail',h.terminal],['browser-health-detail',h.browser]]){
+  const el=$(id);if(!el)continue;
+  if(!c||!Number.isFinite(c.checkedAt)||Date.now()-c.checkedAt>30000||Date.now()<c.checkedAt){el.textContent='Статус неизвестен: нет актуальной проверки';continue}
+  el.textContent=['MCP: '+(c.mcp?'готов':'не готов'),'Туннель: '+(healthLabels[c.tunnel]||'не подтверждён'),
+   c.browser?'Расширение: '+(healthLabels[c.browser]||'не подтверждено'):'',
+   c.reason?(reasonLabels[c.reason]||c.reason):'Локальная готовность подтверждена',
+   'Проверено '+new Date(c.checkedAt).toLocaleTimeString(),
+   c.lastCallAt?'Последний успешный MCP-вызов '+new Date(c.lastCallAt).toLocaleString():'',
+   c.lastBrowserAt?'Последний успешный браузерный вызов '+new Date(c.lastBrowserAt).toLocaleString():'',
+   'Доступность в конкретном чате не проверена'].filter(Boolean).join(' · ');
+ }
+ const history=$('connection-history');
+ if(history)history.textContent=(data.readiness?.history||[]).slice(-8).reverse().map(e=>new Date(e.at).toLocaleString()+' · '+(e.channel==='terminal'?'Terminal':'Playwright')+' · '+(reasonLabels[e.reason]||healthLabels[e.state]||e.state)).join('\n')||'Нет событий';
+ for(const [id,field,c] of [['state-terminal','terminal',h.terminal],['state-terminalTunnel','terminalTunnel',h.terminal],['state-browser','browser',h.browser],['state-proxy','proxy',h.browser],['state-browserTunnel','browserTunnel',h.browser]]){
+  const el=$(id);if(!el)continue;
+  const fresh=c&&Number.isFinite(c.checkedAt)&&Date.now()>=c.checkedAt&&Date.now()-c.checkedAt<=30000;
+  const status=!fresh?'Не проверено':field.endsWith('Tunnel')?(healthLabels[c.tunnel]||'Не подтверждён'):field==='browser'?(healthLabels[c.browser]||'Не подтверждён'):c.mcp?'MCP готов':'MCP не готов';
+  el.textContent=status;el.className=fresh&&(field.endsWith('Tunnel')?c.tunnel==='ready':field==='browser'?c.browser==='ready'&&Date.now()-c.lastBrowserAt<=300000:c.mcp)?'ok':'warn';
+ }
+}
+setInterval(()=>{if(lastOverview){updateSummary(lastOverview.status||{},lastOverview.readiness||{});renderConnection(lastOverview)}},1000);
 function render(data) {
  if(!initialized){
   $('terminal-id').value=data.terminal.id||'';
@@ -9,20 +143,52 @@ function render(data) {
   $('browser').value=data.browser;
   $('autoStart').checked=data.autoStart;
   initialized=true;
+  if(!data.terminal?.id || !data.browserTunnel?.id)navigate('onboarding');
+  else if(!data.terminal?.configured||!data.browserTunnel?.configured)navigate('onboarding');
  }
+ lastOverview=data;
+ updateSummary(data.status||{},data.readiness||{});
+ const diagnostic=$('connection-diagnostic'),r=data.readiness||{};
+ if(diagnostic)diagnostic.textContent=[
+  'Terminal MCP: '+(r.terminalMcp?'готов':'не подтверждён'),
+  'Terminal Tunnel: '+(r.terminalTunnel?'готов':'не подтверждён'),
+  'Browser MCP: '+(r.browserMcp?'готов':'не подтверждён'),
+  'Browser Tunnel: '+(r.browserTunnel?'готов':'не подтверждён'),
+  'Chrome/Edge: '+(r.chrome===true?'вкладки доступны':r.chrome===false?'проверка не пройдена':'не проверен'),
+  'ChatGPT: выполни тестовый вызов из подключённого чата'
+ ].join(' · ');
+
+ const extensionStates=[data.status?.browser,data.status?.autosendBrowser];
+ const invalid=extensionStates.some(v=>typeof v==='string'&&/INVALID_ENCRYPTED_EXTENSION_TOKEN|SECURE_STORAGE_UNAVAILABLE|EXTENSION_CONFIG_UNREADABLE/.test(v));
+ const missing=!data.playwrightExtension?.configured||extensionStates.includes('unconfigured');
+ const hint=$('playwright-token-help');
+ if(hint)hint.textContent=invalid?'Не удалось прочитать токен. Проверь доступ к защищённому хранилищу Windows и введи токен заново. Туннели пересоздавать не нужно.':
+  missing?'Токен отсутствует. Вставь токен Chrome Extension и сохрани настройки для восстановления Browser MCP и AutoSend.':
+  'Токен сохранён в защищённом хранилище Windows. Это не подтверждает соединение с Chrome. Для восстановления введи новый токен и сохрани настройки.';
+
  for(const [key,value] of Object.entries(data.status||{})){
   const el=$('state-'+key);if(!el)continue;
-  const messages={running:'Запущен',stopped:'Остановлен',starting:'Запуск',unconfigured:'Не настроен'};
+  const messages={running:'Запущен',stopped:'Остановлен',starting:'Запуск',unconfigured:'Не настроен','error: PORT_OCCUPIED':'Локальный порт занят','error: INVALID_ENCRYPTED_EXTENSION_TOKEN':'Токен повреждён','error: EXTENSION_CONFIG_UNREADABLE':'Не удалось прочитать токен','error: SECURE_STORAGE_UNAVAILABLE':'Защищённое хранилище недоступно'};
   el.textContent=messages[value]||value;
   el.className=value==='running'?'ok':(value==='stopped'||value==='unconfigured'?'':'warn');
  }
+ renderConnection(data);
 }
 window.mcpgo.onStatus(render);
+$('copy-connection-test').onclick=async()=>{
+ try{await window.mcpgo.copyConnectionTest();message('Вставь скопированный тест в нужный чат ChatGPT.')}catch(e){message(e.message,true)}
+};
+$('overview-verify').onclick=async()=>{
+ try{message('Проверяем соединение с браузером…');render(await window.mcpgo.verifyConnection());message('Проверка завершена. См. состояние компонентов.')}catch(e){message(e.message,true)}
+};
+for(const [id,name] of [['recover-terminal-tunnel','terminalTunnel'],['recover-browser-tunnel','browserTunnel']])$(id).onclick=async()=>{
+ try{if(!window.confirm('Переподключить только туннель? Текущий сетевой вызов может быть прерван.'))return;render(await window.mcpgo.recoverTunnel(name));message('Переподключаем туннель…')}catch(e){message(e.message,true)}
+};
 window.mcpgo.status().then(data=>{render(data);message('Локальные сервисы запускаются автоматически.')})
   .catch(e=>message(e.message,true));
 $('settings').addEventListener('submit',async event=>{
  event.preventDefault();
- const button=document.querySelector('button[type=submit]');button.disabled=true;
+ const button=event.currentTarget.querySelector('button[type=submit]');button.disabled=true;
  try{
   const terminalId=$('terminal-id').value.trim(),browserId=$('browser-id').value.trim();
   const data={browser:$('browser').value,autoStart:$('autoStart').checked,
@@ -30,10 +196,14 @@ $('settings').addEventListener('submit',async event=>{
     browserTunnel:browserId?{id:browserId,key:$('browser-key').value}:undefined,
     playwrightExtension:$('playwright-token').value?
       {token:$('playwright-token').value}:undefined};
+  if(data.playwrightExtension)message('Проверяем токен и доступ к вкладкам браузера…');
   const result=await window.mcpgo.save(data);
   $('terminal-key').value='';$('browser-key').value='';$('playwright-token').value='';
-  render(result);message('Настройки сохранены. Сервисы переподключены.');
- }catch(e){message(e.message,true)}finally{button.disabled=false}
+  render(result);message('Настройки сохранены. Проверяй состояние подключения в панели сервисов.');
+ }catch(e){
+  const detail=String(e.message||'');
+  message(detail.includes('EXTENSION_TRIAL')?'Расширение не подтвердило доступ к браузеру. Проверь токен и профиль. Предыдущие настройки сохранены.':detail,true);
+ }finally{button.disabled=false}
 });
 $('restart').addEventListener('click',async()=>{
  try{message('Перезапуск компонентов...');render(await window.mcpgo.restart());message('Запрос на перезапуск выполнен.')}
@@ -76,6 +246,38 @@ void checkBrowserCompatibility();
 
 
 const wizard=$('wizard-status');
+async function resumeWizard(){
+ try{
+  const data=await window.mcpgo.onboard('status',{});
+  const current=await window.mcpgo.status();
+  for(const [field,name] of [['terminal-id','terminal'],['browser-id','browser']]){
+   const id=data.tunnels?.[name]?.id;
+   if(id&&!$(field).value)$(field).value=id;
+  }
+  const key=data.runtimeProvision||{},saved=current.terminal?.configured&&current.browserTunnel?.configured;
+  if(['key-issuing','key-issued','recovery-key-issuing','key-recovery-rejected'].includes(key.status)&&!saved){
+   wizard.textContent='Ключ ранее выпускался, но не подтверждён локально. Проверь созданные ресурсы и восстанови ключ; не создавай новый проект.';
+  }else if(data.pending||key.pending){
+   wizard.textContent='Найдена незавершённая настройка. Повтори текущий шаг: McpGo сверит существующие ресурсы.';
+  }else if(data.tunnels?.terminal?.id&&data.tunnels?.browser?.id&&!saved){
+   wizard.textContent='Оба Tunnel ID восстановлены. Продолжи настройку Runtime Key.';
+  }
+  if(saved&&key.keyExpiresAt&&Date.parse(key.keyExpiresAt)-Date.now()<7*86400000)
+   wizard.textContent='Срок Runtime Key подходит к концу или истёк. Проверь ключ в OpenAI Platform и обнови его в настройках.';
+ }catch(e){wizard.textContent='Не удалось прочитать сохранённое состояние: '+e.message}
+}
+void resumeWizard();
+$('verify-connection').onclick=async()=>{
+ const button=$('verify-connection');button.disabled=true;
+ try{
+  wizard.textContent='Проверяем сеть, локальное хранилище и подключение браузера…';
+  const [preflight,connection]=await Promise.all([
+   window.mcpgo.onboard('connection-preflight',{}),window.mcpgo.verifyConnection()]);
+  render(connection);
+  wizard.textContent=preflight.message+' '+(preflight.secureStorage?'Шифрование Windows доступно.':'Защищённое хранилище Windows недоступно.');
+ }
+ catch(e){wizard.textContent=e.message}finally{button.disabled=false}
+};
 $('export-diagnostics').onclick=async()=>{
  try{
   const result=await window.mcpgo.exportDiagnostics();
@@ -83,7 +285,7 @@ $('export-diagnostics').onclick=async()=>{
  }catch(e){wizard.textContent='Не удалось экспортировать диагностику: '+e.message}
 };
 async function runWizard(action,data){
- const buttons=[$('create-tunnels'),$('create-runtime')];
+ const buttons=[$('create-tunnels'),$('create-runtime'),$('inspect-runtime'),$('recover-runtime')];
  buttons.forEach(b=>b.disabled=true);
  try{return await window.mcpgo.onboard(action,data)}
  catch(e){wizard.textContent=e.message;throw e}
@@ -111,6 +313,28 @@ $('create-runtime').onclick=async()=>{
   const r=await window.mcpgo.status();
   $('terminal-id').value=r.terminal.id;$('browser-id').value=r.browserTunnel.id;
   render(r);wizard.textContent='Туннели подключаются. Ключ сохранён.';
+ }catch{}
+};
+$('inspect-runtime').onclick=async()=>{
+ if(!$('admin-key').value)return wizard.textContent='Введите ключ администратора';
+ try{
+  const result=await runWizard('runtime-inspect',{adminKey:$('admin-key').value});
+  wizard.textContent=['Проект: '+(result.priorProjectAvailable?'доступен':'не подтверждён'),
+   'Роль: '+(result.roleValid?'подтверждена':result.roleFound?'требует проверки':'не найдена'),
+   result.priorProjectIsDefault?'Default project не поддерживает Service Account.':'',
+   result.pendingKind?'Незавершённый этап: '+result.pendingKind:'',
+   'Если ключ был выпущен, но не сохранился, используй восстановление Runtime Key.'].filter(Boolean).join(' · ');
+ }catch{}
+};
+$('recover-runtime').onclick=async()=>{
+ if(!$('admin-key').value)return wizard.textContent='Введите ключ администратора';
+ if(!window.confirm('Выпустить один новый ключ для существующего Service Account? Прежний ключ может существовать; он не будет удалён.'))return;
+ try{
+  await runWizard('runtime-recover-key',{adminKey:$('admin-key').value,confirmed:true,acknowledgePossiblePreviousKey:true});
+  $('admin-key').value='';
+  const r=await window.mcpgo.status();
+  $('terminal-id').value=r.terminal.id;$('browser-id').value=r.browserTunnel.id;
+  render(r);wizard.textContent='Новый ключ сохранён. Проверяем соединение.';
  }catch{}
 };
 function element(tag,text){

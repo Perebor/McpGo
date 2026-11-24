@@ -815,3 +815,23 @@ class RuntimeAutoTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+class RuntimeHttpRetryTests(unittest.TestCase):
+    def test_transient_get_retried_but_post_never_replayed(self):
+        import io
+        import urllib.error
+        from unittest.mock import patch
+        from runtime_provision import RuntimeAdminAPI, RuntimeAdminError
+        from contextlib import nullcontext
+        class Response:
+            status=200
+            def read(self,n): return b'{"data":[]}'
+        error=urllib.error.HTTPError("https://api.openai.com/v1/organization/projects",429,"throttled",{"Retry-After":"0"},io.BytesIO(b"{}"))
+        api=RuntimeAdminAPI()
+        with patch("runtime_provision.urlopen_logged",side_effect=[error,nullcontext(Response())]) as request, patch("runtime_provision.time.sleep"):
+            self.assertEqual(api.api("sk-test-key","GET","/organization/projects"),{"data":[]})
+            self.assertEqual(request.call_count,2)
+        with patch("runtime_provision.urlopen_logged",side_effect=TimeoutError) as request, patch("runtime_provision.time.sleep"):
+            with self.assertRaises(RuntimeAdminError):
+                api.api("sk-test-key","POST","/organization/projects",{"name":"test"})
+            self.assertEqual(request.call_count,1)

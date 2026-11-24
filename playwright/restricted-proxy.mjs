@@ -1,4 +1,8 @@
 import {sameChatGPTConversation} from './chatgpt-url.mjs';
+import {McpSseResultReader,responseMessage,transformMcpResponse} from './mcp-response.mjs';
+import {BrowserActionQueue} from './browser-queue.mjs';
+import {PAGE_INSPECT_TOOL,planPageInspection,lowAccessibilitySignal,visualSnapshotArgs} from './page-inspection.mjs';
+import {validateToolProfile,filterTools} from './tool-profiles.mjs';
 import http from 'node:http';
 import {ActionGuard,isMutatingTool,ACTION_STATUS_TOOL} from './action-guard.mjs';
 import {BrowserSessionManager,SHARED_CLIENT,BrowserReconnectError} from './browser-session-manager.mjs';
@@ -7,9 +11,9 @@ import {PortableAgentTabs} from './portable-agent-tabs.mjs';
 import {AgentScopeRegistry,validScopeHint} from './agent-scope.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {BrowserWorkspaceRegistry} from './browser-workspace.mjs';
-import {attachWorkspace,decorateMcpToolResponse,withWorkspaceToolSchema} from './workspace-response.mjs';
+import {attachWorkspace,withWorkspaceToolSchema} from './workspace-response.mjs';
 import {MODERN_PROTOCOL,validateModernRequest,normalizedConversationHint,
-  modernizeResponse,modernizeMessage,discoverResult,stripModernParams} from './mcp-modern-protocol.mjs';
+  modernizeMessage,discoverResult,stripModernParams} from './mcp-modern-protocol.mjs';
 
 const MODE = process.argv[2] || 'shared';
 if (MODE !== 'shared') throw Error('Only the official Playwright Extension shared browser is supported');
@@ -20,6 +24,7 @@ if (MODE !== 'shared') throw Error('Only the official Playwright Extension share
 const LEGACY_TEST_MODE=process.env.NODE_ENV==='test' && process.env.MCPGO_LEGACY_TEST_ONLY==='1';
 const LEGACY_COMPAT=LEGACY_TEST_MODE||process.env.MCPGO_DISABLE_LEGACY!=='1';
 const [LISTEN_PORT,BACKEND_PORT] = [Number(process.env.MCPGO_PROXY_PORT||8940),Number(process.env.MCPGO_BACKEND_PORT||8931)];
+const TOOL_PROFILE=validateToolProfile(process.env.MCPGO_BROWSER_TOOL_PROFILE||'full');
 const MAX_BODY = 1024 * 1024;
 const MAX_RESPONSE = 8 * 1024 * 1024;
 // Reuse one backend MCP session for all short-lived client connections.
@@ -52,15 +57,43 @@ function ownershipConflict(owner,caller,{mode='unknown',tool='unknown'}={}){
 
 // No identifiers, arguments, URLs, or tokens are logged. Count wire formats only.
 const observedWireCalls={modern:0,legacy:0};
-const sessionInfo=()=>({...browserSession.status(),...agentTabs.status(),...agentScopes.status(),...workspaces.status(),browserQueue:browserQueueStatus(),
+// Short privacy-safe failure history. No URLs, DOM, request bodies, user text,
+// image captures, token values or workspace identifiers are ever stored here.
+const recentFailures=[];
+function noteFailure(status,reason){
+ const code=String(reason||'').match(/^([A-Z][A-Z0-9_]{3,63})(?:\b|:)/)?.[1]||'HTTP_'+status;
+ recentFailures.push({at:new Date().toISOString(),status,code});
+ if(recentFailures.length>20)recentFailures.shift();
+}
+const upstreamCounts={catalog:0,tabLists:0,total:0};
+const latencyBuckets=Object.create(null);
+const responseSizes=Object.create(null);
+function recordResponseSize(type,bytes){
+ const bucket=responseSizes[type]??=[];bucket.push(bytes);
+ if(bucket.length>500)bucket.shift();
+}
+function recordLatency(type,total,queue){
+ const bucket=latencyBuckets[type]??={total:[],queue:[]};
+ bucket.total.push(total);bucket.queue.push(queue);
+ if(bucket.total.length>500){bucket.total.shift();bucket.queue.shift();}
+}
+const quantile=(samples,p)=>samples.length?([...samples].sort((a,b)=>a-b)[Math.ceil(samples.length*p)-1]??0):null;
+const performanceStatus=()=>({upstream:{...upstreamCounts},commands:Object.fromEntries(
+ Object.entries(latencyBuckets).map(([type,b])=>[type,{count:b.total.length,
+  medianMs:quantile(b.total,0.5),p95Ms:quantile(b.total,0.95),
+  queueMedianMs:quantile(b.queue,0.5),queueP95Ms:quantile(b.queue,0.95),
+  responseMedianBytes:quantile(responseSizes[type]||[],0.5),
+  responseP95Bytes:quantile(responseSizes[type]||[],0.95)}]))});
+const sessionInfo=()=>({...browserSession.status(),...agentTabs.status(),...agentScopes.status(),...workspaces.status(),browserQueue:browserQueueStatus(),performance:performanceStatus(),recentFailures:[...recentFailures],
   publicProtocol:MODERN_PROTOCOL,legacyExternal:LEGACY_COMPAT,
-  observedWireCalls:{...observedWireCalls}});
+  observedWireCalls:{...observedWireCalls},toolProfile:TOOL_PROFILE});
 const BACKEND_INIT={jsonrpc:'2.0',id:'mcpgo-private-backend-init',method:'initialize',
   params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:SHARED_CLIENT,version:'1.0.0'}}};
 const LOCAL_TOOL_NAMES=new Set(['mcpgo_workspace','mcpgo_agent_status','mcpgo_browser_status','mcpgo_action_status']);
 let backendNotifiedSid=null,privateReadyInFlight=null;
 async function ensurePrivatePlaywright(){
-  await ensureValidInitialize(BACKEND_INIT,'2025-03-26');
+  try{await initializeOnce(BACKEND_INIT,'2025-03-26');}
+  catch(e){browserSession.recordBrowserEvent('transport_unavailable');throw e;}
   const sid=sharedSessionId;
   if(backendNotifiedSid===sid)return;
   if(privateReadyInFlight)return privateReadyInFlight;
@@ -71,77 +104,47 @@ async function ensurePrivatePlaywright(){
     backendNotifiedSid=sid;
   })();
   privateReadyInFlight=task;
-  try{await task;}finally{if(privateReadyInFlight===task)privateReadyInFlight=null;}
+  try{await task;}
+  catch(e){expireSession(sid);throw e;}
+  finally{if(privateReadyInFlight===task)privateReadyInFlight=null;}
 }
 
 // A shared Chrome context is not safe for simultaneous browser tool calls:
 // one client can otherwise change the active tab while another is clicking.
 // Never retain an abandoned browser waiter. Previous promise-tail chaining
 // kept timed-out/closed callers in the queue, starving AutoSend for minutes.
-const BROWSER_QUEUE_MAX=16;
-const BROWSER_QUEUE_WAIT_MS=process.env.NODE_ENV==='test'?
- Number(process.env.MCPGO_TEST_QUEUE_WAIT_MS||12000):12000;
-let browserLockHeld=false,browserLockStartedAt=0;
-const browserWaiters=[];
-function browserQueueStatus(){
- const now=Date.now();
- return {active:browserLockHeld,waiting:browserWaiters.length,
-  activeMs:browserLockHeld?now-browserLockStartedAt:0,
-  oldestWaitMs:browserWaiters.length?now-browserWaiters[0].createdAt:0,
-  blocked:browserWaiters.length>=8||(browserLockHeld&&now-browserLockStartedAt>45000)};
-}
-function nextBrowserWaiter(){
- while(browserWaiters.length){
-  const waiter=browserWaiters.shift();waiter.cleanup();
-  if(waiter.signal?.aborted){waiter.reject(Error('BROWSER_QUEUE_CLIENT_GONE'));continue;}
-  browserLockStartedAt=Date.now();
-  waiter.resolve(browserRelease());return;
- }
- browserLockHeld=false;browserLockStartedAt=0;
-}
-function browserRelease(){
- let released=false;
- return ()=>{if(released)return;released=true;nextBrowserWaiter();};
-}
-function acquireBrowserLock({signal,priority=false}={}){
- if(signal?.aborted)return Promise.reject(Error('BROWSER_QUEUE_CLIENT_GONE'));
- if(!browserLockHeld){
-  browserLockHeld=true;browserLockStartedAt=Date.now();
-  return Promise.resolve(browserRelease());
- }
- if(browserWaiters.length>=BROWSER_QUEUE_MAX)return Promise.reject(Error('BROWSER_QUEUE_FULL'));
- return new Promise((resolve,reject)=>{
-  let timeout;
-  const waiter={resolve,reject,signal,priority,createdAt:Date.now(),cleanup:()=>{
-   clearTimeout(timeout);signal?.removeEventListener('abort',cancel);
-  }};
-  const cancel=()=>{
-   const i=browserWaiters.indexOf(waiter);
-   if(i<0)return;
-   browserWaiters.splice(i,1);waiter.cleanup();
-   reject(Error(signal?.aborted?'BROWSER_QUEUE_CLIENT_GONE':'BROWSER_QUEUE_WAIT_TIMEOUT'));
-  };
-  timeout=setTimeout(cancel,BROWSER_QUEUE_WAIT_MS);timeout.unref?.();
-  signal?.addEventListener('abort',cancel,{once:true});
-  if(priority){
-   const i=browserWaiters.findIndex(w=>!w.priority);
-   browserWaiters.splice(i<0?browserWaiters.length:i,0,waiter);
-  }else browserWaiters.push(waiter);
- });
-}
-
+const browserQueue=new BrowserActionQueue({
+ waitMs:process.env.NODE_ENV==='test'?Number(process.env.MCPGO_TEST_QUEUE_WAIT_MS||12000):12000
+});
+const browserQueueStatus=()=>browserQueue.status();
+const acquireBrowserLock=opts=>browserQueue.acquire(opts);
 
 // Always scope requests to the upstream session. Do not leak downstream
 // session IDs from different MCP clients into the shared Chrome backend.
 function upstreamRequest(payload, headers={}, method='POST', timeout=12000) {
   return new Promise((resolve,reject) => {
     const data=Buffer.isBuffer(payload)?payload:Buffer.from(JSON.stringify(payload));
-    let requestId=null;
-    try{requestId=JSON.parse(data.toString('utf8')).id??null}catch{}
+    let requestId=null,metric='upstream:other';
+    const upstreamStarted=Date.now();
+    try{
+      const requested=JSON.parse(data.toString('utf8'));
+      metric=requested.method==='tools/call'
+        ?'upstream:'+(requested.params?.name==='browser_tabs'
+            ?'tabs:'+(requested.params?.arguments?.action||'unknown')
+            :String(requested.params?.name||'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40))
+        :'upstream:'+String(requested.method||'other').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,30);
+      requestId=requested.id??null;
+      upstreamCounts.total++;
+      if(requested.method==='tools/list')upstreamCounts.catalog++;
+      if(requested.method==='tools/call'&&requested.params?.name==='browser_tabs'&&
+        requested.params?.arguments?.action==='list')upstreamCounts.tabLists++;
+    }catch{}
     let finished=false,deadline;
     const settle=(err,result)=>{
       if(finished)return;
       finished=true;clearTimeout(deadline);
+      recordLatency(metric,Date.now()-upstreamStarted,0);
+      if(result?.body)recordResponseSize(metric,result.body.length);
       if(err)reject(err);else resolve(result);
     };
     const request=http.request({hostname:'127.0.0.1',port:BACKEND_PORT,path:'/mcp',
@@ -149,33 +152,31 @@ function upstreamRequest(payload, headers={}, method='POST', timeout=12000) {
         accept:'application/json, text/event-stream','content-type':'application/json',
         'mcp-protocol-version':initVersion,...headers,
         ...(method==='POST'?{'content-length':String(data.length)}:{})}},up=>{
-      const parts=[];let size=0,sseBuffer='';
+      const parts=[];let size=0;
       const sse=/\btext\/event-stream\b/i.test(String(up.headers['content-type']||''));
+      const reader=sse&&requestId!==null?new McpSseResultReader(requestId):null;
       up.on('data',chunk=>{
         if(finished)return;
         size+=chunk.length;
         if(size>MAX_RESPONSE){up.destroy(Error('MCP response too large'));return;}
         parts.push(chunk);
-        if(!sse||requestId===null)return;
-        // MCP over SSE may keep the HTTP connection open after the matching
-        // JSON-RPC result. Never hold the shared browser lock for heartbeats.
-        sseBuffer+=chunk.toString('utf8').replace(/\r\n/g,'\n');
-        let boundary;
-        while((boundary=sseBuffer.indexOf('\n\n'))>=0){
-          const frame=sseBuffer.slice(0,boundary);sseBuffer=sseBuffer.slice(boundary+2);
-          const lines=frame.split('\n').filter(x=>x.startsWith('data:'));
-          if(!lines.length)continue;
-          let json;
-          try{json=JSON.parse(lines.map(x=>x.slice(5).trimStart()).join('\n'));}
-          catch{continue;}
-          if(String(json.id)!==String(requestId)||(!Object.hasOwn(json,'result')&&!Object.hasOwn(json,'error')))continue;
+        if(!reader)return;
+        const complete=reader.push(chunk);
+        if(complete){
           settle(null,{status:up.statusCode||502,headers:up.headers,
-            body:Buffer.from(frame+'\n\n')});
+            body:complete.body,message:complete.message});
           up.destroy();return;
         }
       });
-      up.on('end',()=>settle(null,{status:up.statusCode||502,
-        headers:up.headers,body:Buffer.concat(parts)}));
+      up.on('end',()=>{
+        if(reader)return settle(Error('MCP backend closed before matching complete SSE result'));
+        const body=Buffer.concat(parts),status=up.statusCode||502;
+        let message=null;
+        try{if(status===200&&requestId!==null)
+          message=responseMessage(body,up.headers['content-type'],requestId);
+        }catch(e){return settle(e);}
+        settle(null,{status,headers:up.headers,body,message});
+      });
       up.on('error',err=>settle(err));
       up.on('close',()=>{if(!finished)settle(Error('MCP backend closed before final response'));});
     });
@@ -193,7 +194,7 @@ function expireSession(expected=sharedSessionId){
   if (expected!==sharedSessionId) return;
   sharedSessionId=null;
   cachedInit=null;
-  browserSession.markMcpUnavailable();
+  if(browserSession.status().mcp!=='unavailable')browserSession.markMcpUnavailable();
   agentTabs.reset();
 }
 async function initializeOnce(payload,protocolVersion){
@@ -256,14 +257,9 @@ async function ensureSessionAfterExpiry(payload,oldSession){
   }
   return newSession;
 }
-const rewriteJsonRpcId = (raw,id) => {
-  const text=raw.trim();
-  if (text.startsWith('{')) { const obj=JSON.parse(text);obj.id=id;return JSON.stringify(obj); }
-  return text.replace(/^data: (.+)$/gm,(line,json)=>{
-    try {const obj=JSON.parse(json);if ('id' in obj)obj.id=id;return 'data: '+JSON.stringify(obj);}
-    catch{return line;}
-  });
-};
+const rewriteJsonRpcId=(raw,id)=>transformMcpResponse(raw,
+  raw.trimStart().startsWith('{')?'application/json':'text/event-stream',
+  message=>Object.hasOwn(message,'id')?{...message,id}:message).toString();
 
 const WORKSPACE_TOOL={
   name:'mcpgo_workspace',
@@ -303,7 +299,7 @@ const SESSION_STATUS_TOOL={
   description:'Read-only McpGo browser session diagnostics. Never contacts Chrome, creates tabs, or opens a Playwright extension connection. Browser state is last observed by a real tool, not a background probe.',
   inputSchema:{type:'object',properties:{},additionalProperties:false}
 };
-const UNSAFE = new Set(['browser_run_code_unsafe']);
+const UNSAFE = new Set(['browser_run_code_unsafe','browser_close']);
 
 const inspectCall = payload => {
   const entries = Array.isArray(payload) ? payload : [payload];
@@ -330,58 +326,25 @@ const stripTools = (message,{requireWorkspace=false}={}) => {
     if(!message.result.tools.some(t=>t.name===STABLE_TAB_ACTION_TOOL.name))message.result.tools.push(STABLE_TAB_ACTION_TOOL);
     if(!message.result.tools.some(t=>t.name===AGENT_SCOPE_STATUS_TOOL.name))message.result.tools.push(AGENT_SCOPE_STATUS_TOOL);
     if(!message.result.tools.some(t=>t.name===WORKSPACE_TOOL.name))message.result.tools.push(WORKSPACE_TOOL);
-    message.result.tools=message.result.tools.map(t=>withWorkspaceToolSchema(t,{requireWorkspace}));
+    if(!message.result.tools.some(t=>t.name===PAGE_INSPECT_TOOL.name))message.result.tools.push(PAGE_INSPECT_TOOL);
+    message.result.tools=filterTools(message.result.tools,TOOL_PROFILE).map(t=>withWorkspaceToolSchema(t,{requireWorkspace}));
   }
   return message;
 };
-const filterResponse = (raw, contentType,{requireWorkspace=false}={}) => {
-  const source = raw.toString('utf8');
-  if (contentType.includes('text/event-stream')) {
-    return Buffer.from(source.replace(/^data:\s*(\{[^\r\n]*\})\r?$/gm, (line, obj) => {
-      try { return 'data: ' + JSON.stringify(stripTools(JSON.parse(obj),{requireWorkspace})); }
-      catch { return line; }
-    }), 'utf8');
-  }
-  return Buffer.from(JSON.stringify(stripTools(JSON.parse(source),{requireWorkspace})), 'utf8');
-};
 const error = (res, status, reason, id = null, rpcCode=null) => {
+  noteFailure(status,reason);
   const body = JSON.stringify({jsonrpc:'2.0', id,
     error:{code:rpcCode??(status===403 ? -32601 : -32600),message:reason}});
   res.writeHead(status, {'content-type':'application/json','cache-control':'no-store'});
   res.end(body);
 };
-// The remote ChatGPT connector may create a fresh MCP session for each tool call.
-// Populate the tab index table in the same session immediately before select/close.
-async function warmupTabIndices(headers) {
-  const payload=Buffer.from(JSON.stringify({jsonrpc:'2.0',id:'tab-index-sync',method:'tools/call',
-    params:{name:'browser_tabs',arguments:{action:'list'}}}));
-  return await new Promise(resolve => {
-    const backend=http.request({hostname:'127.0.0.1',port:BACKEND_PORT,path:'/mcp',method:'POST',
-      headers:{...headers,'content-length':String(payload.length)},timeout:12000},up=>{
-        up.resume();up.on('end',()=>resolve(up.statusCode===200));
-      });
-    backend.on('timeout',()=>{backend.destroy();resolve(false);});
-    backend.on('error',()=>resolve(false));
-    backend.end(payload);
-  });
-}
-
-
 /** A page-scoped modifying action must target the exact active tab.
  * Read the current URL inside the same serialized critical section immediately
  * before dispatching a browser action. Fail closed if Playwright cannot prove it.
  */
 function extractMcpToolText(response){
- const raw=response.body.toString('utf8');
- let obj=null;
- if(raw.trimStart().startsWith('{'))obj=JSON.parse(raw);
- else for(const line of raw.split(/\r?\n/)){
-  if(line.startsWith('data: ')){
-   try{const candidate=JSON.parse(line.slice(6));if(candidate?.result){obj=candidate;break}}
-   catch{}
-  }
- }
- return (obj?.result?.content||[]).filter(c=>c?.type==='text').map(c=>c.text||'').join('\n');
+ const message=response.message??responseMessage(response.body,response.headers?.['content-type']);
+ return (message?.result?.content||[]).filter(c=>c?.type==='text').map(c=>c.text||'').join('\n');
 }
 function parseActiveUrl(response){
  if(response.status!==200)return null;
@@ -396,20 +359,30 @@ function parseActiveUrl(response){
 }
 // Read the live tab index table only when the user explicitly requests a
 // tab lease or an agent is working with leased tabs. Never used by healthz.
-async function tabSnapshot(headers,{track=true}={}){
+async function tabSnapshot(headers,{track=true,deadlineAt=Infinity}={}){
+  const started=Date.now();
+  try{
   browserSession.beforeBrowserCall();
   let response;
   try{
     response=await upstreamRequest({jsonrpc:'2.0',id:'mcpgo-tab-lease-read',
-      method:'tools/call',params:{name:'browser_tabs',arguments:{action:'list'}}},headers,'POST',12000);
+      method:'tools/call',params:{name:'browser_tabs',arguments:{action:'list'}}},headers,'POST',
+      Math.max(1,Math.min(12000,deadlineAt-Date.now())));
     browserSession.recordBrowserResult(response);
-  }catch(e){browserSession.recordBrowserResult({status:503});throw e;}
+  }catch(e){
+    // A previous tab inspection may still be running on the shared active tab.
+    // Do not admit another command until a controlled backend restart.
+    browserSession.recordBrowserEvent('outcome_unknown');
+    browserQueue.quarantine();
+    throw e;
+  }
   if(response.status!==200 || browserTransportFailedFromTabList(response))return null;
   const text=extractMcpToolText(response);
   if(!text.includes('### Result'))return null;
   if(!track)return {...parseTabIndices(text),text};
   const snapshot=agentTabs.refresh(text);
   return {...parseTabIndices(text),view:snapshot,currentHandle:snapshot.current,text};
+  }finally{recordLatency('stage_tab_verification',Date.now()-started,0);}
 }
 function browserTransportFailedFromTabList(response){
   try{const text=extractMcpToolText(response);
@@ -417,21 +390,29 @@ function browserTransportFailedFromTabList(response){
   }catch{return true}
 }
 const sendLocalTool=(res,id,value,clientSid=sharedSessionId,workspaceId=null)=>{
-  const result=attachWorkspace({content:[{type:'text',text:JSON.stringify(value)}]},workspaceId);
+  const result=attachWorkspace({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value},workspaceId);
   const message={jsonrpc:'2.0',id,result};
   const body=Buffer.from(JSON.stringify(res.mcpModern?modernizeMessage(message):message));
   res.writeHead(200,{'content-type':'application/json','cache-control':'no-store',
     ...(!res.mcpModern?{'mcp-session-id':clientSid}:{}),'content-length':String(body.length)});
   res.end(body);
 };
-async function verifyActiveUrl(headers,expected){
- const answer=await upstreamRequest({jsonrpc:'2.0',id:'mcpgo-scope-check',method:'tools/call',
-  params:{name:'browser_evaluate',arguments:{function:'() => ({url: location.href})'}}},headers,'POST',12000);
+async function verifyActiveUrl(headers,expected,deadlineAt=Infinity){
+ let answer;
+ try{answer=await upstreamRequest({jsonrpc:'2.0',id:'mcpgo-scope-check',method:'tools/call',
+  params:{name:'browser_evaluate',arguments:{function:'() => ({url: location.href})'}}},headers,'POST',
+  Math.max(1,Math.min(12000,deadlineAt-Date.now())));
+ }catch(e){
+  browserSession.recordBrowserEvent('outcome_unknown');
+  browserQueue.quarantine();
+  throw e;
+ }
  const active=parseActiveUrl(answer);
  return active===expected||sameChatGPTConversation(active,expected);
 }
 
 const server = http.createServer(async (req,res) => {
+  const requestReceivedAt=Date.now();
   const reqHost = String(req.headers.host || '').toLowerCase();
   if (!['localhost:'+LISTEN_PORT,'127.0.0.1:'+LISTEN_PORT].includes(reqHost)) return error(res,403,'Host forbidden');
   // Unique inert first page for newly-created tabs. The official Playwright
@@ -546,8 +527,10 @@ const server = http.createServer(async (req,res) => {
       }
       if(data.method==='tools/list'||(data.method==='tools/call' &&
         !LOCAL_TOOL_NAMES.has(data.params?.name))){
+        const initStarted=Date.now();
         try{await ensurePrivatePlaywright()}
         catch{return error(res,502,'Private Playwright initialization unavailable',data.id)}
+        finally{recordLatency('stage_session_prepare',Date.now()-initStarted,0)}
       }
     }else{
       scope=req.headers['mcp-session-id']===sharedSessionId
@@ -622,20 +605,34 @@ const server = http.createServer(async (req,res) => {
     const isStableTabAction=req.method==='POST'&&data?.method==='tools/call'&&data.params?.name===STABLE_TAB_ACTION_TOOL.name;
     const isBrowserCall=req.method==='POST'&&data?.method==='tools/call'&&!isTabLeaseCall&&!isTabHandleCall;
     let unlock=null;
+    const waitingSince=Date.now();let queueWait=0;
+    const metricType=data?.params?.name==='mcpgo_tab_action' ?
+      data.params.arguments?.action : data?.params?.name==='browser_tabs' ?
+      data.params.arguments?.action : data?.params?.name?.replace(/^browser_/, '')||'other';
+    // One wall-clock budget, including queue wait and tab verification.
+    const deadlineAt=requestReceivedAt+Number(process.env.MCPGO_BROWSER_ACTION_BUDGET_MS||60000);
+    const remaining=()=>Math.max(0,deadlineAt-Date.now());
     const lockAbort=new AbortController();
     res.once('close',()=>lockAbort.abort());
     try{
      if(isBrowserCall||isTabLeaseCall||isTabHandleCall)
       unlock=await acquireBrowserLock({signal:lockAbort.signal,
+       budgetMs:remaining(),
        priority:typeof scope.agent==='string'&&scope.agent.startsWith('autosend-')});
+      queueWait=Date.now()-waitingSince;
     }catch(e){
      if(res.destroyed)return;
-     return error(res,429,e.message==='BROWSER_QUEUE_WAIT_TIMEOUT'?
-      'Browser action queue wait timed out':'Browser action queue full',data?.id??null);
+     return error(res,e.message==='BROWSER_ACTION_OUTCOME_UNKNOWN'?503:429,
+      e.message==='BROWSER_ACTION_OUTCOME_UNKNOWN'?
+        'BROWSER_ACTION_OUTCOME_UNKNOWN: shared Chrome queue quarantined; no replay':
+      e.message==='BROWSER_QUEUE_CLIENT_GONE'?'Browser client disconnected before dispatch':
+      e.message==='BROWSER_QUEUE_WAIT_TIMEOUT'?'Browser action queue wait timed out':
+        'Browser action queue full',data?.id??null);
     }
     try {
      // Never dispatch queued actions after the requesting client vanished.
-     if(res.destroyed)return;
+     if(res.destroyed||remaining()===0)
+       return error(res,429,'Browser action deadline exceeded before dispatch',data?.id??null);
      const name=data?.params?.name;
      const dispatchData=res.mcpModern?stripModernParams(data):data;
      // workspace_id belongs to our proxy, not the upstream Playwright schema.
@@ -650,7 +647,7 @@ const server = http.createServer(async (req,res) => {
       if(!agent)return error(res,400,'Agent scope required',data?.id??null);
       if(args.action==='release')return sendLocalTool(res,data.id,agentTabs.release(agent,args.tab_id),clientSid,workspaceId);
       try{
-        const snapshot=await tabSnapshot(headers);
+        const snapshot=await tabSnapshot(headers,{deadlineAt});
         if(!snapshot)return error(res,503,'Chrome tabs cannot be inspected',data?.id??null);
         if(args.action==='list')return sendLocalTool(res,data.id,agentTabs.list(agent),clientSid,workspaceId);
         if(args.action==='resolve'){
@@ -676,7 +673,7 @@ const server = http.createServer(async (req,res) => {
       if(!validTabIndex(index)||!['claim','release'].includes(operation))
         return error(res,400,'Invalid tab lease request',data?.id??null);
       try{
-        const snapshot=await tabSnapshot(headers);
+        const snapshot=await tabSnapshot(headers,{deadlineAt});
         if(!snapshot)return error(res,503,'Cannot verify Chrome tabs for lease',data?.id??null);
         const tabId=agentTabs.byIndex(index);
         if(!tabId)return error(res,409,'TAB_HANDLE_STALE_OR_AMBIGUOUS',data?.id??null);
@@ -685,14 +682,22 @@ const server = http.createServer(async (req,res) => {
         return sendLocalTool(res,data.id,value,clientSid,workspaceId);
       }catch(e){return error(res,503,e instanceof BrowserReconnectError?e.code:'Tab lease check unavailable',data?.id??null);}
     }
-    let effectiveName=name,effectiveArgs=args,forwardedBody=Buffer.from(JSON.stringify({
+    let effectiveName=name,effectiveArgs=args,inspectPlan=null,precheckedTabs=null,forwardedBody=Buffer.from(JSON.stringify({
       ...dispatchData,params:{...dispatchData.params,arguments:args}}));
+    if(name===PAGE_INSPECT_TOOL.name){
+      try{inspectPlan=planPageInspection(args);}
+      catch(e){return error(res,400,e.message,data?.id??null)}
+      effectiveName=inspectPlan.tool;effectiveArgs=inspectPlan.args;
+      forwardedBody=Buffer.from(JSON.stringify({...dispatchData,params:{...dispatchData.params,
+        name:effectiveName,arguments:effectiveArgs}}));
+    }
     if(isStableTabAction){
       if(!agent || !['select','close'].includes(args.action))
         return error(res,400,'Stable tab action requires an agent and select/close',data?.id??null);
       try{
-        const fresh=await tabSnapshot(headers);
+        const fresh=await tabSnapshot(headers,{deadlineAt});
         if(!fresh)return error(res,503,'Cannot resolve stable tab handle',data?.id??null);
+        precheckedTabs=fresh; // Same serialized request: reuse this verified index map.
         const entry=agentTabs.identities.resolve(args.tab_id);
         if(!entry)return error(res,409,'TAB_HANDLE_STALE_OR_AMBIGUOUS',data?.id??null);
         const owner=agentTabs.owner(args.tab_id);
@@ -715,11 +720,7 @@ const server = http.createServer(async (req,res) => {
     let preTab=null,preTabIndex=null;
     if(req.method==='POST'&&['select','close'].includes(tabs?.action)&&Number.isInteger(tabs?.index)){
       const before=agentTabs.byIndex(tabs.index);
-      if(!isStableTabAction){
-        const warmup=await warmupTabIndices({...headers,host:'localhost:'+BACKEND_PORT,accept:'application/json, text/event-stream','content-type':'application/json'});
-        if(!warmup)return error(res,503,'Browser tab index synchronization failed; not executing action',data?.id??null);
-      }
-      const fresh=await tabSnapshot(headers);
+      const fresh=precheckedTabs??await tabSnapshot(headers,{deadlineAt});
       if(!fresh)return error(res,503,'Cannot verify tab index before action',data?.id??null);
       preTab=agentTabs.byIndex(tabs.index);preTabIndex=tabs.index;
       if(before&&preTab!==before)return error(res,409,'TAB_INDEX_CHANGED_USE_STABLE_ID',data?.id??null);
@@ -734,7 +735,7 @@ const server = http.createServer(async (req,res) => {
     }
     if(isBrowserCall&&effectiveName!=='browser_tabs'&&(agent||tabLeases.count())){
       try{
-        let snapshot=await tabSnapshot(headers);
+        let snapshot=await tabSnapshot(headers,{deadlineAt});
         if(!snapshot)
           return error(res,503,'Chrome tabs cannot be inspected',data?.id??null);
         const owned=agentTabs.resolveOwned(agent);
@@ -747,7 +748,7 @@ const server = http.createServer(async (req,res) => {
           const select=await upstreamRequest({jsonrpc:'2.0',id:'mcpgo-agent-select',method:'tools/call',
             params:{name:'browser_tabs',arguments:{action:'select',index:owned.index}}},headers,'POST',12000);
           if(select.status!==200)return error(res,503,'Could not restore agent tab',data?.id??null);
-          snapshot=await tabSnapshot(headers);
+          snapshot=await tabSnapshot(headers,{deadlineAt});
           if(!snapshot||snapshot.currentHandle!==owned.id)
             return error(res,409,'Agent tab changed during selection',data?.id??null);
         }
@@ -775,7 +776,7 @@ const server = http.createServer(async (req,res) => {
      if(!['https:','http:'].includes(url.protocol) || url.href!==expected)
       return error(res,400,'Expected URL must be a canonical HTTP(S) URL',data?.id??null);
      let same=false;
-     try{same=await verifyActiveUrl(headers,expected)}catch{}
+     try{same=await verifyActiveUrl(headers,expected,deadlineAt)}catch{}
      if(!same)return error(res,409,'Active Chrome tab does not match expected URL. No action dispatched.',data?.id??null);
     }
      if(actionId){
@@ -793,12 +794,57 @@ const server = http.createServer(async (req,res) => {
         throw e;
       }
     }
+    // Never dispatch a modifying tool if its owner already disconnected or
+    // the end-to-end action budget has been consumed by tab prechecks.
+    if(res.destroyed||remaining()===0)
+      return error(res,429,'Browser action expired or client disconnected before dispatch',data?.id??null);
     let upstream;
-    try{upstream=await upstreamRequest(forwardedBody,headers,req.method,data?.method==='tools/call'?40000:12000)}
+    const executionStarted=Date.now();
+    try{upstream=await upstreamRequest(forwardedBody,headers,req.method,
+      Math.max(1,Math.min(data?.method==='tools/call'?40000:12000,remaining())))}
     catch(e){
-      if(isBrowserCall)browserSession.recordBrowserResult({status:503});
       if(actionId)actionGuard.finish(actionId,'unknown',null);
+      // Even a read-only upstream request can still be operating on the
+      // shared active tab after its HTTP response is lost. Fail closed until
+      // a controlled backend restart rather than overlap a later click.
+      if(isBrowserCall||isTabHandleCall||isTabLeaseCall){
+        browserSession.recordBrowserEvent('outcome_unknown');
+        browserQueue.quarantine();
+        return error(res,503,'BROWSER_ACTION_OUTCOME_UNKNOWN: no replay; restart controlled browser session after verifying outcome',data?.id??null);
+      }
       throw e;
+    }finally{recordLatency('stage_execution',Date.now()-executionStarted,0)}
+    // Explicit visual requests pair a scoped accessibility tree with a small
+    // WebP viewport screenshot. Auto mode only requests an image when enabled
+    // by the caller AND the DOM snapshot/find has inadequate signal.
+    if(inspectPlan&&upstream.status===200&&inspectPlan.visualFallback&&
+       (inspectPlan.kind==='visual'||lowAccessibilitySignal(upstream.message)) &&
+       !upstream.message?.error&&!upstream.message?.result?.isError){
+      const first=upstream.message;
+      if(res.destroyed||remaining()===0)
+        return error(res,429,'Page inspection deadline reached before visual fallback',data?.id??null);
+      try{
+        const imageReply=await upstreamRequest({jsonrpc:'2.0',id:'mcpgo-inspect-visual',
+          method:'tools/call',params:{name:'browser_take_screenshot',arguments:visualSnapshotArgs()}},
+          headers,'POST',Math.max(1,Math.min(20000,remaining())));
+        if(imageReply.status===200&&!imageReply.message?.error&&!imageReply.message?.result?.isError){
+          const composed={...first,result:{...first.result,
+            content:[...(first.result.content||[]),...(imageReply.message.result.content||[])]}};
+          upstream={...upstream,headers:{...upstream.headers,'content-type':'application/json'},
+            body:Buffer.from(JSON.stringify(composed)),message:composed};
+        }else{
+          const failed={...first,result:{...first.result,isError:true,
+            content:[...(first.result.content||[]),{type:'text',text:'Visual inspection unavailable; no screenshot was confirmed.'}]}};
+          upstream={...upstream,headers:{...upstream.headers,'content-type':'application/json'},
+            body:Buffer.from(JSON.stringify(failed)),message:failed};
+        }
+      }catch(e){
+        // A screenshot can still be using the active tab after the connection
+        // disappears. Never dispatch another browser action while uncertain.
+        browserSession.recordBrowserEvent('outcome_unknown');
+        browserQueue.quarantine();
+        return error(res,503,'BROWSER_ACTION_OUTCOME_UNKNOWN: visual fallback interrupted',data?.id??null);
+      }
     }
     if(actionId)actionGuard.finish(actionId,upstream.status===200?'completed':'unknown',upstream.status);
     if(isBrowserCall)browserSession.recordBrowserResult(upstream);
@@ -807,11 +853,11 @@ const server = http.createServer(async (req,res) => {
       if(tabs?.action==='select'&&agent&&preTab)agentTabs.claim(agent,preTab);
       if(tabs?.action==='close'&&preTab){
         if(agent)agentTabs.release(agent,preTab);
-        try{await tabSnapshot(headers);}catch{} // already closed; do not replay
+        try{await tabSnapshot(headers,{deadlineAt});}catch{} // already closed; do not replay
       }
       if(tabs?.action==='new'){
         try{
-          const created=await tabSnapshot(headers);
+          const created=await tabSnapshot(headers,{deadlineAt});
           if(agent&&created?.currentHandle)agentTabs.claim(agent,created.currentHandle);
         }catch{} // already opened; never repeat an uncertain tab creation
       }
@@ -819,7 +865,7 @@ const server = http.createServer(async (req,res) => {
         try{
           // Navigation changes a URL fingerprint. Rebind the old opaque ID
           // only when the same selected index can be proved after navigation.
-          const fresh=await tabSnapshot(headers,{track:false});
+          const fresh=await tabSnapshot(headers,{track:false,deadlineAt});
           if(fresh)agentTabs.explicitNavigation(agent,preTab,preTabIndex,fresh.text);
         }catch{} // action may already have committed; next list will fail closed
       }
@@ -841,8 +887,11 @@ const server = http.createServer(async (req,res) => {
     if(isToolsList(data)&&upstream.status===200){
       try{
         const sourceType=String(upstream.headers['content-type']||'application/json');
-        const filtered=filterResponse(upstream.body,sourceType,{requireWorkspace:res.mcpModern});
-        const output=res.mcpModern?modernizeResponse(filtered,sourceType,{cache:true}):filtered;
+        // One parse, one transform, one serialization per outbound response.
+        const output=transformMcpResponse(upstream.body,sourceType,message=>{
+          const filtered=stripTools(message,{requireWorkspace:res.mcpModern});
+          return res.mcpModern?modernizeMessage(filtered,{cache:true}):filtered;
+        });
         res.writeHead(200,{'content-type':sourceType,
           ...(!res.mcpModern?{'mcp-session-id':clientSid}:{}),
           'content-length':String(output.length),'cache-control':'no-store'});
@@ -850,14 +899,15 @@ const server = http.createServer(async (req,res) => {
       }catch{return error(res,502,'Failed to sanitize tools/list response',data?.id??null);}
     }
     let responseBody=upstream.body;
-    if(isToolRequest && upstream.status===200 && workspaceId){
-      try{responseBody=decorateMcpToolResponse(upstream.body,
-        String(upstream.headers['content-type']||''),workspaceId);}
-      catch{return error(res,502,'Failed to attach McpGo workspace to tool result',data?.id??null);}
-    }
-    if(res.mcpModern&&upstream.status===200){
-      try{responseBody=modernizeResponse(responseBody,String(upstream.headers['content-type']||'application/json'));}
-      catch{return error(res,502,'Could not transform upstream tool result',data?.id??null);}
+    if(upstream.status===200&&((isToolRequest&&workspaceId)||res.mcpModern)){
+      try{
+        responseBody=transformMcpResponse(upstream.body,
+          String(upstream.headers['content-type']||'application/json'),message=>{
+            const decorated=isToolRequest&&workspaceId&&Array.isArray(message?.result?.content)
+              ? {...message,result:attachWorkspace(message.result,workspaceId)}:message;
+            return res.mcpModern?modernizeMessage(decorated):decorated;
+          });
+      }catch{return error(res,502,'Could not transform upstream tool result',data?.id??null);}
     }
     const responseHeaders={...upstream.headers,
       ...(!res.mcpModern?{'mcp-session-id':clientSid}:{}),
@@ -867,7 +917,9 @@ const server = http.createServer(async (req,res) => {
     delete responseHeaders['content-encoding'];
     res.writeHead(upstream.status,responseHeaders);
     res.end(responseBody);
-    }finally{if(unlock)unlock()}
+    }finally{
+      if(unlock){recordLatency(metricType,Date.now()-waitingSince,queueWait);unlock();}
+    }
   } catch {
     if (!res.writableEnded) error(res,502,'MCP backend request failed or timed out');
   }

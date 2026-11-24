@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {browserConfig} from '../../launchers/browser.mjs';
+import {browserConfig,extensionStatus} from '../../launchers/browser.mjs';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
@@ -96,4 +96,54 @@ test('trial mode can use a separate localhost port without changing the live bac
     assert.throws(()=>browserConfig({env:{MCPGO_PLAYWRIGHT_PORT:'0',PLAYWRIGHT_MCP_EXTENSION_TOKEN:'abcdefghijklmnopqrstuvwxyz012345'},settingsDir:dir}),/port/);
     assert.throws(()=>browserConfig({env:{MCPGO_PLAYWRIGHT_PORT:'70000',PLAYWRIGHT_MCP_EXTENSION_TOKEN:'abcdefghijklmnopqrstuvwxyz012345'},settingsDir:dir}),/port/);
   });
+});
+
+test('browser settle is bounded and AutoSend retains conservative defaults',()=>{
+ const env={PLAYWRIGHT_MCP_EXTENSION_TOKEN:'abcdefghijklmnopqrstuvwxyz012345'};
+ const browser=browserConfig({role:'browser',env,settingsDir:'/nonexistent'});
+ const autosend=browserConfig({role:'autosend',env,settingsDir:'/nonexistent'});
+ const settle=args=>args[args.indexOf('--timeout-settle')+1];
+ assert.equal(settle(browser.args),'200');
+ assert.equal(settle(autosend.args),'500');
+ assert.equal(settle(browserConfig({role:'browser',env:{...env,MCPGO_BROWSER_SETTLE_MS:'100'},settingsDir:'/nonexistent'}).args),'100');
+ assert.throws(()=>browserConfig({env:{...env,MCPGO_BROWSER_SETTLE_MS:'-1'},settingsDir:'/nonexistent'}),/settle timeout/);
+ assert.throws(()=>browserConfig({env:{...env,MCPGO_BROWSER_SETTLE_MS:'99999'},settingsDir:'/nonexistent'}),/settle timeout/);
+});
+
+test('snapshot mode is conservative and opt-in for both browser clients',()=>{
+ const env={PLAYWRIGHT_MCP_EXTENSION_TOKEN:'abcdefghijklmnopqrstuvwxyz012345'};
+ const mode=args=>args[args.indexOf('--snapshot-mode')+1];
+ assert.equal(mode(browserConfig({env,settingsDir:'/nonexistent'}).args),'full');
+ assert.equal(mode(browserConfig({role:'autosend',env,settingsDir:'/nonexistent'}).args),'full');
+ assert.equal(mode(browserConfig({env:{...env,MCPGO_BROWSER_SNAPSHOT_MODE:'none'},settingsDir:'/nonexistent'}).args),'none');
+ assert.throws(()=>browserConfig({env:{...env,MCPGO_BROWSER_SNAPSHOT_MODE:'invalid'},settingsDir:'/nonexistent'}),/snapshot mode/);
+});
+
+test('extension preflight agrees with launch and does not expose the token',()=>{
+ withSettings(dir=>{
+  const opts={env:{},settingsDir:dir};
+  const tokenFile=path.join(dir,'extension-token');
+  assert.deepEqual(extensionStatus(opts),{configured:false,code:'EXTENSION_TOKEN_MISSING'});
+  fs.writeFileSync(tokenFile,'bad',{mode:0o600});
+  assert.equal(extensionStatus(opts).code,'EXTENSION_TOKEN_INVALID');
+  fs.writeFileSync(tokenFile,'abcdefghijklmnopqrstuvwxyz012345');
+  fs.chmodSync(tokenFile,0o644);
+  assert.equal(extensionStatus(opts).code,'EXTENSION_TOKEN_UNSAFE');
+  fs.chmodSync(tokenFile,0o600);
+  assert.deepEqual(extensionStatus(opts),{configured:true,code:'EXTENSION_CONFIGURED'});
+  for(const role of ['browser','autosend'])assert.equal(browserConfig({...opts,role}).mode,'extension');
+ });
+});
+
+test('AutoSend launcher does not restart-loop before token configuration',()=>{
+ withSettings(home=>{
+  const launcher=fileURLToPath(new URL('../../launchers/browser.mjs',import.meta.url));
+  const env={...process.env,HOME:home,MCPGO_BROWSER_MODE:'extension'};
+  delete env.PLAYWRIGHT_MCP_EXTENSION_TOKEN;
+  const result=spawnSync(process.execPath,[launcher,'--autosend'],{env,encoding:'utf8'});
+  assert.equal(result.status,0);
+  assert.match(result.stderr,/EXTENSION_TOKEN_MISSING/);
+  const normal=spawnSync(process.execPath,[launcher],{env,encoding:'utf8'});
+  assert.equal(normal.status,2);
+ });
 });

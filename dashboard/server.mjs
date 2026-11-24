@@ -5,10 +5,12 @@ import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {probeMcp} from './mcp-health.mjs';
+import {extensionStatus} from '../launchers/browser.mjs';
 import {TunnelRecovery} from './tunnel-recovery.mjs';
 import {checkHealthFile} from './tunnel-health.mjs';
 import {mcpVersions} from './mcp-versions.mjs';
+import connectionHealth from './connection-health.cjs';
+import {execFile} from 'node:child_process';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(DIR, '..');
@@ -61,6 +63,10 @@ const recovery=new TunnelRecovery({
     if(!j.loaded||!agentOwned(label))return false;
     if(observed?.pid && j.pid!==observed.pid)return false;
     if(target==='playwright' && !(await alive(ports.proxy)))return false;
+    const telemetry=await connectionHealth.readTelemetry(target==='terminal'?'http://127.0.0.1:12848/health':'http://127.0.0.1:8940/healthz');
+    if(target==='terminal'?(telemetry?.active!==0||telemetry?.interactive_sessions!==0):
+      (!telemetry?.browserQueue||telemetry.browserQueue.active||telemetry.browserQueue.waiting>0))return false;
+    if(busy||job(label).pid!==j.pid)return false;
     // Never restart terminal/server, job_worker, Chrome or MCP proxy here.
     call(['kickstart',...(j.running?['-k']:[]),DOMAIN+'/'+label]);
     return true;
@@ -133,20 +139,6 @@ async function waitPort(port, ms=16000) {
   do {if (await alive(port)) return true; await new Promise(r=>setTimeout(r,320));} while(Date.now()<until);
   return false;
 }
-let mcpHealthCache={value:false,validUntil:0};
-let mcpHealthFlight=null;
-async function mcpReadiness(){
-  if(Date.now()<mcpHealthCache.validUntil)return mcpHealthCache.value;
-  if(mcpHealthFlight)return mcpHealthFlight;
-  mcpHealthFlight=(async()=>{
-    let ready=false;
-    try{ready=await probeMcp();}catch{}
-    mcpHealthCache={value:ready,validUntil:Date.now()+15000};
-    return ready;
-  })();
-  try{return await mcpHealthFlight;}
-  finally{mcpHealthFlight=null;}
-}
 async function browserTelemetry() {
   // Probe ONLY our own proxy's in-memory state; never wake Chrome or create tabs.
   try {
@@ -158,19 +150,61 @@ async function browserTelemetry() {
       ? value : null;
   }catch{return null}
 }
+const healthHistory=new connectionHealth.HealthHistory(path.join(os.homedir(),'Library','Application Support','McpGo','connection-health-history.json'));
+let healthEvidence={key:null,checkedAt:null},healthFlight=null,browserVerificationFailure=null;
+function terminalEndpoint(){
+  try{
+    const file=path.join(os.homedir(),'Library','Application Support','McpGo','terminal','stateless-config.json');
+    const route=JSON.parse(fs.readFileSync(file,'utf8')).mcpPath;
+    return /^exec\/[a-f0-9]{64}$/.test(route)?'http://127.0.0.1:12848/'+route:null;
+  }catch{return null}
+}
+async function collectHealth(terminal,browser,force=false){
+  const key=[...terminal,...browser].map(x=>x.pid||0).join(':');
+  if(healthFlight){
+    if(!force)return healthFlight;
+    try{await healthFlight}catch{}
+    if(healthFlight)return healthFlight;
+  }
+  if(!force&&healthEvidence.key===key&&connectionHealth.fresh(healthEvidence.checkedAt,Date.now(),10000))return healthEvidence;
+  healthFlight=(async()=>{
+    const terminalUrl=terminalEndpoint();
+    const [tm,bm,tt,bt,th,bh]=await Promise.all([
+      terminal[0].running&&terminalUrl?connectionHealth.probeMcp(terminalUrl,['terminal_exec']):false,
+      browser[0].running&&browser[1].running?connectionHealth.probeMcp('http://127.0.0.1:8940/mcp',['browser_tabs','browser_snapshot']):false,
+      terminal[1].running?connectionHealth.tunnelHealth(RECOVERY_URL_FILES.terminal):'down',
+      browser[2].running?connectionHealth.tunnelHealth(RECOVERY_URL_FILES.playwright):'down',
+      terminal[0].running?connectionHealth.readTelemetry('http://127.0.0.1:12848/health'):null,
+      browser[1].running?connectionHealth.readTelemetry('http://127.0.0.1:8940/healthz'):null
+    ]);
+    const now=Date.now();
+    healthEvidence={key,checkedAt:now,tm,bm,tt,bt,th,bh};
+    healthHistory.observe('terminal',connectionHealth.evaluate({running:terminal.every(x=>x.running),mcp:tm,tunnel:tt,checkedAt:now,lastCallAt:th?.lastSuccessfulCallAt},now),now);
+    healthHistory.observe('browser',connectionHealth.evaluate({running:browser.every(x=>x.running),mcp:bm,tunnel:bt,checkedAt:now,browser:connectionHealth.browserEvidence(bh,now,browserVerificationFailure?.pid===browser[0].pid?browserVerificationFailure.at:null)},now),now);
+    return healthEvidence;
+  })();
+  try{return await healthFlight}finally{healthFlight=null}
+}
 async function status() {
   const terminal = groups.terminal.map(job);
   const browser = groups.playwright.map(job);
   const [backend,proxy] = await Promise.all([alive(ports.browser),alive(ports.proxy)]);
   const browserSession=proxy?await browserTelemetry():null;
-  // Keep the status endpoint fast; Chrome can wait for user CDP consent.
-  if(backend&&proxy)void mcpReadiness();
-  const mcpReady=backend&&proxy?mcpHealthCache.value:false;
+  void collectHealth(terminal,browser).catch(()=>{});
+  const key=[...terminal,...browser].map(x=>x.pid||0).join(':');
+  const evidence=healthEvidence.key===key?healthEvidence:{};
+  const mcpReady=backend&&proxy&&connectionHealth.fresh(evidence.checkedAt,Date.now())&&evidence.bm===true;
+  const now=Date.now();
+  const health={
+    terminal:connectionHealth.evaluate({running:terminal.every(x=>x.running),mcp:evidence.tm,tunnel:evidence.tt,checkedAt:evidence.checkedAt,lastCallAt:evidence.th?.lastSuccessfulCallAt},now),
+    browser:connectionHealth.evaluate({running:browser.every(x=>x.running),mcp:evidence.bm,tunnel:evidence.bt,checkedAt:evidence.checkedAt,browser:connectionHealth.browserEvidence(browserSession,now,browserVerificationFailure?.pid===browser[0].pid?browserVerificationFailure.at:null)},now)
+  };
+  for(const [channel,value] of Object.entries(health))healthHistory.observe(channel,value,now);
   const keyDir=path.join(os.homedir(),'Library','Application Support','McpGo','playwright');
   const hasFile = n => {try {return fs.statSync(`${keyDir}/${n}`).size>0;}catch{return false;}};
   const hasKeychain = (() => {try {execFileSync('/usr/bin/security',['find-generic-password','-a',os.userInfo().username,'-s','com.mcphub.playwright.openai.tunnel'],{stdio:'ignore',timeout:2500});return true;}catch{return false;}})();
   const configured=hasFile('tunnel.id') && (hasFile('tunnel.key') || hasKeychain);
-  return {installationRoot:ROOT,busy,mcpVersions:mcpVersions(ROOT),recovery:recovery.snapshot(),terminal:{oneshot:terminal[0],tunnel:terminal[1]},playwright:{browser:browser[0],proxy:browser[1],tunnel:browser[2],backend,proxyReady:proxy,mcpReady,browserSession,configured},updatedAt:new Date().toISOString()};
+  return {installationRoot:ROOT,busy,mcpVersions:mcpVersions(ROOT),recovery:recovery.snapshot(),connectionHealth:health,connectionHistory:healthHistory.snapshot(),terminal:{oneshot:terminal[0],tunnel:terminal[1]},playwright:{browser:browser[0],proxy:browser[1],tunnel:browser[2],backend,proxyReady:proxy,mcpReady,browserSession,configured,extension:extensionStatus()},updatedAt:new Date().toISOString()};
 }
 function load(label) {
   if(label===TUNNEL_LABEL) ensureTerminalTunnel();
@@ -187,6 +221,10 @@ async function waitFor(predicate, timeout=25000) {
 }
 async function action(group,verb) {
   if (!Object.hasOwn(groups,group) || !['start','stop','restart'].includes(verb)) throw Error('Неизвестное действие');
+  if(group==='playwright' && verb!=='stop') {
+    const extension=extensionStatus();
+    if(!extension.configured)throw Error(extension.code+' — откройте McpGo → Настройка → Chrome Extension и восстановите подключение.');
+  }
   if (verb==='stop' || verb==='restart') {
     for (const label of [...groups[group]].reverse()) unload(label);
     // launchd bootout is asynchronous: never bootstrap a still-registered label.
@@ -233,7 +271,7 @@ async function action(group,verb) {
         execFileSync(process.execPath,[`${ROOT}/playwright/probe.mjs`],{
           env:{...process.env,PLAYWRIGHT_MCP_URL:'http://127.0.0.1:8940/mcp',PLAYWRIGHT_MCP_REJECT_UNSAFE:'1',PLAYWRIGHT_MCP_VERIFY_TABS:'1'},
           timeout:44000,stdio:['ignore','pipe','pipe']});
-      } catch {throw Error('Playwright CDP не видит вкладки Chrome. Проверь включение Chrome Remote Debugging и перезапусти Playwright.');}
+      } catch {throw Error('Chrome Extension не подтвердило доступ к вкладкам. Проверьте профиль Chrome и токен в настройках McpGo.');}
     } else {
       if(group==='terminal') {
         load(groups.terminal[0]);
@@ -271,8 +309,31 @@ const server = http.createServer(async (req,res)=>{
       const {group,action:verb}=JSON.parse(body);
       if(group==='system' && verb==='logs') execFileSync('/usr/bin/open',[`${ROOT}/logs`],{timeout:4000});
       else if(group==='system' && verb==='folder') execFileSync('/usr/bin/open',[ROOT],{timeout:4000});
+      else if(['terminal','playwright'].includes(group)&&verb==='recover-tunnel'){
+        const label=RECOVERY_LABELS[group],j=job(label);
+        const terminal=groups.terminal.map(job),browser=groups.playwright.map(job);
+        const e=await collectHealth(terminal,browser,true);
+        const local=group==='terminal'?e.tm:e.bm,tunnel=group==='terminal'?e.tt:e.bt;
+        const inUse=group==='terminal'?e.th?.active!==0||e.th?.interactive_sessions!==0:!e.bh?.browserQueue||e.bh.browserQueue.active||e.bh.browserQueue.waiting>0;
+        if(!local||inUse||tunnel==='auth'||tunnel==='throttled'||!j.loaded||!agentOwned(label)||job(label).pid!==j.pid)
+          throw Error('Туннель нельзя безопасно переподключить. Проверьте авторизацию, MCP и активные задачи.');
+        call(['kickstart',...(j.running?['-k']:[]),DOMAIN+'/'+label]);
+        healthEvidence={key:null,checkedAt:null};
+        recovery.setDesired(group,true);
+      }
+      else if(group==='system' && verb==='verify-connection'){
+        const terminal=groups.terminal.map(job),browser=groups.playwright.map(job);
+        if(browser[0].running&&browser[1].running&&extensionStatus().configured){
+          const ok=await new Promise(resolve=>execFile(process.execPath,[path.join(ROOT,'playwright','probe.mjs')],{
+            env:{...process.env,PLAYWRIGHT_MCP_URL:'http://127.0.0.1:8940/mcp',PLAYWRIGHT_MCP_REJECT_UNSAFE:'0',PLAYWRIGHT_MCP_VERIFY_TABS:'1'},
+            timeout:45000,maxBuffer:65536},error=>resolve(!error)));
+          if(job(groups.playwright[0]).pid===browser[0].pid)
+            browserVerificationFailure=ok?null:{pid:browser[0].pid,at:Date.now()};
+        }
+        await collectHealth(terminal,browser,true);
+      }
       else {
-        if(verb==='stop' && ['terminal','terminal-tunnel','playwright'].includes(group))
+        if(verb==='stop'  && ['terminal','terminal-tunnel','playwright'].includes(group))
           recovery.setDesired(group==='playwright'?'playwright':'terminal',false);
         await action(group,verb);
         if((verb==='start'||verb==='restart') &&
@@ -292,6 +353,7 @@ const server = http.createServer(async (req,res)=>{
   fs.createReadStream(path.join(DIR,name)).pipe(res);
 });
 try { ensureTerminalTunnel(); } catch(e) { console.error('Tunnel agent setup:', e.message); }
+setInterval(()=>{if(!busy)void collectHealth(groups.terminal.map(job),groups.playwright.map(job)).catch(()=>{})},10000).unref();
 server.listen(PORT,'127.0.0.1',()=>console.log(`McpGo ready: http://127.0.0.1:${PORT}`));
 // Recovery is opt-in through the explicit Dashboard Start action. No legacy
 // tunnel, browser or terminal job is restarted when this code is installed.

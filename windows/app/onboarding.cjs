@@ -2,7 +2,7 @@
 const path=require('node:path');
 const {spawn}=require('node:child_process');
 const {record,register,scrub}=require('./diagnostics.cjs');
-const ACTIONS=new Set(['browser-check','discover','provision','import','runtime-projects',
+const ACTIONS=new Set(['status','connection-preflight','browser-check','discover','provision','import','runtime-projects',
   'runtime-inspect','runtime-auto','runtime-recover-key','verify-remote','doctor','export-diagnostics']);
 async function onboarding({action,payload,root,userData,python}){
  if(!ACTIONS.has(action))throw Error('UNSUPPORTED_ONBOARDING_ACTION');
@@ -20,26 +20,36 @@ async function onboarding({action,payload,root,userData,python}){
    stdio:['pipe','pipe','pipe'],env:{
     ...process.env,MCPGO_USER_DATA:userData,MCPGO_RESOURCE_ROOT:root,
     MCPGO_TUNNEL_CLIENT:path.join(root,'tunnel','tunnel-client.exe'),
-    PYTHONDONTWRITEBYTECODE:'1',PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8'
+    PYTHONDONTWRITEBYTECODE:'1',PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',MCPGO_ONBOARDING_PROGRESS:'1'
    }});
   let stdout='',size=0,done=false;
   const fail=error=>{if(done)return;done=true;record(userData,'windows.onboarding.failure',{action,error:scrub(error?.message),durationMs:Date.now()-started});reject(error)};
-  const timer=setTimeout(()=>{child.kill();fail(Error('ONBOARDING_TIMEOUT'))},145000);
+  const deadline=['runtime-auto','runtime-recover-key','provision'].includes(action)?900000:240000;
+  let lastProgress=Date.now();
+  const timer=setInterval(()=>{
+    if(Date.now()-started>=deadline||Date.now()-lastProgress>=120000){
+      clearInterval(timer);child.kill();
+      fail(Error('ONBOARDING_TIMEOUT: результат операции неизвестен; проверь сохранённое состояние перед повтором.'));
+    }
+  },5000);
   child.stdout.setEncoding('utf8');
   child.stdout.on('data',chunk=>{size+=Buffer.byteLength(chunk);
     if(size>131072){child.kill();fail(Error('ONBOARDING_OUTPUT_TOO_LARGE'))}
     else stdout+=chunk;
   });
-  let stderrBytes=0,stderr='';
+  let stderrBytes=0,stderr='',progressTail='';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data',chunk=>{
     stderrBytes+=Buffer.byteLength(chunk);
+    const lines=(progressTail+chunk).split(/\r?\n/);
+    progressTail=(lines.pop()||'').slice(-256);
+    for(const line of lines)if(/^MCPGO_PROGRESS [A-Za-z0-9._:-]+$/.test(line))lastProgress=Date.now();
     if(stderr.length<131072)stderr+=chunk.slice(0,131072-stderr.length);
   });
-  child.on('error',error=>{clearTimeout(timer);fail(Error('ONBOARDING_START_FAILED_'+(error.code||'')))});
+  child.on('error',error=>{clearInterval(timer);fail(Error('ONBOARDING_START_FAILED_'+(error.code||'')))});
   child.on('close',(code,signal)=>{
     record(userData,'windows.onboarding.exit',{action,code,signal,durationMs:Date.now()-started,stdoutBytes:size,stderrBytes,stderr:scrub(stderr),stderrTruncated:stderrBytes>131072});
-    clearTimeout(timer);if(done)return;
+    clearInterval(timer);if(done)return;
     let reply;
     try{reply=JSON.parse(stdout)}catch{return fail(Error('ONBOARDING_INVALID_RESPONSE'))}
     if(!reply?.ok)return fail(Error(String(reply?.error||'ONBOARDING_FAILED').slice(0,180)));

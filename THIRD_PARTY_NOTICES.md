@@ -7,9 +7,9 @@ the [MIT License](LICENSE). This does **not** relicense third-party software.
 
 | Component | Version | License in lockfile | Upstream |
 |---|---|---|---|
-| @playwright/mcp | 0.0.83 | Apache-2.0 | https://github.com/microsoft/playwright-mcp |
-| playwright | 1.64.0-alpha-1790635538000 | Apache-2.0 | https://github.com/microsoft/playwright |
-| playwright-core | 1.64.0-alpha-1790635538000 | Apache-2.0 | https://github.com/microsoft/playwright |
+| @playwright/mcp | 0.0.86 | Apache-2.0 | https://github.com/microsoft/playwright-mcp |
+| playwright | 1.66.0-alpha-2026-11-18 | Apache-2.0 | https://github.com/microsoft/playwright |
+| playwright-core | 1.66.0-alpha-2026-11-18 | Apache-2.0 | https://github.com/microsoft/playwright |
 
 These packages are resolved through playwright/package-lock.json. Their
 upstream license texts and any required notices remain subject to the terms
@@ -55,7 +55,7 @@ preparation script never reads local credentials.
 | OpenAI Secure MCP Tunnel client | v0.0.20 x64 (full client) | https://github.com/openai/tunnel-client ; bundled upstream LICENSE |
 | Electron | 45.3.0 | https://electronjs.org ; MIT and Chromium NOTICE files in assembled app |
 | @lydell/node-pty | 1.2.0-beta.15 | https://github.com/lydell/node-pty ; MIT, bundled LICENSE |
-| Playwright MCP | 0.0.83 | Apache-2.0, pinned in playwright/package-lock.json |
+| Playwright MCP | 0.0.86 | Apache-2.0, pinned in playwright/package-lock.json |
 
 The actual ZIP names and their verified SHA-256 values are recorded in
 the local ignored windows/vendor/MANIFEST.json when the build runs.

@@ -9,6 +9,7 @@ Each non-idempotent mutation is journaled *before* the request. Unknown results
 are reconciled by reading the named resource; never blindly repeat POSTs.
 """
 from __future__ import annotations
+from datetime import datetime, timedelta, timezone
 
 import json
 import re
@@ -135,27 +136,39 @@ class RuntimeAdminAPI:
             headers={"Authorization": "Bearer " + admin,
                      "Accept": "application/json", "Content-Type": "application/json"},
         )
-        try:
-            with urlopen_logged(request, timeout=22) as response:
-                # The diagnostics layer stores selected request metadata and
-                # redacted response details, never authorization credentials.
-                self.last_http_status = getattr(response, "status", None)
-                body = response.read(131073)
-        except urllib.error.HTTPError as exc:
-            # Keep the real provider rejection for local troubleshooting, but
-            # mask credentials before persistence and never echo it to the UI.
-            from diagnostics import event
-            error_body = exc.read(65537)
-            event("admin.http.error.response", method=method, endpoint=path,
-                  status=exc.code, body=error_body[:65536],
-                  bodyTruncated=len(error_body)>65536)
-            if exc.code in (400, 401, 403, 404, 409, 422):
-                raise KnownRejection("OpenAI отклонил запрос (" + str(exc.code) +
-                                     "). Проверь права администратора, проект и политику организации.") from None
-            raise RuntimeAdminError("OpenAI временно недоступен (HTTP " +
-                                    str(exc.code) + "). Статус операции нужно сверить.") from None
-        except (OSError, TimeoutError):
-            raise RuntimeAdminError("Нет подтверждения от OpenAI. Повтор без сверки запрещён.") from None
+        for attempt in range(3 if method == "GET" else 1):
+            try:
+                with urlopen_logged(request, timeout=22) as response:
+                    # The diagnostics layer stores selected request metadata and
+                    # redacted response details, never authorization credentials.
+                    self.last_http_status = getattr(response, "status", None)
+                    body = response.read(131073)
+                    break
+            except urllib.error.HTTPError as exc:
+                # Keep the real provider rejection for local troubleshooting, but
+                # mask credentials before persistence and never echo it to the UI.
+                from diagnostics import event
+                error_body = exc.read(65537)
+                event("admin.http.error.response", method=method, endpoint=path,
+                      status=exc.code, body=error_body[:65536],
+                      bodyTruncated=len(error_body)>65536)
+                if method == "GET" and attempt < 2 and (exc.code == 429 or 500 <= exc.code < 600):
+                    try:
+                        delay = min(20.0, max(0.0, float(exc.headers.get("Retry-After", 2 ** attempt))))
+                    except (ValueError, TypeError, AttributeError):
+                        delay = float(2 ** attempt)
+                    time.sleep(delay)
+                    continue
+                if exc.code in (400, 401, 403, 404, 409, 422):
+                    raise KnownRejection("OpenAI отклонил запрос (" + str(exc.code) +
+                                         "). Проверь права администратора, проект и политику организации.") from None
+                raise RuntimeAdminError("OpenAI временно недоступен (HTTP " +
+                                        str(exc.code) + "). Статус операции нужно сверить.") from None
+            except (OSError, TimeoutError):
+                if method == "GET" and attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise RuntimeAdminError("Нет подтверждения от OpenAI. Повтор без сверки запрещён.") from None
         if len(body) > 131072:
             raise RuntimeAdminError("Слишком большой ответ от OpenAI — операция остановлена.")
         try:
@@ -525,6 +538,7 @@ class RuntimeAutoProvisioner:
                 "Проверь ключи в OpenAI Platform или используй ручную настройку.")
         journal["status"] = "key-issued"
         journal["keyId"] = identifier
+        journal["keyExpiresAt"] = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
         self.saved(state,journal)
         return {"runtimeKey":value, "message":"Новый ключ получен. Сохрани его в Keychain."}
 
@@ -709,6 +723,7 @@ class RuntimeAutoProvisioner:
                                     "Повторное создание заблокировано; воспользуйся ручным способом.")
         journal["status"] = "key-issued"
         journal["keyId"] = key_id
+        journal["keyExpiresAt"] = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
         self.saved(state,journal)
         return {"runtimeKey":value, "projectName":name,
                 "message":"Ключ выдан для отдельного Service Account; сохраните в Keychain."}

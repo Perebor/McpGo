@@ -7,8 +7,10 @@ Local state is source-scoped and owner-only. Remote create is reconciled before 
 from __future__ import annotations
 
 import json
+import stat
 import os
 from pathlib import Path
+from contextlib import contextmanager
 import plistlib
 import re
 import secrets
@@ -53,12 +55,54 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600):
             os.unlink(filename)
 
 
+@contextmanager
+def onboarding_mutation_lock(engine, action):
+    mutating = {"provision", "import", "runtime-auto", "runtime-recover-key", "verify-remote",
+                "configure", "install", "install-deps", "activate-browser-extension",
+                "start-local", "chatgpt-instructions", "dismiss"}
+    if action not in mutating:
+        yield
+        return
+    parent = engine.store.parent
+    if parent.is_symlink():
+        raise SetupError("Небезопасная директория мастера.")
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock = parent / ".onboarding.lock"
+    if lock.is_symlink():
+        raise SetupError("Небезопасный файл блокировки мастера.")
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    locked = False
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"0")
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            except OSError:
+                raise SetupError("Другая операция настройки уже выполняется.") from None
+        else:
+            import fcntl
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SetupError("Другая операция настройки уже выполняется.") from None
+        locked = True
+        yield
+    finally:
+        if locked and sys.platform == "win32":
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        os.close(fd)
+
+
 class SetupEngine:
     def __init__(self, root: Path = ROOT, home: Path | None = None,
                  client: str | None = None):
         self.root = root.resolve()
         self.home = home or Path.home()
-        self.client = client or shutil.which("tunnel-client") or "/opt/homebrew/bin/tunnel-client"
+        self.client = client or os.environ.get("MCPGO_TUNNEL_CLIENT") or shutil.which("tunnel-client") or "/opt/homebrew/bin/tunnel-client"
         self.appdata = self.home / "Library/Application Support/McpGo"
         self.store = self.appdata / "Onboarding/state.json"
 
@@ -114,6 +158,40 @@ class SetupEngine:
         return {"state": state, "preflight": self.preflight(),
                 "local": self.local_check(), "platformUrl": PLATFORM_URL,
                 "chatgptUrl": CHATGPT_URL}
+
+    def connection_preflight(self, data: dict) -> dict:
+        # Read-only, no keys transmitted; this only proves network reachability,
+        # not that the user's organization or runtime credential is authorized.
+        import urllib.request
+        import urllib.error
+        parent = self.appdata
+        while not parent.exists() and parent != parent.parent:
+            parent = parent.parent
+        writable = parent.is_dir() and os.access(parent, os.W_OK) and not self.appdata.is_symlink()
+        request = urllib.request.Request("https://api.openai.com/v1/models",
+                                         headers={"Accept": "application/json"})
+        try:
+            with urlopen_logged(request, timeout=8) as response:
+                status = getattr(response, "status", 200)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        except (OSError, TimeoutError, ValueError):
+            status = None
+        reachable = status in (200, 401)
+        if reachable:
+            network = "API OpenAI доступен; права ключа проверяются отдельно."
+        elif status == 429:
+            network = "OpenAI ограничил частоту запросов (429)."
+        elif status == 403:
+            network = "OpenAI отказал в доступе (403). Проверь сеть и региональные ограничения."
+        elif status is not None:
+            network = "OpenAI вернул HTTP " + str(status) + "."
+        else:
+            network = "Нет ответа от API OpenAI. Проверь интернет, DNS и прокси."
+        return {"apiReachable": reachable, "httpStatus": status,
+                "storageWritable": writable, "networkMessage": network,
+                "message": network + (" Локальное хранилище доступно."
+                                      if writable else " Нет доступа на запись в локальное хранилище.")}
 
     def local_check(self) -> dict[str, bool]:
         def port_open(port: int) -> bool:
@@ -376,7 +454,18 @@ class SetupEngine:
             if not re.fullmatch(r"exec/[a-f0-9]{64}", route):
                 raise SetupError("Неподдерживаемый private MCP route.")
         else:
-            route = "exec/" + secrets.token_hex(32)
+            prior_profile = self.home / ".config/tunnel-client/chat-terminal-hub.yaml"
+            if prior_profile.is_symlink():
+                raise SetupError("Небезопасный профиль Terminal.")
+            if prior_profile.exists():
+                existing = prior_profile.read_text("utf-8")
+                matches = set(re.findall(r"http://127\.0\.0\.1:12848/(exec/[a-f0-9]{64})(?=[\s\"'\n]|$)", existing))
+                ids_in_profile = set(re.findall(r"""(?m)^\s*tunnel_id:\s*["']?(tunnel_[A-Za-z0-9_-]+)["']?\s*(?:#.*)?$""", existing))
+                if len(matches) != 1 or ids_in_profile != {ids[0]}:
+                    raise SetupError("Существующий профиль Terminal не удалось безопасно сопоставить с этой установкой.")
+                route = matches.pop()
+            else:
+                route = "exec/" + secrets.token_hex(32)
         targets = {
             "terminal": ("chat-terminal-hub", ids[0], "http://127.0.0.1:12848/" + route),
             "browser": ("mcpgo-browser", ids[1], "http://127.0.0.1:8940/mcp"),
@@ -389,6 +478,17 @@ class SetupEngine:
         profiles.mkdir(parents=True, exist_ok=True, mode=0o700)
         if profiles.is_symlink():
             raise SetupError("Каталог профилей tunnel-client не должен быть ссылкой.")
+        for profile, tid, endpoint in targets.values():
+            dest = profiles / (profile + ".yaml")
+            if dest.is_symlink():
+                raise SetupError("Небезопасный профиль туннеля.")
+            if dest.exists():
+                existing = dest.read_text("utf-8")
+                if tid not in existing or endpoint not in existing:
+                    raise SetupError("Существующий профиль " + profile +
+                                     " отличается. Не перезаписываем чужую настройку.")
+        if not conf.exists():
+            atomic_write(conf, (json.dumps({"mcpPath": route}) + "\n").encode())
         outputs = {}
         for name, (profile, tid, endpoint) in targets.items():
             dest = profiles / (profile + ".yaml")
@@ -414,8 +514,6 @@ class SetupEngine:
                     raise SetupError("Неподходящий конфигурационный профиль от tunnel-client.")
                 atomic_write(dest, payload.encode(), mode=0o600)
                 outputs[name] = str(dest)
-        if not conf.exists():
-            atomic_write(conf, (json.dumps({"mcpPath": route}) + "\n").encode())
         browser_file = self.appdata / "playwright/tunnel.id"
         if browser_file.exists() and browser_file.read_text().strip() != ids[1]:
             raise SetupError("Уже есть другой Browser Tunnel ID — обновление требует ручной миграции.")
@@ -439,7 +537,7 @@ class SetupEngine:
         for mode in ("--check", "--install"):
             try:
                 result = run_logged([sys.executable, str(script), mode],
-                                        capture_output=True, text=True, timeout=35)
+                                        capture_output=True, text=True, timeout=120)
             except (OSError, subprocess.TimeoutExpired):
                 raise SetupError("Установка служб не завершилась, проверьте launchd.") from None
             if result.returncode:
@@ -454,15 +552,46 @@ class SetupEngine:
         """Public mode flag only. Never return the extension authentication token."""
         file = self.appdata / "playwright/browser-mode"
         try:
-            if file.is_symlink():
+            if file.parent.is_symlink() or file.is_symlink():
                 return "invalid"
-            return "extension" if file.read_text("utf-8").strip() == "extension" else "not-configured"
+            if file.exists() and file.read_text("utf-8").strip() != "extension":
+                return "not-configured"
+            token_file = file.parent / "extension-token"
+            info = token_file.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or (hasattr(os, "getuid") and info.st_uid != os.getuid()):
+                return "invalid"
+            token = token_file.read_text("utf-8").strip()
+            return "extension" if re.fullmatch(r"[^\s\x00-\x1f]{16,2048}", token) else "invalid"
         except FileNotFoundError:
             return "not-configured"
-        except OSError:
+        except (OSError, UnicodeError):
             return "invalid"
 
     def activate_browser_extension(self, data: dict) -> dict:
+        # Serialize trial, commit and rollback across separate onboarding processes.
+        # Validate before creating local state (invalid input must be side-effect free).
+        token = str(data.get("token") or "").strip().removeprefix("PLAYWRIGHT_MCP_EXTENSION_TOKEN=")
+        if sys.platform != "darwin" or data.get("confirmed") is not True or not re.fullmatch(r"[^\s\x00-\x1f]{16,2048}", token):
+            return self._activate_browser_extension(data)
+        import fcntl  # macOS only; shared onboarding also imports on Windows
+        settings = self.appdata / "playwright"
+        if settings.is_symlink():
+            raise SetupError("Небезопасная директория Playwright.")
+        settings.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(settings / ".extension-setup.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise SetupError("Небезопасный файл блокировки Playwright.")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SetupError("Настройка Playwright уже выполняется.") from None
+            return self._activate_browser_extension(data)
+        finally:
+            os.close(fd)
+
+    def _activate_browser_extension(self, data: dict) -> dict:
         """Test the user's supplied extension token BEFORE changing the live browser.
 
         Only the browser launch agent is restarted after isolated verification.
@@ -485,8 +614,8 @@ class SetupEngine:
             version = json.loads(package.read_text("utf-8")).get("version")
         except (OSError, ValueError):
             version = None
-        if version != "0.0.85":
-            raise SetupError("Сначала обновите Playwright MCP до 0.0.85.")
+        if version not in ("0.0.85", "0.0.86"):
+            raise SetupError("Установлена неподдерживаемая версия Playwright MCP. Обновите McpGo.")
         port = 8999
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=.2):
@@ -586,9 +715,25 @@ class SetupEngine:
                 pass
             return False
         def kickstart():
-            return run_logged(["/bin/launchctl", "kickstart", "-k", label],
+            def start():
+                return run_logged(["/bin/launchctl", "kickstart", "-k", label],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                   timeout=15, check=False).returncode == 0
+            if start():
+                return True
+            plist = self.home / "Library/LaunchAgents/com.mcphub.playwright.browser.plist"
+            if not plist.is_file() or plist.is_symlink():
+                return False
+            try:
+                owner = plistlib.loads(plist.read_bytes()).get("EnvironmentVariables", {}).get("MCPGO_INSTALL_ROOT")
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                return False
+            if owner != str(self.root):
+                return False
+            boot = run_logged(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=15, check=False)
+            return boot.returncode == 0 and start()
         try:
             atomic_write(token_file, (token + "\n").encode("utf-8"))
             atomic_write(mode_file, b"extension\n")
@@ -622,8 +767,22 @@ class SetupEngine:
                 token_file.unlink(missing_ok=True)
             else:
                 atomic_write(token_file, old_token)
-            kickstart()
+            if self.browser_extension_mode() == "extension":
+                kickstart()
+            else:
+                # Never launch the browser again with a missing or invalid token.
+                run_logged(["/bin/launchctl", "kill", "SIGTERM", label],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=15, check=False)
             raise SetupError("Переключение на Extension не завершено. Прежний режим восстановлен.") from None
+        autosend_label = f"gui/{os.getuid()}/com.mcphub.autosend.browser"
+        try:
+            autosend = run_logged(["/bin/launchctl", "kickstart", "-k", autosend_label],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=15, check=False)
+            event("browser.extension.autosend", started=autosend.returncode == 0)
+        except (OSError, subprocess.TimeoutExpired):
+            event("browser.extension.autosend", started=False)
         return {"mode": "extension", "verified": True, "background": True}
 
     def status_without_secrets(self) -> dict:
@@ -641,6 +800,7 @@ class SetupEngine:
                 "pending": str((state.get("runtimeProvision") or {}).get("pending") or "")[:64],
                 "status": str((state.get("runtimeProvision") or {}).get("status") or "")[:64],
                 "keyRecoveryAttempted": bool((state.get("runtimeProvision") or {}).get("keyRecoveryAttempted")),
+                "keyExpiresAt": (state.get("runtimeProvision") or {}).get("keyExpiresAt"),
             },
             "localConfigured": state.get("localConfigured", False),
             "localServicesInstalled": state.get("localServicesInstalled", False),
@@ -696,6 +856,8 @@ class SetupEngine:
         if data.get("confirmed") is not True or group not in ("terminal", "playwright"):
             raise SetupError("Выберите Terminal или Playwright и подтвердите запуск.")
         self.ensure_installation_ownership()
+        if group == "playwright" and self.browser_extension_mode() != "extension":
+            raise SetupError("Chrome Extension не настроено. Восстановите токен в мастере McpGo.")
         if not self.read_state().get("localServicesInstalled"):
             raise SetupError("Сначала установите локальные службы.")
         base = "http://127.0.0.1:8969"
@@ -710,7 +872,7 @@ class SetupEngine:
                 method="POST",
                 headers={"Origin": base, "X-MCP-Hub": "dashboard",
                          "Content-Type": "application/json"})
-            # Browser startup can include CDP consent and MCP health checks.
+            # Browser startup can include Extension consent and MCP health checks.
             # Do not report a client-side timeout as if services definitely failed.
             with urlopen_logged(req, timeout=180) as res:
                 outcome = json.loads(res.read(32768))
@@ -735,7 +897,8 @@ class SetupEngine:
                 "Браузер открыл порт, но MCP не готов",
                 "Туннель не запустился",
                 "Playwright не прошёл проверку готовности",
-                "Playwright CDP не видит вкладки Chrome",
+                "Chrome Extension не подтвердило доступ к вкладкам",
+                "EXTENSION_",
                 "Не все службы запустились",
                 "Служба завершилась сразу после запуска",
                 "Не найден run-tunnel.sh",
@@ -834,8 +997,8 @@ class SetupEngine:
         if status["browserMcp"] and not status["browser"]:
             status["browserDetail"] = (
                 "Playwright MCP работает, но запрос вкладок Chrome не завершился. "
-                "Проверь разрешение Remote Debugging в Chrome; если в браузере "
-                "много спящих вкладок, попробуй открыть одну из них и проверить снова."
+                "Проверь Chrome Extension, выбранный профиль и сохранённый токен. "
+                "При необходимости восстанови подключение через мастер."
             )
         elif not status["browserMcp"]:
             status["browserDetail"] = (

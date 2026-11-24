@@ -60,7 +60,9 @@ class SettingsStore {
   const value=this.load().playwrightExtension;
   if(!value?.ciphertext)return null;
   await this.cryptoReady();
-  const decrypted=await this.safeStorage.decryptStringAsync(Buffer.from(value.ciphertext,'base64'));
+  let decrypted;
+  try {decrypted=await this.safeStorage.decryptStringAsync(Buffer.from(value.ciphertext,'base64'))}
+  catch {throw Error('EXTENSION_CONFIG_UNREADABLE')}
   const token=decrypted?.result;
   if(typeof token!=='string'||!/^\S{16,2048}$/.test(token)||/[\x00-\x1f]/.test(token))
    throw Error('INVALID_ENCRYPTED_EXTENSION_TOKEN');

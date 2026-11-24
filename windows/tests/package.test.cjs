@@ -26,6 +26,8 @@ test('Windows reinstall keeps the stable app identity and userData outside packa
 });
 test('bundle allowlists exact runtime files and not private local configuration',()=>{
  const resources=app.build.extraResources;
+ const shared=resources.find(x=>x.to==='mcpgo-runtime/dashboard');
+ assert.ok(shared.filter.includes('connection-health.cjs'));
  const terminal=resources.find(x=>x.to==='mcpgo-runtime/terminal');
  const playwright=resources.find(x=>x.to==='mcpgo-runtime/playwright');
  assert.ok(terminal&&playwright);
@@ -36,7 +38,7 @@ test('bundle allowlists exact runtime files and not private local configuration'
   assert.ok(fs.existsSync(path.join(repo,'terminal',file)),file+' absent');
  }
  assert.ok(resources.some(x=>x.from==='../playwright/node_modules'&&x.to==='mcpgo-runtime/playwright/node_modules'&&x.filter.includes('**/*')));
- for(const file of ['restricted-proxy.mjs','action-guard.mjs','browser-session-manager.mjs',
+ for(const file of ['probe.mjs','restricted-proxy.mjs','action-guard.mjs','browser-session-manager.mjs', 'mcp-response.mjs', 'page-inspection.mjs', 'inspection-conditions.mjs', 'tool-profiles.mjs', 'browser-queue.mjs',
   'tab-lease-manager.mjs','agent-scope.mjs','portable-tab-identity.mjs','portable-agent-tabs.mjs','browser-workspace.mjs','workspace-response.mjs','mcp-modern-protocol.mjs'])
   assert.ok(playwright.filter.includes(file));
  const autosend=resources.find(x=>x.to==='mcpgo-runtime/autosend');

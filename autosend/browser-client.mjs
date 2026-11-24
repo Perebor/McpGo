@@ -9,18 +9,34 @@
  *
  * No user text, URLs or browser output are logged.
  */
+import {McpSseResultReader,isSse,responseMessage} from '../playwright/mcp-response.mjs';
+
 const DEFAULT_URL='http://127.0.0.1:8932/mcp';
 const ACCEPT='application/json, text/event-stream';
 const PROTOCOL='2025-03-26';
 
-function decode(text){
- if(text.trimStart().startsWith('{'))return JSON.parse(text);
- for(const line of text.split(/\r?\n/)){
-  if(line.startsWith('data:')){
-   try{return JSON.parse(line.slice(5).trim())}catch{}
+async function readReply(response,requestId){
+ const type=response.headers?.get?.('content-type')||'application/json';
+ if(isSse(type)&&response.body?.getReader){
+  const stream=response.body.getReader(),decoder=new McpSseResultReader(requestId);
+  let receivedBytes=0;
+  try{
+   while(true){
+    const {done,value}=await stream.read();
+    if(done)throw Error('Official Playwright MCP closed before a matching complete response');
+    receivedBytes+=value.byteLength;
+    if(receivedBytes>8*1024*1024)throw Error('Official Playwright MCP response exceeded 8MB');
+    const reply=decoder.push(value);
+    if(reply)return reply.message;
+   }
+  }finally{
+   // A compliant SSE backend can keep streaming heartbeats after the result.
+   // Stop reading immediately, releasing the private client for its next call.
+   try{await stream.cancel()}catch{}
+   try{stream.releaseLock()}catch{}
   }
  }
- throw Error('Official Playwright MCP returned unreadable JSON-RPC');
+ return responseMessage(await response.text(),type,requestId);
 }
 function contentOf(reply){
  if(reply?.error)throw Error('Playwright MCP: '+String(reply.error.message||'transport error').slice(0,220));
@@ -49,9 +65,8 @@ export class ExtensionMcpClient {
   const sid=response.headers?.get?.('mcp-session-id');
   if(sid&&/^[A-Za-z0-9._-]{8,256}$/.test(sid))this.session=sid;
   if(!response.ok)throw Error('Playwright MCP HTTP '+response.status);
-  const text=await response.text();
   if(method==='notifications/initialized')return null;
-  return decode(text);
+  return readReply(response,body.id);
  }
  async connect(){
   if(this.initialized&&this.session)return;

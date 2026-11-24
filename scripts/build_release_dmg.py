@@ -60,12 +60,12 @@ SOURCES = {
     "autosend": ["server.mjs", "core.mjs", "delivery.mjs", "browser-client.mjs", "browser-health.mjs", "preview-check.mjs", "schedule.mjs", "smart-continuation.mjs",
                  "chat-state.mjs", "guarded-send.mjs", "browser-events.mjs",
                  "conversation-fsm.mjs", "stream-monitor.mjs", "reconciliation.mjs"],
-    "dashboard": ["server.mjs", "mcp-health.mjs", "tunnel-recovery.mjs",
+    "dashboard": ["connection-health.cjs", "server.mjs", "mcp-health.mjs", "tunnel-recovery.mjs",
                   "tunnel-health.mjs", "mcp-versions.mjs", "index.html", "style.css", "app.js"],
     "launchers": ["browser.mjs", "tunnel.mjs"],
     "onboarding": ["cli.py", "setup_engine.py", "browser_compat.py", "runtime_provision.py", "diagnostics.py"],
     "scripts": ["setup_macos.py", "upgrade_runtime.py"],
-    "playwright": ["probe.mjs", "restricted-proxy.mjs", "browser-session-manager.mjs", "chrome-profile.mjs", "tab-lease-manager.mjs", "agent-scope.mjs", "portable-tab-identity.mjs", "portable-agent-tabs.mjs", "browser-workspace.mjs", "workspace-response.mjs", "mcp-modern-protocol.mjs", "chatgpt-url.mjs", "action-guard.mjs", "patch-playwright.mjs",
+    "playwright": ["probe.mjs", "restricted-proxy.mjs", "browser-session-manager.mjs", "mcp-response.mjs", "page-inspection.mjs", "inspection-conditions.mjs", "tool-profiles.mjs", "browser-queue.mjs", "chrome-profile.mjs", "tab-lease-manager.mjs", "agent-scope.mjs", "portable-tab-identity.mjs", "portable-agent-tabs.mjs", "browser-workspace.mjs", "workspace-response.mjs", "mcp-modern-protocol.mjs", "chatgpt-url.mjs", "action-guard.mjs", "patch-playwright.mjs",
                    "package.json", "package-lock.json", "start.sh", "configure-extension.sh", "try-extension.sh", "start-tunnel.sh"],
 }
 

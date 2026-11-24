@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.5",
+  "version": "2.1.0-preview.6",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -24,9 +24,15 @@
       "app/*.js",
       "app/*.html",
       "app/*.css",
+      "app/logo.png",
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "../skills",
+        "to": "mcpgo-runtime/skills",
+        "filter": ["*/SKILL.md"]
+      },
       {
         "from": "../terminal",
         "to": "mcpgo-runtime/terminal",
@@ -47,12 +53,18 @@
         ]
       },
       {
+        "from": "../dashboard",
+        "to": "mcpgo-runtime/dashboard",
+        "filter": ["connection-health.cjs"]
+      },
+      {
         "from": "../playwright",
         "to": "mcpgo-runtime/playwright",
         "filter": [
           "action-guard.mjs",
+          "probe.mjs",
           "restricted-proxy.mjs",
-          "browser-session-manager.mjs",
+          "browser-session-manager.mjs", "mcp-response.mjs", "page-inspection.mjs", "inspection-conditions.mjs", "tool-profiles.mjs", "browser-queue.mjs",
           "tab-lease-manager.mjs",
           "agent-scope.mjs",
           "portable-tab-identity.mjs",

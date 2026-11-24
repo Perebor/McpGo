@@ -23,7 +23,7 @@ test('supervisor starts existing JS service, exposes status and cleans process t
  fs.mkdirSync(path.dirname(script),{recursive:true});
  fs.writeFileSync(script,"setInterval(()=>{},1000);\n");
  const agent=new Runtime({resourceRoot:dir,userData:path.join(dir,'user'),
-   nodeExecutable:process.execPath,credentials:async name=>
+   nodeExecutable:process.execPath,portProbe:async()=>false,credentials:async name=>
      name==='playwrightExtension'?{token:'abcdefghijklmnopqrstuvwxyz012345'}:null});
  t.after(()=>agent.stop());
  agent.running=true;
@@ -38,7 +38,7 @@ test('supervisor starts existing JS service, exposes status and cleans process t
 test('missing executable does not masquerade as a connected service',async t=>{
  const dir=directory(t);
  const agent=new Runtime({resourceRoot:dir,userData:path.join(dir,'user'),
-   nodeExecutable:path.join(dir,'missing-node'),credentials:async()=>null});
+   nodeExecutable:path.join(dir,'missing-node'),portProbe:async()=>false,credentials:async()=>null});
  t.after(()=>agent.stop());
  agent.running=true;
  await agent.launch('terminal');
@@ -46,4 +46,16 @@ test('missing executable does not masquerade as a connected service',async t=>{
  assert.ok(agent.entries.get('terminal').timer);
  agent.stop();
  assert.equal(agent.entries.get('terminal'),undefined);
+});
+
+test('foreign listener blocks launch without spawning or retrying',async t=>{
+ const dir=directory(t);
+ const agent=new Runtime({resourceRoot:dir,userData:path.join(dir,'user'),
+   nodeExecutable:process.execPath,portProbe:async()=>true,credentials:async()=>null});
+ t.after(()=>agent.stop());
+ agent.running=true;
+ await agent.launch('terminal');
+ assert.equal(agent.state().terminal,'error: PORT_OCCUPIED');
+ assert.equal(agent.entries.get('terminal').child,null);
+ assert.equal(agent.entries.get('terminal').timer,null);
 });

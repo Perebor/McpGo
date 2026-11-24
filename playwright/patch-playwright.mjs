@@ -1,5 +1,5 @@
 /**
- * Compatibility patches for Playwright MCP 0.0.85 / playwright-core 1.66-alpha.
+ * Compatibility patches for Playwright MCP 0.0.86 / playwright-core 1.66-alpha.
  * In personal Chrome, a page may never resolve page.title() (e.g. modal or
  * devtools page), and browser_tabs(list) awaits titles of EVERY open tab.
  * Bound the optional per-tab metadata, not the whole MCP operation.
@@ -40,7 +40,7 @@ const previousPatched = `      async headerSnapshot() {
           } finally { clearTimeout(consoleTimer); }
         }
 `;
-const patched = `      async headerSnapshot() {
+const patchedV1 = `      async headerSnapshot() {
         let title;
         let consoleCounts = { total: 0, errors: 0, warnings: 0 };
         if (!this.crashed) {
@@ -73,9 +73,19 @@ const patched = `      async headerSnapshot() {
           } finally { clearTimeout(consoleTimer); }
         }
 `;
+// Optional titles/console counts are not ownership facts. In a personal
+// Chrome with dozens of tabs, 2500+1200 ms PER unresponsive tab can exceed
+// the proxy's 12 s read budget and quarantine the entire shared queue.
+// Preserve the old exact patch for safe migration and keep bounded one-shot
+// promises so the same hung tab never accumulates modal/title listeners.
+const patched=patchedV1.replace('metadataTimer = setTimeout(resolve, 2500)',
+  'metadataTimer = setTimeout(resolve, 250)')
+  .replace('consoleTimer = setTimeout(() => resolve(consoleCounts), 1200)',
+    'consoleTimer = setTimeout(() => resolve(consoleCounts), 100)');
 export function patchSource(source) {
   if (source.includes(patched)) return {source,modified:false};
-  const match=source.includes(previousPatched)?previousPatched:original;
+  const match=source.includes(patchedV1)?patchedV1:
+    source.includes(previousPatched)?previousPatched:original;
   if(source.split(match).length!==2)throw Error("Unsupported Playwright bundle: headerSnapshot() signature changed");
   return {source:source.replace(match,patched),modified:true};
 }

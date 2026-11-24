@@ -3,34 +3,62 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <title>McpGo для Windows</title><link rel="stylesheet" href="style.css"></head>
-<body><main>
-<header><div class="brand"><div class="logo">M</div><div><h1>McpGo</h1><small>Локальный агент для Windows</small></div></div><span class="tag">WINDOWS PREVIEW</span></header>
-<section class="intro"><h2>ChatGPT работает на вашем компьютере</h2><p>Терминал PowerShell, автоматизация Chrome и Edge, параллельные операции и защищённые MCP-туннели.</p></section>
-<section class="panel"><div class="heading"><h3>Компоненты</h3><button class="minor" id="restart">Перезапустить</button></div>
-<div class="services">
- <div><span>PowerShell / MCP / ConPTY</span><span id="state-terminal">—</span></div>
- <div><span>Playwright / Браузер</span><span id="state-browser">—</span></div>
-<div><span>Playwright / AutoSend</span><span id="state-autosendBrowser">—</span></div>
- <div><span>Защита браузерных действий</span><span id="state-proxy">—</span></div>
- <div><span>Туннель терминала</span><span id="state-terminalTunnel">—</span></div>
- <div><span>Туннель браузера</span><span id="state-browserTunnel">—</span></div>
- <div><span>Автопродолжение / таймер</span><span id="state-autosend">—</span></div>
- <div><span>Межагентный обмен</span><span id="state-messaging">—</span></div>
-</div></section>
-<section class="panel" aria-labelledby="updates-label"><div class="heading"><h3 id="updates-label">Обновления</h3><span class="subtle">Проверка без автоматической установки</span></div>
+<body data-active-section="overview"><div class="app-shell">
+<aside class="sidebar" aria-label="Боковое меню">
+<div class="brand"><img class="brand-mark" src="logo.png" alt="" width="43" height="43"><div><h1>McpGo</h1><small>DESKTOP CONTROL</small></div></div>
+<nav class="sidebar-navigation" aria-label="Разделы McpGo"><p class="sidebar-caption">ПРОСТРАНСТВО</p><button type="button" class="nav-item" data-nav="overview"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Обзор</span><span class="nav-dot" aria-hidden="true"></span></button><button type="button" class="nav-item" data-nav="onboarding"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><path d="M7 6.5l4 10m6-10-4 10M7 5h10"/></svg><span>Первое подключение</span><span class="nav-dot" aria-hidden="true"></span></button><button type="button" class="nav-item" data-nav="messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8l-5 3V11a8 8 0 0 1 16 0"/><path d="M8 10h8M8 14h5"/></svg><span>Связь агентов</span><span class="nav-dot" aria-hidden="true"></span></button><button type="button" class="nav-item" data-nav="settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Настройки туннелей</span><span class="nav-dot" aria-hidden="true"></span></button><button type="button" class="nav-item" data-nav="skills"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="m12 2 1.5 3.5L17 7l-3.5 1.5L12 12l-1.5-3.5L7 7l3.5-1.5ZM7 14h10"/></svg><span>Навыки</span><span class="nav-dot" aria-hidden="true"></span></button><button type="button" class="nav-item" data-nav="autosend"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></svg><span>Сообщения по таймеру</span><span class="nav-dot" aria-hidden="true"></span></button><button type="button" class="nav-item" data-nav="updates"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 18v3h16v-3"/></svg><span>Обновления</span><span class="nav-dot" aria-hidden="true"></span></button>
+<p class="sidebar-caption tools-caption">ИНСТРУМЕНТЫ</p><button type="button" class="nav-item nav-tool" data-open="folder"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h7l2 3h9v11H3Z"/></svg><span>Папка MCP</span><span class="external-arrow" aria-hidden="true">↗</span></button><button type="button" class="nav-item nav-tool" data-open="logs"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/></svg><span>Журналы</span><span class="external-arrow" aria-hidden="true">↗</span></button><button type="button" class="nav-item nav-tool" data-open="docs"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6a4 4 0 0 1 4 4v13H7a3 3 0 0 0-3 1Zm16 0h-2a4 4 0 0 0-4 4v13h3a3 3 0 0 1 3 1Z"/></svg><span>Документация</span><span class="external-arrow" aria-hidden="true">↗</span></button></nav>
+<div class="sidebar-spacer"></div>
+<div class="sidebar-state"><div class="sidebar-state-title"><span id="connection-dot" class="connection-dot"></span>СОСТОЯНИЕ MCP</div>
+<div class="sidebar-count"><strong id="active-count">0</strong><span>/ 2 системы активны</span></div>
+<div class="sidebar-state-foot">♢ &nbsp;Локальное соединение</div></div>
+</aside><main id="workspace" class="workspace" tabindex="-1"><div class="content-wrap">
+<div class="page-header"><div><p id="page-kicker" class="page-kicker">CONTROL CENTER</p><h2 id="page-title">Сервисы MCP</h2><p id="page-description">Управление подключениями ChatGPT на этом компьютере</p></div>
+<button type="button" id="refresh-status" class="minor refresh-button">↻ &nbsp;Обновить</button></div>
+<div class="connection-summary" data-section="overview" aria-live="polite">
+<div class="summary-icon" aria-hidden="true">⌁</div><div class="summary-copy"><strong>Локальные подключения</strong><span id="summary-message">Проверяем состояние сервисов</span></div>
+<strong class="summary-count" id="summary-count">0 / 2</strong><span class="summary-divider"></span><span class="summary-local">♢ &nbsp;127.0.0.1</span></div>
+<div class="section-label" data-section="overview"><span>ПОДКЛЮЧЕНИЯ</span><i></i></div>
+
+<section class="services-overview" data-section="overview" aria-label="Компоненты MCP">
+<div class="service-card"><div class="service-head"><div class="service-icon" aria-hidden="true">&gt;_</div><div class="service-description"><h3>Терминал</h3><p>Локальный MCP · PowerShell и задачи Windows</p></div><span id="terminal-pill" class="service-pill">Проверка</span></div>
+<div class="component-grid"><div class="component-tile"><span>PowerShell / MCP / ConPTY</span><span id="state-terminal">—</span></div><div class="component-tile"><span>Secure MCP tunnel</span><span id="state-terminalTunnel">—</span></div></div><p class="service-footnote" id="terminal-health-detail">Проверяем соединение…</p><button class="minor" id="recover-terminal-tunnel" type="button">Переподключить только туннель</button></div>
+<div class="service-card"><div class="service-head"><div class="service-icon" aria-hidden="true">◎</div><div class="service-description"><h3>Playwright</h3><p>Chrome / Edge · Browser MCP</p></div><span id="browser-pill" class="service-pill">Проверка</span></div>
+<div class="component-grid"><div class="component-tile"><span>Браузер</span><span id="state-browser">—</span></div><div class="component-tile"><span>Защита действий</span><span id="state-proxy">—</span></div><div class="component-tile"><span>Secure MCP tunnel</span><span id="state-browserTunnel">—</span></div><div class="component-tile"><span>AutoSend Browser</span><span id="state-autosendBrowser">—</span></div></div>
+<p class="service-footnote" id="browser-health-detail">Проверяем соединение…</p><div class="actions"><button class="minor" id="overview-verify" type="button">Проверить локально</button><button class="minor" id="copy-connection-test" type="button">Скопировать тест для ChatGPT</button><button class="minor" id="recover-browser-tunnel" type="button">Переподключить только туннель</button></div></div>
+<div class="service-card"><h3>Последние изменения соединения</h3><pre id="connection-history" style="white-space:pre-wrap;font-size:12px">Нет событий</pre></div>
+<div class="service-card background-card"><div class="heading"><h3>Фоновые службы</h3><button class="minor" id="restart" type="button">Перезапустить все</button></div>
+<div class="component-grid"><div class="component-tile"><span>Сообщения по таймеру</span><span id="state-autosend">—</span></div><div class="component-tile"><span>Обмен между агентами</span><span id="state-messaging">—</span></div></div></div>
+</section>
+<section class="skills-panel" data-section="skills" aria-label="Навыки инструментов">
+<div class="skills-note">Навыки — локальные инструкции. Чтобы использовать их в чате ChatGPT, скопируйте текст и вставьте в разговор. Они не устанавливают плагины и не добавляют разрешений.</div>
+<div class="skills-layout"><div class="skills-list" role="group" aria-label="Доступные навыки">
+<button type="button" class="skill-option" data-skill="terminalhub-operations"><strong>Безопасный терминал</strong><span>ChatTerminalHub</span><small>Команды, сборки и задачи</small></button>
+<button type="button" class="skill-option" data-skill="playwrighthub-qa"><strong>Браузерное тестирование</strong><span>PlaywrightHub</span><small>UI, сеть и регрессии</small></button>
+<button type="button" class="skill-option" data-skill="agent-coordination"><strong>Координация агентов</strong><span>McpGo</span><small>Inbox и передача задач</small></button>
+<button type="button" class="skill-option" data-skill="tunnel-diagnostics"><strong>Диагностика туннелей</strong><span>Оба туннеля</span><small>Настройка и диагностика</small></button>
+</div><div class="skill-detail"><div class="heading"><div><h3 id="skill-title">Безопасный терминал</h3><small id="skill-path">terminalhub-operations/SKILL.md</small></div>
+<button type="button" id="skill-open" class="minor">Показать файл</button></div>
+<pre id="skill-content" tabindex="0">Выберите навык, чтобы просмотреть инструкцию.</pre>
+<div class="actions"><button type="button" id="skill-copy-chat" class="primary">Скопировать для чата</button><button type="button" id="skill-copy-raw" class="minor">Скопировать SKILL.md</button></div>
+</div></div><p id="skills-feedback" class="skill-feedback" role="status">4 локальных навыка · Без автоматического выполнения команд</p></section>
+<section class="panel" data-section="updates" aria-labelledby="updates-label"><div class="heading"><h3 id="updates-label">Обновления</h3><span class="subtle">Проверка без автоматической установки</span></div>
 <p id="updates-status" class="hint" role="status">Установщик неподписан. Перед запуском проверяйте SHA-256 из GitHub Releases.</p>
 <div class="actions wizard-buttons"><button class="minor" id="check-updates" type="button">Проверить обновления</button><button class="minor" id="open-releases" type="button">Все версии на GitHub</button><button class="primary" id="open-update" type="button" hidden>Открыть новую версию</button></div>
 </section>
-<section class="panel"><div class="heading"><h3>Мастер первого подключения</h3><span class="subtle">Автоматическая настройка через OpenAI Platform</span></div>
+<section class="panel" data-section="onboarding"><div class="heading"><h3>Мастер первого подключения</h3><span class="subtle">Автоматическая настройка через OpenAI Platform</span></div>
 <p class="hint">Административный ключ используется только в выбранной операции и не сохраняется. Создание туннелей и служебного аккаунта — отдельные подтверждаемые действия.</p>
 <div class="group"><label for="admin-key">OpenAI Admin API Key</label><input type="password" autocomplete="off" id="admin-key" placeholder="Только для настройки"></div>
 <div class="group"><label for="organization-id">OpenAI Organization ID (org-...)</label><input id="organization-id" autocomplete="off" spellcheck="false" placeholder="org-..."></div>
 <div class="group"><label for="workspace-id">Workspace ID (если используется вместо организации)</label><input id="workspace-id" autocomplete="off" spellcheck="false" placeholder="ws-..."></div>
 <div class="actions wizard-buttons"><button class="minor" id="create-tunnels" type="button">1. Создать два туннеля</button><button class="primary" id="create-runtime" type="button">2. Создать Runtime Key и подключить</button></div>
+<div class="actions wizard-buttons"><button class="minor" id="inspect-runtime" type="button">Проверить созданные ресурсы</button><button class="minor" id="recover-runtime" type="button">Восстановить Runtime Key</button></div>
 <div class="actions wizard-buttons"><button class="minor" id="export-diagnostics" type="button">Экспортировать диагностику (.zip)</button></div>
+<div class="actions wizard-buttons"><button class="minor" id="verify-connection" type="button">Диагностика подключения</button></div>
+<p class="hint" id="connection-diagnostic" role="status"></p>
 <p id="wizard-status" class="hint" role="status">Второе действие создаст отдельный проект McpGo и сервисный аккаунт с минимальными разрешениями.</p>
 </section>
-<section class="panel"><div class="heading"><h3>Подключение MCP</h3><span class="subtle">Ключи шифруются средствами Windows</span></div>
+<section class="panel" data-section="settings"><div class="heading"><h3>Подключение MCP</h3><span class="subtle">Ключи шифруются средствами Windows</span></div>
 <p class="hint">Создайте два Secure MCP Tunnels в ChatGPT и укажите идентификаторы и ключи. McpGo не передаёт ключи сторонним серверам.</p>
 <form id="settings">
 <div class="fields">
@@ -58,14 +86,14 @@
 <p class="hint" id="playwright-token-help">Токен шифруется средствами Windows. Если расширение уже настроено, оставь поле пустым — предыдущий токен сохранится. AutoSend использует собственную группу вкладок.</p></div>
 <div class="actions"><button type="submit" class="primary">3. Сохранить и подключить</button></div>
 </form></section>
-<section class="panel"><div class="heading"><h3>Сообщения по таймеру</h3><button class="minor" id="refresh-tasks" type="button">Обновить</button></div>
+<section class="panel" data-section="autosend"><div class="heading"><h3>Сообщения по таймеру</h3><button class="minor" id="refresh-tasks" type="button">Обновить</button></div>
 <p class="hint">Создание задания не включает отправку. Перед стартом нужно проверить выбранный чат и нажать «Включить».</p>
 <form id="task-create"><div class="group"><label for="task-url">Ссылка на существующий разговор ChatGPT</label>
 <input id="task-url" placeholder="https://chatgpt.com/c/..." required autocomplete="off"></div>
 <div class="group"><label for="task-message">Сообщение для продолжения</label><textarea id="task-message" rows="2" required placeholder="Продолжи работу"></textarea></div>
 <div class="bottom"><div class="group"><label for="task-interval">Интервал (в минутах)</label><input id="task-interval" type="number" min="1" max="10080" value="10" required></div>
 <button class="primary" type="submit">Добавить выключенным</button></div></form><div id="tasks-list" class="item-list"></div></section>
-<section class="panel"><div class="heading"><h3>Обмен между агентами</h3><button type="button" id="refresh-agents" class="minor">Обновить</button></div>
+<section class="panel" data-section="messages"><div class="heading"><h3>Обмен между агентами</h3><button type="button" id="refresh-agents" class="minor">Обновить</button></div>
 <form id="agent-create" class="fields"><div class="group"><label for="agent-id">ID агента</label><input id="agent-id" required placeholder="agent1"></div>
 <div class="group"><label for="agent-label">Имя агента</label><input id="agent-label" required placeholder="Разработчик Windows"></div>
 <button type="submit" class="minor">Зарегистрировать агента</button></form><div id="agents-list" class="item-list"></div>
@@ -75,5 +103,5 @@
 <div class="actions"><button class="primary" type="submit">Передать сообщение</button><button id="refresh-history" class="minor" type="button">История</button></div>
 </form><div id="agent-history" class="item-list"></div></section>
 <p class="status" id="message" role="status">Загрузка...</p>
-<footer>После закрытия окна McpGo остаётся в системном трее. SSH и файлы доступны через PowerShell.</footer>
-</main><script src="renderer.js"></script></body></html>
+<footer>После закрытия окна McpGo продолжает работу в системном трее Windows.</footer>
+</div></main></div><script src="renderer.js"></script></body></html>

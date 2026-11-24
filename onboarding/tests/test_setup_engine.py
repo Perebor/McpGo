@@ -69,6 +69,18 @@ class SetupEngineTests(unittest.TestCase):
         fakecli.chmod(0o700)
         self.engine = FakeEngine(self.root, self.home, fakecli)
 
+    def test_network_preflight_treats_401_as_reachable_and_does_not_write(self):
+        import io
+        import urllib.error
+        err=urllib.error.HTTPError("https://api.openai.com/v1/models",401,"unauthorized",{},io.BytesIO(b"{}"))
+        with patch("setup_engine.urlopen_logged",side_effect=err) as request:
+            result=self.engine.connection_preflight({})
+            self.assertTrue(result["apiReachable"])
+            self.assertNotIn("Authorization",request.call_args.args[0].headers)
+        self.assertFalse(self.engine.store.exists())
+        with patch("setup_engine.urlopen_logged",side_effect=TimeoutError):
+            self.assertFalse(self.engine.connection_preflight({})["apiReachable"])
+
     def test_readonly_status_does_not_create_state(self):
         data = self.engine.status_without_secrets()
         self.assertEqual(data["phase"], "preflight")
@@ -164,6 +176,43 @@ class SetupEngineTests(unittest.TestCase):
         self.assertEqual(browser.stat().st_mode & 0o077, 0)
         self.assertEqual(self.engine.configure({"confirmed": True})["profiles"], result["profiles"])
         self.assertTrue((self.engine.appdata / "terminal/stateless-config.json").exists())
+
+    def test_profile_setup_resumes_after_interruption(self):
+        from unittest.mock import patch
+        self.engine.import_tunnels({"confirmed": True, "terminalId": A, "browserId": B})
+        original = self.engine.run_cli
+        def fail_browser(args, **kwargs):
+            if args[0] == "init" and args[args.index("--profile") + 1] == "mcpgo-browser":
+                raise SetupError("simulated interruption")
+            return original(args, **kwargs)
+        with patch.object(self.engine, "run_cli", side_effect=fail_browser):
+            with self.assertRaisesRegex(SetupError, "interruption"):
+                self.engine.configure({"confirmed": True})
+        config = self.engine.appdata / "terminal/stateless-config.json"
+        before = config.read_bytes()
+        result = self.engine.configure({"confirmed": True})
+        self.assertEqual(config.read_bytes(), before)
+        self.assertTrue(Path(result["profiles"]["browser"]).is_file())
+
+    def test_legacy_partial_installation_recovers_original_route(self):
+        self.engine.import_tunnels({"confirmed": True, "terminalId": A, "browserId": B})
+        config = self.engine.appdata / "terminal/stateless-config.json"
+        profile = self.home / ".config/tunnel-client/chat-terminal-hub.yaml"
+        profile.parent.mkdir(parents=True)
+        route = "exec/" + "a"*64
+        profile.write_text(f'control_plane:\n  tunnel_id: "{A}"\nmcp:\n  server_urls:\n    - url: "http://127.0.0.1:12848/{route}"\n')
+        result = self.engine.configure({"confirmed": True})
+        self.assertEqual(json.loads(config.read_text())["mcpPath"], route)
+        self.assertTrue(Path(result["profiles"]["browser"]).is_file())
+
+    def test_mutation_lock_rejects_second_writer_and_releases(self):
+        from setup_engine import onboarding_mutation_lock
+        with onboarding_mutation_lock(self.engine, "provision"):
+            with self.assertRaisesRegex(SetupError, "уже выполняется"):
+                with onboarding_mutation_lock(self.engine, "configure"):
+                    self.fail("concurrent mutation allowed")
+        with onboarding_mutation_lock(self.engine, "configure"):
+            pass
 
     def test_different_installation_state_cannot_be_overwritten(self):
         self.engine.import_tunnels({"confirmed": True, "terminalId": A, "browserId": B})
@@ -311,7 +360,8 @@ class SetupEngineTests(unittest.TestCase):
             io.BytesIO(json.dumps({
                 "error":"Playwright не открыл порт 8931 — проверьте logs/playwright/browser.err.log"
             }).encode()))
-        with patch("urllib.request.urlopen", side_effect=[StatusResponse(),error]):
+        with patch.object(self.engine, "browser_extension_mode", return_value="extension"), \
+             patch("urllib.request.urlopen", side_effect=[StatusResponse(),error]):
             with self.assertRaisesRegex(SetupError,"Playwright не открыл порт 8931"):
                 self.engine.start_local({"confirmed":True,"group":"playwright"})
 

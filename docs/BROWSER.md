@@ -29,3 +29,55 @@ Playwright MCP публично предоставляет `browser_tabs(list/ne
 MCP proxy сериализует изменяющие команды основного Browser MCP, ведёт receipts для защиты от повторных действий и не допускает чужих запросов к закреплённым группам. Scheduler не использует этот proxy и не конкурирует с браузерными агентами за их текущую вкладку.
 
 Локальные порты предназначены только для loopback. При сетевом обрыве браузерного вызова нельзя автоматически повторять действие, которое могло уже выполниться. Не раскрывайте токены расширения, MCP tunnel или пользовательские cookies в логах.
+
+
+## Целевое чтение и проверка состояния (Playwright MCP 0.0.86)
+
+Новый **`mcpgo_inspect_page`** доступен в списке инструментов общего браузера и требует **тот же `workspace_id`**, что и `browser_snapshot`. Используйте его вместо постоянного полного снимка:
+
+- `strategy: auto, query: "Опубликовать", maxResults: 5` — короткий поиск по accessibility tree; обычный `browser_find` также остаётся доступным.
+- `strategy: snapshot, target: "#dialog", depth: 4` — только конкретное поддерево.
+- `strategy: verify, expectedText: "Сохранено", timeoutSeconds: 7` — дождаться подтверждённого изменения DOM после действия; **никогда не повторять отправку** при отсутствии сообщения.
+- `strategy: visual, target: "#chart", depth: 3` — совместный accessibility snapshot с координатами и WebP screenshot, когда DOM не описывает canvas/иконки. `visualFallback: true` разрешает снимок в режиме `auto` только при слабом accessibility сигнале. По умолчанию изображения не отправляются.
+
+После смены активной страницы, переподключения и каждого действия проверка владельца вкладки и запрет повторения при неизвестном исходе сохраняются. `browser_close` и `browser_run_code_unsafe` не экспортируются через общий прокси.
+
+Для Browser MCP базовый settle timeout — **200 мс** (`MCPGO_BROWSER_SETTLE_MS`), для отдельного AutoSend — **500 мс** (`MCPGO_AUTOSEND_SETTLE_MS`); допустимые значения 0–2000 мс. Это ожидание Playwright после действия, а не гарантия загрузки данных. Для асинхронных изменений используйте `verify` или `browser_wait_for`. Установленная версия приложения не меняется без отдельной сборки и установки.
+
+С 0.0.86 штатное расширение поддерживает цветные группы сессий и их возобновление, но требуется обновлённое Playwright Extension; локальные проверки изолированного Chrome не подтверждают совместимость с установленным расширением на macOS/Windows. Наши ограничения `workspace_id` и tab lease оставлены до проверки новой модели на реальном расширении.
+
+`mcpgo_browser_status` и `/healthz` показывают числовые метрики и короткую историю типов ошибок без HTML, URL, скриншотов, токенов или текста страниц. Дамп/trace содержимого пользовательского браузера автоматически **не включён**.
+
+## Дополнительные возможности dev — этап 19.11.2026
+
+`mcpgo_inspect_page` поддерживает новые read-only стратегии. Каждое обращение ОБЯЗАТЕЛЬНО включает тот же `workspace_id`, что и действия с вкладками:
+
+```json
+{"strategy":"recover","query":"Сохранить","maxResults":3,"workspace_id":"<your-workspace>"}
+{"strategy":"state","selector":"#status","expectedText":"Сохранено","timeoutSeconds":3,"workspace_id":"<your-workspace>"}
+{"strategy":"state","expectedUrl":"https://example.com/complete","timeoutSeconds":3,"workspace_id":"<your-workspace>"}
+{"strategy":"state","selector":"#target","includeFrames":true,"timeoutSeconds":3,"workspace_id":"<your-workspace>"}
+{"strategy":"scroll","selector":".wanted-row","containerSelector":"#virtual-list","maxSteps":5,"stepPixels":500,"workspace_id":"<your-workspace>"}
+{"strategy":"visual","screenshotOnly":true,"workspace_id":"<your-workspace>"}
+```
+
+`recover` возвращает **свежий** accessibility ref после перерисовки React, но не повторяет клик. `state` ждёт строго заданное условие в текущей вкладке, не делает повторные submit/click. `includeFrames` ограничен same-origin iframe: cross-origin DOM недоступен через JS. `expectedRequestPath` отмечает появление завершённой загрузки ресурса в Performance API, **не** HTTP-код ответа и не успешное действие на сайте. `scroll` меняет только позицию прокрутки и не отправляет формы. Для SVG/страниц без `body` включайте `screenshotOnly`, не дожидаясь таймаута DOM-snapshot. Любой инструмент остаётся под проверкой владения текущей вкладкой.
+
+Профили инструментов (настроить для процесса и **перезапустить прокси**):
+
+- `MCPGO_BROWSER_TOOL_PROFILE=full` — стандартный полный каталог, максимальная совместимость.
+- `MCPGO_BROWSER_TOOL_PROFILE=core` — базовые действия + инспекция/владение вкладками (в тесте 21 инструмент).
+- `MCPGO_BROWSER_TOOL_PROFILE=vision` — core плюс визуальные инструменты.
+- `MCPGO_BROWSER_TOOL_PROFILE=diagnostics` — core, vision и диагностика.
+
+Профиль влияет на **объявление** инструментов, но не на область полномочий локального MCP-клиента; его нельзя использовать как замену авторизации. При смене каталога ChatGPT может сохранять предыдущую схему подключения. Настройка `MCPGO_BROWSER_SNAPSHOT_MODE=full|none` опционально отключает автоматические полные snapshots после действий, **но явные** `browser_snapshot` и `mcpgo_inspect_page` остаются. Для AutoSend отдельная переменная `MCPGO_AUTOSEND_SNAPSHOT_MODE`; оба режима по умолчанию `full` до QA на настоящих страницах.
+
+Производительность и приватность: `/healthz` показывает p50/p95 отдельно по `upstream:tabs:list`, действиям, проверкам вкладок и примерному размеру результата в **байтах**, без копирования пользовательского DOM, сетевых заголовков, URL и скриншотов. Это не стоимость токенов. См. `PLAYWRIGHT_PERFORMANCE_PHASE2_20261119.md`.
+
+Важно для dev на этом Mac: Dev.app и опубликованный клиент используют общий writable runtime `~/Library/Application Support/McpGo/Runtime`; перезапуск Browser/Proxy в dev может временно нарушить прежний `workspace_id`. В таком случае в текущем чате заново вызовите `mcpgo_workspace`, не пытайтесь переиспользовать идентификатор другого агента. Рабочие вкладки не закрывались при установке.
+
+### Замедление списка вкладок и восстановление после таймаута
+
+В dev Playwright MCP 0.0.86 для `browser_tabs:list` применён ограничитель необязательной tab metadata: 250 мс на title, 100 мс на console counters вместо прежних 2500/1200. При неотвечающей странице заголовок может временно отсутствовать; URL/владение вкладкой не угадываются. Этот патч входит в `npm ci` postinstall и воспроизводится для будущих macOS/Windows сборок. Результаты на установленном расширении и откат описаны в `PLAYWRIGHT_PERFORMANCE_PHASE2_20261119.md`.
+
+Если `/healthz` возвращает `browserQueue.quarantined=true`, McpGo **не повторяет** ранее отправленные действия. Сначала необходимо проверить возможные последствия неизвестного действия на соответствующей странице и убедиться, что очередь не занята; только после этого допустим управляемый перезапуск Browser/Proxy. Автоматический повтор нажатия Send запрещён.

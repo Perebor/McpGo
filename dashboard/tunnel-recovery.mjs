@@ -88,13 +88,13 @@ export class TunnelRecovery {
       s.status='AUTH_REQUIRED';s.lastProblem='AUTH_REQUIRED';
       s.failures=0;s.nextRetryAt=null;return;
     }
-    if(s.status==='AUTH_REQUIRED'||s.status==='NEEDS_ATTENTION')return;
     if(p.health==='ready') {
       s.status='CONNECTED';s.lastHealthyAt=now;s.failures=0;
       s.notReadySince=null;s.nextRetryAt=null;s.lastProblem=null;
       s.successes=Math.min(s.successes+1,2);
       if(s.successes===2)s.attempts=[];return;
     }
+    if(s.status==='AUTH_REQUIRED'||s.status==='NEEDS_ATTENTION')return;
     s.successes=0;
     if(p.health==='unmonitored') {
       // Existing tunnel from a previous release, with no health URL yet.
@@ -104,14 +104,17 @@ export class TunnelRecovery {
     if(p.health==='offline') {
       s.status='OFFLINE';s.lastProblem='NETWORK_OFFLINE';return;
     }
+    if(p.health==='throttled') {
+      s.status='DEGRADED';s.lastProblem='RATE_LIMITED';s.failures=0;return;
+    }
     if(p.health==='starting') {
       // /readyz is startup readiness, not liveness. The official tunnel-client
       // can self-retry OAuth discovery and network polling for a long time.
       // Restarting a live process on 503 risks interrupting in-flight work.
       s.notReadySince??=now;
-      s.status='DEGRADED';
-      s.lastProblem=now-s.notReadySince>NOT_READY_GRACE?
-        'PROLONGED_NOT_READY':'TUNNEL_NOT_READY';
+      const prolonged=now-s.notReadySince>NOT_READY_GRACE;
+      s.status=prolonged?'NEEDS_ATTENTION':'DEGRADED';
+      s.lastProblem=prolonged?'PROLONGED_NOT_READY':'TUNNEL_NOT_READY';
       return;
     }
     s.notReadySince=null;

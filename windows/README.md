@@ -25,6 +25,28 @@ launchd, Keychain and DMG logic remain untouched.
 All backend HTTP listeners bind exclusively to 127.0.0.1. Two independent
 outbound Secure MCP Tunnels forward the terminal and browser MCP endpoints.
 
+## Desktop interface parity
+
+The Windows Electron shell follows the macOS SwiftUI desktop layout:
+dark palette, fixed sidebar, navigation, local status summary, and separate
+Terminal/Playwright service cards. Pages: Overview, First connection, Agent
+messaging, Tunnel settings, Skills, Scheduled messages, and Windows updates.
+The sidebar also opens the local runtime, onboarding logs, and documentation.
+
+Four bundled SKILL.md files are available under Skills. The renderer can only
+read, copy, or reveal these four allowlisted files; arbitrary paths and shell
+commands are not accepted. Copying a skill into a chat does not install a
+ChatGPT plugin or grant permissions.
+
+Windows still has a **global** service restart control, rather than macOS's
+per-service Start/Stop/Restart controls. The status indicator shows *local*
+process state and is not a remote ChatGPT tunnel verification.
+
+UI source: \`windows/app/index.html\`, \`style.css\`, \`renderer.js\`; secure
+IPC: \`main.cjs\`, \`preload.cjs\`, \`skills.cjs\`. Regression tests:
+\`windows/tests/ui-parity.test.cjs\` and \`skills.test.cjs\`. Real Windows
+interactive validation and packaging are separate release gates.
+
 ## First-run workflow
 
 1. Run **McpGo Setup** under the Windows user account that owns the files and

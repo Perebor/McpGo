@@ -1,7 +1,8 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
-const {app,BrowserWindow,Tray,Menu,ipcMain,safeStorage,nativeImage,shell,dialog}=require('electron');
+const {app,BrowserWindow,Tray,Menu,ipcMain,safeStorage,nativeImage,shell,dialog,clipboard}=require('electron');
 const {Runtime,assertTunnelId}=require('./runtime.cjs');
+const {readSkill,textForChat}=require('./skills.cjs');
 const {localRequest}=require('./local-api.cjs');
 const {onboarding}=require('./onboarding.cjs');
 const {record,register}=require('./diagnostics.cjs');
@@ -30,7 +31,7 @@ app.setAppUserModelId('ru.mcpgo.desktop');
 if(!app.requestSingleInstanceLock()){app.quit();process.exit(0)}
 let window,tray,runtime,quitting=false;
 const settings=new SettingsStore({userData:()=>app.getPath('userData'),safeStorage});
-function publicStatus(){return {...settings.public(),status:runtime?.state()||{}}}
+function publicStatus(){return {...settings.public(),status:runtime?.state()||{},readiness:runtime?.readinessState()||{}}}
 function publish(){
  if(window&&!window.isDestroyed())window.webContents.send('mcpgo:status',publicStatus());
  if(tray)tray.setToolTip('McpGo — '+(runtime?.state()?.terminal==='running'?'работает':'подключение'));
@@ -42,8 +43,8 @@ function iconPath(){
 function openWindow(){
  diag('windows.ui.openWindow');
  if(window&&!window.isDestroyed()){window.show();window.focus();return}
- window=new BrowserWindow({width:900,height:690,minWidth:730,minHeight:590,show:false,
- title:'McpGo для Windows',icon:iconPath(),backgroundColor:'#121719',autoHideMenuBar:true,
+ window=new BrowserWindow({width:1100,height:770,minWidth:770,minHeight:620,show:false,
+ title:'McpGo для Windows',icon:iconPath(),backgroundColor:'#0d1016',autoHideMenuBar:true,
  webPreferences:{preload:path.join(__dirname,'preload.cjs'),nodeIntegration:false,
  contextIsolation:true,sandbox:true,webSecurity:true}});
  window.loadFile(path.join(__dirname,'index.html'));
@@ -53,28 +54,77 @@ function openWindow(){
  window.on('close',event=>{if(!quitting){event.preventDefault();window.hide()}});
 }
 ipcMain.handle('mcpgo:status',()=>publicStatus());
-ipcMain.handle('mcpgo:save',async(_event,value)=>{
+ipcMain.handle('mcpgo:copy-connection-test',()=>{
+ clipboard.writeText('Проверь McpGo именно из этого чата: вызови Terminal с безвредной командой echo MCPGO_OK и Playwright: сначала mcpgo_workspace, затем browser_tabs(action=list) с возвращённым workspace_id. Не открывай и не закрывай вкладки. Сообщи отдельно, какие вызовы реально прошли, какие отсутствуют или завершились ошибкой. Не заменяй проверку предположением.');
+ return true;
+});
+ipcMain.handle('mcpgo:verify-connection',async()=>{await runtime.verifyBrowserConnection(true);return publicStatus()});
+ipcMain.handle('mcpgo:recover-tunnel',async(_event,name)=>{
+ await settingsSaveTail;
+ if(!await runtime.recoverTunnel(name,{manual:true}))throw Error('Туннель не готов к безопасному переподключению. Проверь локальный MCP и авторизацию.');
+ return publicStatus();
+});
+let settingsSaveTail=Promise.resolve();
+ipcMain.handle('mcpgo:save',(_event,value)=>{
+ const action=settingsSaveTail.then(async()=>{
+
  register(value);diag('windows.settings.save.requested',{keys:Object.keys(value||{})});
+ const rawToken=value?.playwrightExtension?.token;
+ if(typeof rawToken==='string'&&rawToken.trim()){
+  const token=rawToken.trim().replace(/^PLAYWRIGHT_MCP_EXTENSION_TOKEN=/,'');
+  try{await runtime.verifyExtension(token,value.browser||runtime.browser)}
+  catch(e){diag('windows.extension.trial.failed',{code:e.message});throw e}
+ }
  const v=await settings.save(value);
  app.setLoginItemSettings({openAtLogin:v.autoStart});
  runtime.browser=v.browser;await runtime.restart();publish();diag('windows.settings.save.success');return publicStatus();
+ });
+ settingsSaveTail=action.catch(()=>{});
+ return action;
 });
-ipcMain.handle('mcpgo:restart',async()=>{diag('windows.runtime.restart.requested');await runtime.restart();publish();return publicStatus()});
+ipcMain.handle('mcpgo:restart',async()=>{await settingsSaveTail;diag('windows.runtime.restart.requested');await runtime.restart();publish();return publicStatus()});
 ipcMain.handle('mcpgo:check-updates',()=>checkUpdates(appVersion));
 ipcMain.handle('mcpgo:open-update',(_event,url)=>shell.openExternal(safeReleaseUrl(url)));
 ipcMain.handle('mcpgo:open-releases',()=>shell.openExternal('https://github.com/mcpgo1/McpGo/releases'));
+// Fixed allowlist: never accept filesystem paths or arbitrary URLs from the renderer.
+ipcMain.handle('mcpgo:skill-read',(_event,id)=>{
+ const {content}=readSkill(runtime.resourceRoot,id);
+ return {id,content};
+});
+ipcMain.handle('mcpgo:skill-copy',(_event,id,mode)=>{
+ if(mode!=='chat'&&mode!=='raw')throw Error('INVALID_SKILL_COPY_MODE');
+ const {content}=readSkill(runtime.resourceRoot,id);
+ clipboard.writeText(mode==='chat'?textForChat(content):content);
+ return {ok:true};
+});
+ipcMain.handle('mcpgo:skill-open',(_event,id)=>{
+ const {file}=readSkill(runtime.resourceRoot,id);
+ shell.showItemInFolder(file);
+ return {ok:true};
+});
+ipcMain.handle('mcpgo:open-location',async(_event,kind)=>{
+ if(kind==='docs')return shell.openExternal('https://github.com/mcpgo1/McpGo/blob/main/README.md');
+ if(kind!=='folder'&&kind!=='logs')throw Error('INVALID_LOCATION');
+ const target=kind==='folder'?runtime.resourceRoot:path.join(app.getPath('userData'),'Onboarding','Logs');
+ if(kind==='logs')fs.mkdirSync(target,{recursive:true});
+ const error=await shell.openPath(target);
+ if(error)throw Error('OPEN_LOCATION_FAILED: '+error);
+ return {ok:true};
+});
+
 
 ipcMain.handle('mcpgo:service-read',(_event,service,route)=>localRequest(service,route,undefined,app.getPath('userData')));
 ipcMain.handle('mcpgo:service-action',(_event,service,route,body)=>localRequest(service,route,body,app.getPath('userData')));
-ipcMain.handle('mcpgo:onboard',async(_event,action,payload)=>{
+ipcMain.handle('mcpgo:onboard',(_event,action,payload)=>{
+ const run=settingsSaveTail.then(async()=>{
  register(payload);diag('windows.ui.onboard.requested',{action,keys:Object.keys(payload||{})});
- if(!['browser-check','provision','runtime-auto','runtime-projects','discover','runtime-inspect','verify-remote'].includes(action))
+ if(!['status','connection-preflight','browser-check','provision','runtime-auto','runtime-projects','discover','runtime-inspect','runtime-recover-key','verify-remote'].includes(action))
   throw Error('UNSUPPORTED_ONBOARDING_ACTION');
- if((action==='provision'||action==='runtime-auto')&&payload?.confirmed!==true)
+ if(['provision','runtime-auto','runtime-recover-key'].includes(action)&&payload?.confirmed!==true)
   throw Error('EXPLICIT_CONFIRMATION_REQUIRED');
  const root=runtime.resourceRoot;
  let terminal,browser;
- if(action==='runtime-auto'){
+ if(['runtime-auto','runtime-recover-key'].includes(action)){
   // Validate both IDs and the local encryption backend BEFORE issuing the
   // one-time, non-idempotent runtime credential.
   await settings.cryptoReady();
@@ -87,8 +137,12 @@ ipcMain.handle('mcpgo:onboard',async(_event,action,payload)=>{
  }
  const result=await onboarding({action,payload,root,userData:app.getPath('userData'),
   python:path.join(root,'python','python.exe')});
+ if(action==='connection-preflight'){
+  try{await settings.cryptoReady();result.secureStorage=true}
+  catch{result.secureStorage=false}
+ }
  diag('windows.ui.onboard.response',{action,result});
- if(action==='runtime-auto'){
+ if(['runtime-auto','runtime-recover-key'].includes(action)){
   if(typeof result?.runtimeKey!=='string'||!result.runtimeKey.startsWith('sk-'))
    throw Error('RUNTIME_KEY_MISSING');
   await settings.save({terminal:{id:terminal,key:result.runtimeKey},
@@ -97,6 +151,9 @@ ipcMain.handle('mcpgo:onboard',async(_event,action,payload)=>{
   return {ok:true,configured:true};
  }
  return result;
+ });
+ settingsSaveTail=run.catch(()=>{});
+ return run;
 });
 ipcMain.handle('mcpgo:export-diagnostics',async()=>{
  diag('windows.ui.export.clicked');
@@ -134,7 +191,7 @@ app.whenReady().then(async()=>{
  tray=new Tray(nativeImage.createFromPath(iconPath()).resize({width:16,height:16}));
  tray.setContextMenu(Menu.buildFromTemplate([
  {label:'Открыть McpGo',click:openWindow},
- {label:'Перезапустить',click:()=>runtime.restart()},
+ {label:'Перезапустить',click:async()=>{await settingsSaveTail;await runtime.restart()}},
  {type:'separator'},{label:'Выход',click:()=>{quitting=true;app.quit()}}
  ]));
  tray.on('double-click',openWindow);

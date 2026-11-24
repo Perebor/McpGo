@@ -9,6 +9,7 @@ import argparse
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import socket
 import subprocess
@@ -21,7 +22,16 @@ TEMPLATES = ROOT / "launchagents"
 AGENTS = HOME / "Library/LaunchAgents"
 LOGS = HOME / "Library/Logs/McpGo"
 DATA = HOME / "Library/Application Support/McpGo"
-PORTS = (12848, 8931, 8932, 8940, 8969, 8971, 8972)
+PORT_OWNERS = {
+    12848: "com.chatterminalhub.oneshot",
+    8931: "com.mcphub.playwright.browser",
+    8932: "com.mcphub.autosend.browser",
+    8940: "com.mcphub.playwright.proxy",
+    8969: "com.mcphub.dashboard",
+    8971: "com.mcphub.messaging",
+    8972: "com.mcphub.autosend",
+}
+PORTS = tuple(PORT_OWNERS)
 
 
 def existing_listener(port: int) -> bool:
@@ -82,6 +92,38 @@ def installed_owner(plist: Path) -> str:
     return "different"
 
 
+def listener_owned(port: int, label: str) -> bool:
+    if installed_owner(AGENTS / (label + ".plist")) != "this":
+        return False
+    try:
+        agent = subprocess.run(["/bin/launchctl", "print", f"{DOMAIN}/{label}"],
+                               capture_output=True, text=True, timeout=4)
+        match = re.search(r"(?m)^\s*pid = ([1-9][0-9]*)\s*$", agent.stdout)
+        if agent.returncode or not match:
+            return False
+        owner = int(match.group(1))
+        listeners = subprocess.run(["/usr/sbin/lsof", "-nP", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                                   capture_output=True, text=True, timeout=4)
+        pids = {int(p) for p in listeners.stdout.split() if p.isdecimal()}
+        if listeners.returncode or not pids:
+            return False
+        for pid in pids:
+            for _ in range(12):
+                if pid == owner:
+                    break
+                parent = subprocess.run(["/bin/ps", "-o", "ppid=", "-p", str(pid)],
+                                        capture_output=True, text=True, timeout=2)
+                value = parent.stdout.strip()
+                if parent.returncode or not value.isdecimal() or int(value) <= 1 or int(value) == pid:
+                    return False
+                pid = int(value)
+            else:
+                return False
+        return True
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+
+
 def check() -> tuple[bool, list[str]]:
     problems = []
     if sys.platform != "darwin":
@@ -122,10 +164,9 @@ def check() -> tuple[bool, list[str]]:
             capture_output=True, timeout=4)
         if result.returncode == 0 and owner != "this":
             problems.append(f"LaunchAgent {label} is already loaded by another instance.")
-    if not all(installed_owner(AGENTS / t.name) == "this" for t in TEMPLATES.glob("*.plist")):
-        for port in PORTS:
-            if existing_listener(port):
-                problems.append(f"Local port {port} is already occupied; refusing to mix installations.")
+    for port, label in PORT_OWNERS.items():
+        if existing_listener(port) and not listener_owned(port, label):
+            problems.append(f"Local port {port} is already occupied by an unverified process; refusing to mix installations.")
     return not problems, problems
 
 
@@ -164,8 +205,11 @@ def install() -> None:
             result = subprocess.run(["/bin/launchctl", "bootstrap", DOMAIN, str(dest)],
                                     capture_output=True, text=True, timeout=15)
             if result.returncode:
-                print(f"WARNING: {label} bootstrap failed; inspect launchctl and logs.",
-                      file=sys.stderr)
+                raise RuntimeError(f"{label}: bootstrap failed; inspect launchctl and logs")
+        registered = subprocess.run(["/bin/launchctl", "print", f"{DOMAIN}/{label}"],
+                                    capture_output=True, timeout=4).returncode == 0
+        if not registered:
+            raise RuntimeError(f"{label}: registration not confirmed")
     # Upgrade existing installations: retire only a LaunchAgent owned by this
     # exact McpGo root, never a foreign service at the legacy port.
     old = AGENTS / "com.chatterminalhub.server.plist"

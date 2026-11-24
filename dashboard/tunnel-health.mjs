@@ -19,11 +19,14 @@ export async function checkHealthFile(file,{fetchFn=fetch,timeoutMs=2500}={}) {
     return {health:'unmonitored',reason:'UNSAFE_HEALTH_URL'};
   const base='http://127.0.0.1:'+url.port;
   try {
-    const live=await fetchFn(base+'/healthz',{signal:AbortSignal.timeout(timeoutMs)});
+    const live=await fetchFn(base+'/healthz',{redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
+    if(live.status===401||live.status===403)return {health:'auth'};
+    if(live.status===429)return {health:'throttled',reason:'RATE_LIMITED'};
     if(live.status!==200)return {health:'down',reason:'HEALTHZ_UNAVAILABLE'};
-    const ready=await fetchFn(base+'/readyz',{signal:AbortSignal.timeout(timeoutMs)});
+    const ready=await fetchFn(base+'/readyz',{redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
     if(ready.status===200)return {health:'ready'};
     if(ready.status===401||ready.status===403)return {health:'auth'};
+    if(ready.status===429||live.status===429)return {health:'throttled',reason:'RATE_LIMITED'};
     // During startup or network failure, the process is live: never restart
     // immediately. The controller provides a lengthy grace period.
     return {health:'starting',reason:'READYZ_NOT_READY'};

@@ -12,7 +12,7 @@ DIRECTORIES = {
     "native": {".swift", ".py", ".svg"},
     "onboarding": {".py"},
     "scripts": {".py", ".sh"},
-    "dashboard": {".mjs", ".js", ".html", ".css"},
+    "dashboard": {".mjs", ".js", ".cjs", ".html", ".css"},
     "terminal": {".js", ".cjs", ".mjs", ".py", ".sh", ".html", ".css"},
     "playwright": {".mjs", ".sh"},
     "autosend": {".mjs", ".js", ".py", ".swift", ".html"},

@@ -141,13 +141,27 @@ class UpgradeTest(unittest.TestCase):
         foreign = agents / "com.mcphub.messaging.plist"
         foreign.write_bytes(plistlib.dumps({"EnvironmentVariables": {
             "MCPGO_INSTALL_ROOT": "/some/other/installation"}}))
-        response = type("Result", (), {"returncode": 0})()
+        response = type("Result", (), {"returncode": 0, "stdout": b"state = running\npid = 123\n"})()
         with patch.object(module.sys, "platform", "darwin"), patch.object(
                 module.subprocess, "run", return_value=response) as run:
             self.assertEqual(module.restart_owned_services(self.runtime, home), 1)
         self.assertEqual(run.call_count, 2)
         self.assertIn("com.mcphub.dashboard", run.call_args.args[0][-1])
         self.assertNotIn("com.mcphub.messaging", str(run.call_args_list))
+
+    def test_upgrade_does_not_start_loaded_but_stopped_browser(self):
+        import plistlib
+        home = self.base / "stopped-user"
+        agents = home / "Library" / "LaunchAgents"
+        agents.mkdir(parents=True)
+        (agents / "com.mcphub.playwright.browser.plist").write_bytes(plistlib.dumps({
+            "EnvironmentVariables": {"MCPGO_INSTALL_ROOT": str(self.runtime)}}))
+        response = type("Result", (), {"returncode": 0, "stdout": b"state = not running"})()
+        with patch.object(module.sys, "platform", "darwin"), patch.object(
+                module.subprocess, "run", return_value=response) as run:
+            self.assertEqual(module.restart_owned_services(self.runtime, home), 0)
+        self.assertEqual(run.call_count, 1)
+        self.assertNotIn("kickstart", str(run.call_args_list))
 
     def test_bad_installation_symlink_is_rejected(self):
         other = self.base / "other"

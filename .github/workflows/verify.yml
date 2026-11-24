@@ -51,6 +51,24 @@ jobs:
           node --check dashboard/server.mjs
           node --check autosend/server.mjs
           node --check playwright/restricted-proxy.mjs
+          node --check playwright/page-inspection.mjs
+          node --check playwright/inspection-conditions.mjs
+          node --check playwright/tool-profiles.mjs
+          node --check launchers/browser.mjs
+          node --check windows/app/runtime.cjs
+          node --test windows/tests
+      - name: Isolated Chrome browser smoke on pull requests (informational)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          MCPGO_LIVE_BROWSER_SMOKE: '1'
+          MCPGO_SMOKE_CLIENTS: '1'
+          MCPGO_SMOKE_REPS: '2'
+        run: |
+          # Own temp Chrome profile/ports; never connects to personal Chrome.
+          # Informational until browser binary availability is proven on CI runners.
+          node playwright/qa/isolated-chrome-smoke.mjs
       - name: Launcher and installer syntax
         run: |
           bash -n scripts/launch-macos.sh playwright/start.sh playwright/start-tunnel.sh

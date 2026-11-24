@@ -91,10 +91,34 @@ private enum WizardBridge {
                         "action": action, "executable": executable, "root": root
                     ])
                     try p.run()
+                    let drain = DispatchGroup()
+                    drain.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        while true {
+                            let chunk = errors.fileHandleForReading.availableData
+                            if chunk.isEmpty { break }
+                        }
+                        drain.leave()
+                    }
+                    let deadline: Double = ["runtime-auto", "runtime-recover-key", "provision"].contains(action) ? 900 : 240
+                    let watchdog = DispatchWorkItem {
+                        if p.isRunning {
+                            p.terminate()
+                            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                                if p.isRunning { Darwin.kill(p.processIdentifier, SIGKILL) }
+                            }
+                        }
+                    }
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + deadline, execute: watchdog)
+                    defer { watchdog.cancel() }
                     input.fileHandleForWriting.write(payload)
                     try? input.fileHandleForWriting.close()
                     let bytes = output.fileHandleForReading.readDataToEndOfFile()
                     p.waitUntilExit()
+                    _ = drain.wait(timeout: .now() + 2)
+                    if p.terminationReason == .uncaughtSignal {
+                        throw Failure.failed("Операция прервана. Проверь сохранённое состояние перед повторной попыткой.")
+                    }
                     OnboardingDiagnostics.record("mac.wizard.process.exit", [
                         "action": action, "exitCode": p.terminationStatus, "stdoutBytes": bytes.count
                     ])
@@ -141,6 +165,7 @@ private enum WizardBridge {
     @Published var runtimeOperationPending = ""
     @Published var runtimeKeyIssuanceStatus = ""
     @Published var runtimeKeyRecoveryAttempted = false
+    @Published var runtimeKeyExpiryWarning = false
     private var restoredPage = false
 
     func navigate(to target: Int) {
@@ -175,6 +200,8 @@ private enum WizardBridge {
             runtimeOperationPending = runtimeProgress["pending"] as? String ?? ""
             runtimeKeyIssuanceStatus = runtimeProgress["status"] as? String ?? ""
             runtimeKeyRecoveryAttempted = runtimeProgress["keyRecoveryAttempted"] as? Bool ?? false
+            let expiry = (runtimeProgress["keyExpiresAt"] as? String)?.replacingOccurrences(of: #"\.\d+(?=[+-])"#, with:"", options:.regularExpression)
+            runtimeKeyExpiryWarning = expiry.flatMap { ISO8601DateFormatter().date(from:$0) }.map { $0.timeIntervalSinceNow < 7*86400 } ?? false
             let tunnels = data["tunnels"] as? [String: [String:Any]] ?? [:]
             terminalID = tunnels["terminal"]?["id"] as? String ?? ""
             browserID = tunnels["browser"]?["id"] as? String ?? ""
@@ -203,6 +230,8 @@ private enum WizardBridge {
                     ((checks["terminal"]?["ready"] as? Bool == true) ? "OK" : "нужна настройка") +
                     "; Browser: " +
                     ((checks["browser"]?["ready"] as? Bool == true) ? "OK" : "нужна настройка")
+            } else if action == "connection-preflight" {
+                note = result["message"] as? String ?? "Проверка сети выполнена."
             } else if action == "verify-local" {
                 terminalReady = result["terminal"] as? Bool ?? false
                 browserReady = result["browser"] as? Bool ?? false
@@ -498,6 +527,10 @@ struct OnboardingView: View {
     private var systemStep: some View {
         VStack(alignment:.leading,spacing:18) {
             heading("1. Проверяем Mac", "Убедимся, что всё готово к подключению ChatGPT.")
+            Button("Проверить доступ к OpenAI и локальному хранилищу") {
+                Task { await model.perform("connection-preflight") }
+            }
+            .disabled(model.busy)
             if preflightLoaded { chromeVersionNotice }
 
             if !preflightLoaded {
@@ -1065,6 +1098,10 @@ struct OnboardingView: View {
             if tunnelsExist {
                 Divider()
                 VStack(alignment:.leading,spacing:12) {
+                    if model.runtimeKeyExpiryWarning && savedRuntimeKeyExists {
+                        Text("Срок ранее выпущенного Runtime Key подходит к концу или истёк. Проверь ключ в OpenAI Platform и при необходимости замени его.")
+                            .font(.system(size:12)).foregroundStyle(Palette.warning)
+                    }
                     if tunnelSetupComplete && !replaceRuntimeKey {
                         Label("Шаг 2 из 2 · Ключ сохранён, настройка готова",
                               systemImage:"checkmark.circle.fill")
@@ -1872,11 +1909,17 @@ struct OnboardingView: View {
                 .font(.system(size:13,weight:.semibold))
                 .foregroundStyle(Palette.ink)
             if model.browserMode == "extension" {
-                Label("Playwright Extension уже подключено · вкладки MCPGO в фоне",
+                Label("Токен Playwright Extension сохранён · соединение проверяется при запуске",
                       systemImage:"checkmark.circle.fill")
                     .font(.system(size:12,weight:.semibold))
                     .foregroundStyle(Palette.online)
-            } else {
+            }
+            if model.browserMode == "invalid" {
+                Text("Настройки расширения повреждены. Введи токен повторно.")
+                    .font(.system(size:12))
+                    .foregroundStyle(Palette.muted)
+            }
+            Group {
                 Text("Нажми значок Playwright Extension на панели Chrome → Manage clients → скопируй PLAYWRIGHT_MCP_EXTENSION_TOKEN и вставь ниже. Не отправляй токен в чат. Мастер сохранит его только на этом Mac и сначала проверит соединение.")
                     .font(.system(size:12))
                     .foregroundStyle(Palette.muted)
@@ -1893,7 +1936,7 @@ struct OnboardingView: View {
                     Task { await model.perform("activate-browser-extension",
                         data:["confirmed":true, "token":token]) }
                 } label: {
-                    Label("Проверить и включить фоновый режим",
+                    Label(model.browserMode == "extension" ? "Проверить и обновить подключение" : "Восстановить / подключить расширение",
                           systemImage:"rectangle.3.group")
                         .font(.system(size:12,weight:.semibold))
                 }

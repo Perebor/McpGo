@@ -64,3 +64,25 @@ test('failed initialized notification cannot make an uninitialized connection lo
  assert.equal(initializeCount,2);
  assert.equal(notifications,2);
 });
+
+test('private AutoSend client shares complete SSE parser; multiline UTF-8 result ends an open heartbeat stream',async()=>{
+ const encoder=new TextEncoder();let dispatched=0;
+ const fetcher=async(_url,{body})=>{
+  const request=JSON.parse(body);
+  if(request.method==='initialize')return result(request.id,{serverInfo:{name:'Playwright'}});
+  if(request.method==='notifications/initialized')return new Response('',{status:202});
+  dispatched++;
+  const framed='event: message\r\ndata:{"jsonrpc":"2.0",\r\n'+
+   'data:"id":'+request.id+',\r\n'+
+   'data:"result":{"content":[{"type":"text","text":"Привет 🐕"}]}}\r\n\r\n';
+  const chunks=encoder.encode(': heartbeat\r\n\r\n'+framed);
+  const stream=new ReadableStream({start(controller){
+   for(let i=0;i<chunks.length;i+=3)controller.enqueue(chunks.subarray(i,i+3));
+   // Intentionally leave stream open; caller must finish at matching JSON-RPC.
+  }});
+  return new Response(stream,{headers:{'content-type':'text/event-stream','mcp-session-id':'private-12345678'}});
+ };
+ const client=new ExtensionMcpClient('http://127.0.0.1:8932/mcp',fetcher);
+ assert.equal(await client.tool('browser_tabs',{action:'list'}),'Привет 🐕');
+ assert.equal(dispatched,1);
+});

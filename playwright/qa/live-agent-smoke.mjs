@@ -15,7 +15,7 @@ const owned=[];
 let errors=[];
 let current=0;
 function client(name,{conversation=true,workspaceId=null}={}){
- let id=0;
+ let id=0,activeWorkspaceId=workspaceId;
  const send=async(method,params={})=>{
   const body={jsonrpc:'2.0',id:++id,method,params:modernParams(params,'McpGo-Live-Smoke')};
   if(conversation)body.params._meta['openai/session']='mcpgo-qa-conversation-'+name;
@@ -32,9 +32,16 @@ function client(name,{conversation=true,workspaceId=null}={}){
   if(reply?.result?.resultType!=='complete')throw Error('Missing 2026 complete result');
   return reply;
  };
- return {name,send,tool:(tool,args={})=>send('tools/call',{name:tool,arguments:{...args,...(workspaceId?{workspace_id:workspaceId}:{})}}),init:async()=>{
+ return {name,send,tool:(tool,args={})=>send('tools/call',{name:tool,arguments:{...args,...(activeWorkspaceId?{workspace_id:activeWorkspaceId}:{})}}),init:async()=>{
   const discovery=await send('server/discover');
   if(!discovery.result?.supportedVersions?.includes(MODERN_PROTOCOL))throw Error('Modern discovery rejected');
+  // Acquire the workspace BEFORE touching Chrome. The public modern protocol
+  // does not infer a workspace from a short-lived MCP transport session.
+  const bootstrap=await send('tools/call',{name:'mcpgo_workspace',arguments:{
+   ...(activeWorkspaceId?{workspace_id:activeWorkspaceId}:{})}});
+  const received=bootstrap?.result?.structuredContent?.workspace_id;
+  if(!/^ws_[A-Za-z0-9_-]{32}$/.test(received||''))throw Error('Missing initial workspace_id');
+  activeWorkspaceId=received;
  },close:async()=>{}};
 }
 const value=reply=>JSON.parse(reply.result.content.find(x=>x.type==='text').text);

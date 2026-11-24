@@ -100,8 +100,14 @@ test('SSE final JSON-RPC result releases the browser lock even if heartbeat stre
   if(data.method==='notifications/initialized'){res.writeHead(202);return res.end();}
   if(data.method==='tools/call'){
    res.writeHead(200,{'content-type':'text/event-stream','mcp-session-id':'backend-test'});
-   res.write('event: message\ndata: '+JSON.stringify({jsonrpc:'2.0',id:data.id,
-    result:{content:[{type:'text',text:'### Result\n- 0: (current) [Home](https://chatgpt.com/)'}]}})+'\n\n');
+   const title='Привет 🐕';
+   const frame=Buffer.from('event: message\r\ndata: '+JSON.stringify({jsonrpc:'2.0',id:data.id,
+    result:{content:[{type:'text',text:`### Result\n- 0: (current) [${title}](https://chatgpt.com/)`}]}})+'\r\n\r\n');
+   const split=frame.indexOf(Buffer.from(title))+1;
+   res.write(frame.subarray(0,split));await delay(15);
+   res.write(frame.subarray(split,-1));await delay(15);
+   res.write(Buffer.concat([frame.subarray(-1),Buffer.from('data: {"jsonrpc":"2.0","method":"notifications/progress"}\r\n\r\n')]));
+   res.write('data: '+JSON.stringify({jsonrpc:'2.0',id:data.id,result:{content:[{type:'text',text:'unexpected later frame'}]}})+'\n\n');
    const heartbeat=setInterval(()=>res.write(': heartbeat\n\n'),35);
    res.on('close',()=>clearInterval(heartbeat));
    return;
@@ -124,7 +130,7 @@ test('SSE final JSON-RPC result releases the browser lock even if heartbeat stre
   await mcp.connect();
   const start=Date.now();
   const first=await mcp.tool('browser_tabs',{action:'list'});
-  assert.match(first,/### Result/);
+  assert.match(first,/Привет 🐕/);
   assert.ok(Date.now()-start<4000,'never wait for SSE heartbeat stream to close');
   const second=await mcp.tool('browser_tabs',{action:'list'});
   assert.match(second,/### Result/,'next tool is not blocked by previous stream');
@@ -133,5 +139,50 @@ test('SSE final JSON-RPC result releases the browser lock even if heartbeat stre
   assert.equal(health.browserQueue.waiting,0);
  }finally{
   proxy.kill('SIGTERM');backend.closeAllConnections?.();await new Promise(resolve=>backend.close(resolve));
+ }
+});
+
+test('an incomplete read-only SSE result quarantines shared tab before a later click',
+ {timeout:9000},async()=>{
+ let readCount=0,clickCount=0;
+ const backend=http.createServer(async(req,res)=>{
+  let raw='';for await(const part of req)raw+=part;
+  const msg=JSON.parse(raw||'{}');
+  if(msg.method==='initialize')return respond(res,msg.id,{serverInfo:{name:'QA'},capabilities:{tools:{}}});
+  if(msg.method==='notifications/initialized'){res.writeHead(202);return res.end();}
+  if(msg.method==='tools/list')return respond(res,msg.id,{tools:[{name:'browser_tabs'},{name:'browser_click'}]});
+  if(msg.method==='tools/call'){
+   if(msg.params.name==='browser_tabs'){
+    readCount++;res.writeHead(200,{'content-type':'text/event-stream'});
+    return res.end('data: {"jsonrpc":"2.0","id":'+msg.id+',"result":');
+   }
+   clickCount++;return respond(res,msg.id,{content:[{type:'text',text:'clicked'}]});
+  }
+  res.writeHead(400);res.end();
+ });
+ const backendPort=await listen(backend);
+ const vacant=http.createServer(),proxyPort=await listen(vacant);
+ await new Promise(resolve=>vacant.close(resolve));
+ const proxy=spawn(process.execPath,[fileURLToPath(new URL('../restricted-proxy.mjs',import.meta.url)),'shared'],{
+  env:{...process.env,MCPGO_PROXY_PORT:String(proxyPort),MCPGO_BACKEND_PORT:String(backendPort)},
+  stdio:['ignore','pipe','pipe']});
+ const health=`http://127.0.0.1:${proxyPort}/healthz`;
+ try{
+  for(let i=0;i<50;i++){
+   try{if((await fetch(health)).ok)break}catch{}
+   await delay(30);
+  }
+  const client=new ProxyTestClient(`http://127.0.0.1:${proxyPort}/mcp`,fetch,'read-loss-owner');
+  await client.connect();
+  await assert.rejects(client.tool('browser_tabs',{action:'list'}),/HTTP 503/);
+  const status=await fetch(health).then(res=>res.json());
+  assert.equal(status.browserQueue.quarantined,true);
+  assert.equal(status.lastOutcome,'outcome_unknown');
+  await assert.rejects(client.tool('browser_click',{target:'send'}),/HTTP 503/);
+  assert.equal(readCount,1);
+  assert.equal(clickCount,0,'no later click may overlap an unknown upstream read');
+ }finally{
+  proxy.kill('SIGTERM');
+  backend.closeAllConnections?.();await new Promise(resolve=>backend.close(resolve));
  }
 });

@@ -267,6 +267,10 @@ def restart_owned_services(installed: Path, home: Path) -> int:
                                     timeout=4, capture_output=True)
             if result.returncode != 0:
                 continue
+            # A loaded job can be stopped or waiting; preserve that state.
+            output = result.stdout.decode("utf-8", "replace") if isinstance(result.stdout, bytes) else result.stdout
+            if not re.search(r"(?m)^\s*state = running\s*$", output or "") or not re.search(r"(?m)^\s*pid = [1-9][0-9]*\s*$", output or ""):
+                continue
             result = subprocess.run(["/bin/launchctl", "kickstart", "-k", domain + label],
                                     timeout=15, capture_output=True)
             if result.returncode == 0:

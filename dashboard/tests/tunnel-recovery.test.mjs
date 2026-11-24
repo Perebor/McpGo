@@ -77,3 +77,23 @@ test('sleep/resume grace prevents immediate killing of slow reconnected tunnel',
  await e.recovery.tick();e.advance(90000);await e.recovery.tick();
  assert.equal(e.calls.length,0);assert.equal(e.recovery.snapshot().terminal.lastProblem,'TUNNEL_UNHEALTHY');
 });
+
+test('authorization and prolonged-not-ready states recover on actual readiness',async()=>{
+ const e=env('auth-reset');e.recovery.setDesired('terminal',true);
+ e.health.terminal='auth';await e.recovery.tick();
+ assert.equal(e.recovery.snapshot().terminal.status,'AUTH_REQUIRED');
+ e.health.terminal='ready';e.advance(15000);await e.recovery.tick();
+ assert.equal(e.recovery.snapshot().terminal.status,'CONNECTED');
+ e.health.terminal='starting';e.advance(15000);await e.recovery.tick();
+ for(let i=0;i<13;i++){e.advance(15000);await e.recovery.tick()}
+ assert.equal(e.recovery.snapshot().terminal.status,'NEEDS_ATTENTION');
+ e.health.terminal='ready';e.advance(15000);await e.recovery.tick();
+ assert.equal(e.recovery.snapshot().terminal.status,'CONNECTED');
+ assert.deepEqual(e.calls,[]);
+});
+test('rate-limited tunnel does not restart',async()=>{
+ const e=env('throttle');e.recovery.setDesired('terminal',true);
+ e.health.terminal='throttled';for(let i=0;i<10;i++){await e.recovery.tick();e.advance(15000)}
+ assert.equal(e.recovery.snapshot().terminal.lastProblem,'RATE_LIMITED');
+ assert.deepEqual(e.calls,[]);
+});

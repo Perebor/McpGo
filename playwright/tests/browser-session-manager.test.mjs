@@ -61,3 +61,42 @@ test('backend session expiration invalidates cached browser state',()=>{
  assert.equal(mgr.status().browser,'unknown');
  assert.equal(mgr.status().generation,1);
 });
+
+test('HTTP 503 is transport loss, not a successful connection nor an ordinary tool error',()=>{
+ let clock=1000;const m=new BrowserSessionManager({now:()=>clock,minDelayMs:1000});
+ m.beforeBrowserCall();
+ m.recordBrowserResult({status:200,body:Buffer.from('{"jsonrpc":"2.0","id":1,"result":{"content":[]}}')});
+ assert.equal(m.status().browser,'connected');
+ m.recordBrowserResult({status:503});
+ assert.equal(m.status().browser,'unknown');
+ assert.equal(m.status().transport,'unavailable');
+ assert.equal(m.status().lastOutcome,'transport_unavailable');
+ assert.equal(m.status().failures,1);
+ assert.equal(m.status().cooldownMs,1000);
+ clock=2000;m.beforeBrowserCall();
+ m.recordBrowserResult({status:200,body:Buffer.from('{"jsonrpc":"2.0","id":2,"result":{"content":[]}}')});
+ assert.equal(m.status().browser,'connected');
+ assert.equal(m.status().cooldownMs,0);
+});
+test('a multiline SSE element error does not disconnect Chrome; extension loss does',()=>{
+ const m=new BrowserSessionManager({minDelayMs:10});
+ const sse=message=>'data: '+JSON.stringify(message).replace('"result":{','"result":\ndata: {')+'\n\n';
+ m.beforeBrowserCall();
+ const ordinary={jsonrpc:'2.0',id:1,result:{isError:true,content:[{type:'text',text:'Element is not visible'}]}};
+ m.recordBrowserResult({status:200,headers:{'content-type':'text/event-stream'},body:Buffer.from(sse(ordinary))});
+ assert.equal(m.status().lastOutcome,'tool_error');
+ assert.equal(m.status().browser,'connected');
+ assert.equal(m.status().cooldownMs,0);
+ const disconnected={jsonrpc:'2.0',id:2,result:{isError:true,content:[{type:'text',text:'Playwright extension did not connect'}]}};
+ m.recordBrowserResult({status:200,headers:{'content-type':'text/event-stream'},body:Buffer.from(sse(disconnected))});
+ assert.equal(m.status().lastOutcome,'browser_disconnected');
+ assert.equal(m.status().browser,'degraded');
+ assert.ok(m.status().cooldownMs>0);
+});
+test('unknown outcome never claims that Chrome action completed',()=>{
+ const m=new BrowserSessionManager();m.beforeBrowserCall();
+ m.recordBrowserEvent('outcome_unknown');
+ assert.equal(m.status().lastOutcome,'outcome_unknown');
+ assert.equal(m.status().browser,'unknown');
+ assert.equal(m.status().lastFailureCode,'BROWSER_ACTION_OUTCOME_UNKNOWN');
+});

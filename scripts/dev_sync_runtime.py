@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
-    "dashboard/server.mjs", "dashboard/index.html", "dashboard/mcp-health.mjs",
+    "dashboard/connection-health.cjs", "dashboard/server.mjs", "dashboard/index.html", "dashboard/mcp-health.mjs",
     "dashboard/tunnel-recovery.mjs", "dashboard/tunnel-health.mjs",
     "dashboard/mcp-versions.mjs", "dashboard/app.js",
     "terminal/interactive_runtime.cjs", "terminal/stateless_server.js",
@@ -22,7 +22,7 @@ FILES = (
     "terminal/resource_locks.js", "terminal/resource_policy.js",
     "terminal/platform.js",
     "terminal/mcp-version.json", "terminal/run-tunnel.sh",
-    "launchers/tunnel.mjs", "launchers/browser.mjs", "playwright/browser-session-manager.mjs", "playwright/chrome-profile.mjs", "playwright/tab-lease-manager.mjs", "playwright/agent-scope.mjs", "playwright/portable-tab-identity.mjs", "playwright/portable-agent-tabs.mjs", "playwright/browser-workspace.mjs", "playwright/workspace-response.mjs", "playwright/mcp-modern-protocol.mjs", "playwright/chatgpt-url.mjs", "playwright/restricted-proxy.mjs",
+    "launchers/tunnel.mjs", "launchers/browser.mjs", "playwright/browser-session-manager.mjs", "playwright/mcp-response.mjs", "playwright/page-inspection.mjs", "playwright/inspection-conditions.mjs", "playwright/tool-profiles.mjs", "playwright/browser-queue.mjs", "playwright/chrome-profile.mjs", "playwright/tab-lease-manager.mjs", "playwright/agent-scope.mjs", "playwright/portable-tab-identity.mjs", "playwright/portable-agent-tabs.mjs", "playwright/browser-workspace.mjs", "playwright/workspace-response.mjs", "playwright/mcp-modern-protocol.mjs", "playwright/chatgpt-url.mjs", "playwright/restricted-proxy.mjs",
     "onboarding/browser_compat.py", "onboarding/setup_engine.py", "onboarding/cli.py", "onboarding/runtime_provision.py", "onboarding/diagnostics.py",
     # Sync AutoSend source without touching schedules, state or browser profiles.
     "autosend/server.mjs", "autosend/core.mjs",

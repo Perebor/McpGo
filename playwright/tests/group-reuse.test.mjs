@@ -12,7 +12,9 @@ const proxy=fs.readFileSync(fileURLToPath(new URL('../restricted-proxy.mjs',impo
 
 test('upstream group lifecycle unmodified, shared proxy is connection owner',()=>{
  assert.ok(core.includes('const last = !shared || !clientCount;'));
- assert.ok(core.includes('profileDirName, clientInfo.clientName, config.tabGroup, config.background'));
+ assert.ok(core.includes('config.tabGroup === false ? void 0 : { title: config.sessionName, color: config.sessionColor }'),
+  'v0.0.86 native extension tab-group ownership and named sessions retained');
+ assert.ok(core.includes('profileDirName, clientInfo.clientName, tabGroup, config.background'));
  assert.doesNotMatch(core,/PLAYWRIGHT_MCP_SESSION_NAME \|\| clientInfo\.clientName/);
  assert.ok(proxy.includes('clientInfo:{name:SHARED_CLIENT'));
  assert.equal(SHARED_CLIENT,'MCPGO');

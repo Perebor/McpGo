@@ -48,6 +48,20 @@ class BrowserExtensionSetupTests(unittest.TestCase):
         self.settings = self.home / "Library/Application Support/McpGo/playwright"
         self.token = "private-valid-playwright-token-test-32"
 
+    def test_mode_without_valid_token_is_not_configured(self):
+        self.settings.mkdir(parents=True)
+        (self.settings / "browser-mode").write_text("extension")
+        self.assertEqual(self.engine.browser_extension_mode(), "not-configured")
+        token_file = self.settings / "extension-token"
+        token_file.write_text("bad")
+        token_file.chmod(0o600)
+        self.assertEqual(self.engine.browser_extension_mode(), "invalid")
+        token_file.write_text(self.token)
+        token_file.chmod(0o644)
+        self.assertEqual(self.engine.browser_extension_mode(), "invalid")
+        token_file.chmod(0o600)
+        self.assertEqual(self.engine.browser_extension_mode(), "extension")
+
     def test_missing_or_invalid_token_does_not_write_anything(self):
         with self.assertRaises(SetupError):
             self.engine.activate_browser_extension({"confirmed": True, "token": "a"})
@@ -151,6 +165,8 @@ class BrowserExtensionSetupTests(unittest.TestCase):
         self.assertEqual(self.engine.browser_extension_mode(), "not-configured")
         self.assertFalse((self.settings / "extension-token").exists())
         self.assertEqual(sum(args[0] == "/bin/launchctl" for args in commands), 2)
+        self.assertEqual(sum(args[:2] == ["/bin/launchctl", "kickstart"] for args in commands), 1)
+        self.assertTrue(any(args[:2] == ["/bin/launchctl", "kill"] for args in commands))
 
 if __name__ == "__main__":
     unittest.main()

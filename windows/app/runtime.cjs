@@ -4,9 +4,39 @@ const path=require('node:path');
 const net=require('node:net');
 const {spawn,spawnSync}=require('node:child_process');
 const {record:diag,register,scrub}=require('./diagnostics.cjs');
+const sourceHealth=path.resolve(__dirname,'../../dashboard/connection-health.cjs');
+const connectionHealth=require(fs.existsSync(sourceHealth)?sourceHealth:path.join(process.resourcesPath,'mcpgo-runtime/dashboard/connection-health.cjs'));
 
-const ENDPOINTS=Object.freeze({terminal:12848,browser:8931,proxy:8940,autosend:8972,messaging:8971});
+const ENDPOINTS=Object.freeze({terminal:12848,browser:8931,autosendBrowser:8932,proxy:8940,autosend:8972,messaging:8971});
 const CORE_SERVICES=Object.freeze(['terminal','browser','proxy','autosendBrowser','autosend','messaging']);
+function snapshotMode(role,env=process.env){
+  const mode=env[role==='autosendBrowser'?'MCPGO_AUTOSEND_SNAPSHOT_MODE':'MCPGO_BROWSER_SNAPSHOT_MODE']??'full';
+  if(!['full','none'].includes(mode))throw Error('Invalid Playwright snapshot mode');
+  return mode;
+}
+function settleTimeout(role,env=process.env){
+  const val=Number(env[role==='autosendBrowser'?'MCPGO_AUTOSEND_SETTLE_MS':'MCPGO_BROWSER_SETTLE_MS']??(role==='autosendBrowser'?500:200));
+  if(!Number.isInteger(val)||val<0||val>2000)throw Error('Invalid Playwright settle timeout');
+  return String(val);
+}
+function extensionProfile(browser,localAppData=process.env.LOCALAPPDATA){
+  if(!localAppData)return null;
+  const root=path.join(localAppData,...(browser==='msedge'?['Microsoft','Edge','User Data']:['Google','Chrome','User Data']));
+  try{
+    const profiles=fs.readdirSync(root,{withFileTypes:true}).filter(d=>d.isDirectory()&&/^(Default|Profile \d+)$/.test(d.name));
+    const matches=profiles.filter(d=>{
+      try{
+        const ext=path.join(root,d.name,'Extensions','mmlmfjhmonkocbjadbfplnigmagldckm');
+        return fs.lstatSync(ext).isDirectory()&&fs.readdirSync(ext,{withFileTypes:true}).some(v=>v.isDirectory()&&/^\d+\.\d+/.test(v.name));
+      }catch{return false}
+    });
+    return matches.length===1?matches[0].name:null;
+  }catch{return null}
+}
+function extensionProfileArgs(browser){
+  const profile=extensionProfile(browser);
+  return profile?['--profile-dir-name',profile]:[];
+}
 function assertTunnelId(id) {
   if(typeof id!=='string'||!/^tunnel_[a-z0-9_]{3,128}$/.test(id))throw Error('INVALID_TUNNEL_ID');
   return id;
@@ -49,6 +79,10 @@ function listening(port,timeout=900) {
     socket.setTimeout(timeout,()=>done(false));
   });
 }
+const mcpReady=connectionHealth.probeMcp;
+async function tunnelReady(file,fetchImpl=fetch){
+  return (await connectionHealth.tunnelHealth(file,fetchImpl))==='ready';
+}
 function killOwnedTree(pid) {
   if(!Number.isInteger(pid)||pid<=0)return;
   if(process.platform==='win32')
@@ -56,18 +90,26 @@ function killOwnedTree(pid) {
   else {try{process.kill(-pid,'SIGTERM')}catch{}}
 }
 class Runtime {
-  constructor({resourceRoot,userData,nodeExecutable,credentials,onChange=()=>{},browser='chrome'}) {
+  constructor({resourceRoot,userData,nodeExecutable,credentials,onChange=()=>{},browser='chrome',portProbe=listening}) {
     this.paths=runtimePaths(resourceRoot,userData);
     this.resourceRoot=resourceRoot;
     this.userData=userData;
     this.nodeExecutable=nodeExecutable;
     this.credentials=credentials;
+    this.portProbe=portProbe;
     this.onChange=onChange;
     this.browser=browser==='msedge'?'msedge':'chrome';
     this.entries=new Map();
     this.running=false;
     this.generation=0;
     this.lastDiagnosticState='';
+    this.readiness={terminalMcp:false,browserMcp:false,terminalTunnel:false,browserTunnel:false,chrome:null};
+    this.browserProbePid=null;
+    this.browserProbe=null;
+    this.healthEvidence=null;
+    this.browserVerificationFailure=null;
+    this.healthHistory=new connectionHealth.HealthHistory(path.join(userData,'connection-health-history.json'));
+    this.recoveryBudget={};
   }
   report() {
     const state={};
@@ -82,12 +124,111 @@ class Runtime {
     this.onChange(state);
     return state;
   }
+  connectionState(){
+    const e=this.healthEvidence||{},now=Date.now(),running=name=>this.entries.get(name)?.child?.exitCode===null;
+    const key=['terminal','terminalTunnel','browser','proxy','browserTunnel'].map(n=>this.entries.get(n)?.child?.pid||0).join(':');
+    const data=e.key===key?e:{};
+    return {
+      terminal:connectionHealth.evaluate({running:running('terminal')&&running('terminalTunnel'),mcp:data.t,tunnel:data.tt,checkedAt:data.checkedAt,lastCallAt:data.th?.lastSuccessfulCallAt},now),
+      browser:connectionHealth.evaluate({running:running('browser')&&running('proxy')&&running('browserTunnel'),mcp:data.b,tunnel:data.bt,checkedAt:data.checkedAt,browser:connectionHealth.browserEvidence(data.bh,now,this.browserVerificationFailure?.pid===this.entries.get('browser')?.child?.pid?this.browserVerificationFailure.at:null)},now)
+    };
+  }
+  readinessState(){
+    const h=this.connectionState();
+    return {...this.readiness,terminalMcp:h.terminal.mcp,terminalTunnel:h.terminal.tunnel==='ready',
+      browserMcp:h.browser.mcp,browserTunnel:h.browser.tunnel==='ready',
+      chrome:h.browser.browser==='ready'?true:h.browser.browser==='failed'?false:null,
+      connectionHealth:h,history:this.healthHistory.snapshot()};
+  }
   state(){const snapshot={};for(const name of ['terminal','browser','proxy','autosendBrowser','autosend','messaging','terminalTunnel','browserTunnel']){
     snapshot[name]=this.entries.get(name)?.state||'stopped';
   }return snapshot}
   node(script,args=[],env={}) {
     return {file:this.nodeExecutable,args:[script,...args],cwd:path.dirname(script),
       env:{...process.env,...env,ELECTRON_RUN_AS_NODE:'1'}};
+  }
+  async verifyBrowserConnection(force=false){
+    if(this.browserProbe)return this.browserProbe;
+    const entry=this.entries.get('browser'),pid=entry?.child?.pid;
+    if(!pid||!this.readiness.browserMcp)return false;
+    if(!force&&this.browserProbePid===pid)return this.readiness.chrome===true;
+    const generation=this.generation;
+    this.browserProbePid=pid;
+    const task=(async()=>{
+      const probe=path.join(this.resourceRoot,'playwright','probe.mjs');
+      const plan=this.node(probe,[],{PLAYWRIGHT_MCP_URL:'http://127.0.0.1:8940/mcp',
+        PLAYWRIGHT_MCP_PRIVATE_BACKEND:'0',PLAYWRIGHT_MCP_VERIFY_TABS:'1',PLAYWRIGHT_MCP_REJECT_UNSAFE:'1'});
+      delete plan.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN;
+      const ok=await new Promise(resolve=>{
+        let child;
+        try{child=spawn(plan.file,plan.args,{cwd:plan.cwd,env:plan.env,windowsHide:true,stdio:'ignore'})}
+        catch{return resolve(false)}
+        const timer=setTimeout(()=>{child.kill();resolve(false)},45000);
+        child.once('error',()=>{clearTimeout(timer);resolve(false)});
+        child.once('exit',code=>{clearTimeout(timer);resolve(code===0)});
+      });
+      if(generation===this.generation&&this.entries.get('browser')?.child?.pid===pid){
+        const bh=await connectionHealth.readTelemetry('http://127.0.0.1:8940/healthz');
+        if(generation===this.generation&&this.entries.get('browser')?.child?.pid===pid){
+          if(this.healthEvidence)this.healthEvidence.bh=bh;
+          this.browserVerificationFailure=ok?null:{pid,at:Date.now()};
+          this.readiness.chrome=ok;diag(this.userData,'windows.runtime.extension.readiness',{ready:ok});this.report();
+        }
+      }
+      return ok;
+    })();
+    this.browserProbe=task;
+    try{return await task}finally{if(this.browserProbe===task)this.browserProbe=null}
+  }
+  async verifyExtension(token,browser=this.browser){
+    if(typeof token!=='string'||!/^[^\s\x00-\x1f]{16,2048}$/.test(token))
+      throw Error('INVALID_EXTENSION_TOKEN');
+    if(!['chrome','msedge'].includes(browser))throw Error('INVALID_BROWSER');
+    const probe=path.join(this.resourceRoot,'playwright','probe.mjs');
+    if(!fs.existsSync(this.paths.browser)||!fs.existsSync(probe))throw Error('PLAYWRIGHT_DEPENDENCIES_MISSING');
+    if(await listening(8999))throw Error('EXTENSION_TRIAL_PORT_BUSY');
+    register({token});
+    const plan=this.node(this.paths.browser,['--host','127.0.0.1','--port','8999',
+      '--extension','--background','--browser',browser,...extensionProfileArgs(browser),'--caps','vision,devtools',
+      '--block-service-workers','--no-webmcp'],{
+      PLAYWRIGHT_MCP_EXTENSION_TOKEN:token,PLAYWRIGHT_MCP_SESSION_NAME:'MCPGO Setup',
+      PLAYWRIGHT_MCP_PING_TIMEOUT_MS:'0'});
+    const trial=spawn(plan.file,plan.args,{cwd:plan.cwd,env:plan.env,windowsHide:true,stdio:'ignore'});
+    let failed=false;
+    trial.once('error',()=>{failed=true});
+    try{
+      const end=Date.now()+15000;
+      let ready=false;
+      while(!failed&&trial.exitCode===null&&Date.now()<end){
+        if(await listening(8999,250)){ready=true;break}
+        await new Promise(r=>setTimeout(r,150));
+      }
+      if(!ready||failed||trial.exitCode!==null)throw Error('EXTENSION_TRIAL_START_FAILED');
+      const check=this.node(probe,[],{PLAYWRIGHT_MCP_URL:'http://127.0.0.1:8999/mcp',
+        PLAYWRIGHT_MCP_PRIVATE_BACKEND:'1',PLAYWRIGHT_MCP_VERIFY_TABS:'1',PLAYWRIGHT_MCP_REJECT_UNSAFE:'0'});
+      delete check.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN;
+      const ok=await new Promise(resolve=>{
+        const child=spawn(check.file,check.args,{cwd:check.cwd,env:check.env,windowsHide:true,stdio:'ignore'});
+        const timer=setTimeout(()=>{child.kill();resolve(false)},45000);
+        child.once('error',()=>{clearTimeout(timer);resolve(false)});
+        child.once('exit',code=>{clearTimeout(timer);resolve(code===0)});
+      });
+      if(!ok||failed||trial.exitCode!==null)throw Error('EXTENSION_TRIAL_REJECTED');
+      diag(this.userData,'windows.extension.trial.verified',{browser});
+      return true;
+    }finally{if(trial.exitCode===null)trial.kill()}
+  }
+  async extensionCredential(){
+    let extension;
+    try {extension=await this.credentials('playwrightExtension')}
+    catch(e){
+      const code=['SECURE_STORAGE_UNAVAILABLE','INVALID_ENCRYPTED_EXTENSION_TOKEN'].includes(e?.message)?e.message:'EXTENSION_CONFIG_UNREADABLE';
+      throw Error(code);
+    }
+    if(!extension?.token)return null;
+    if(typeof extension.token!=='string'||!/^[^\s\x00-\x1f]{16,2048}$/.test(extension.token))
+      throw Error('INVALID_ENCRYPTED_EXTENSION_TOKEN');
+    return extension;
   }
   async plan(name){
     const p=this.paths;
@@ -100,26 +241,31 @@ class Runtime {
       env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',MCPHUB_MESSAGE_DB:path.join(this.userData,'Messaging','messages.sqlite3')}};
     if(name==='autosendBrowser'){
       if(!fs.existsSync(p.browser))throw Error('PLAYWRIGHT_DEPENDENCIES_MISSING');
-      const extension=await this.credentials('playwrightExtension');
+      const extension=await this.extensionCredential();
       if(!extension?.token)return null;
       fs.mkdirSync(path.join(p.artifacts,'autosend'),{recursive:true});
       return this.node(p.browser,['--host','127.0.0.1','--port','8932',
-        '--extension','--background','--browser',this.browser,'--shared-browser-context',
+        '--extension','--background','--browser',this.browser,...extensionProfileArgs(this.browser),'--shared-browser-context',
         '--caps','devtools','--block-service-workers','--no-webmcp',
-        '--output-dir',path.join(p.artifacts,'autosend'),'--timeout-navigation','45000'],
+        '--output-dir',path.join(p.artifacts,'autosend'),'--timeout-navigation','45000',
+        '--timeout-settle',settleTimeout('autosendBrowser'),
+        '--snapshot-mode',snapshotMode('autosendBrowser')],
         {PLAYWRIGHT_MCP_REJECT_UNSAFE:'1',PLAYWRIGHT_MCP_SESSION_NAME:'MCPGO AutoSend',
          PLAYWRIGHT_MCP_SESSION_COLOR:'blue',PLAYWRIGHT_MCP_EXTENSION_TOKEN:extension.token,
          PLAYWRIGHT_MCP_PING_TIMEOUT_MS:process.env.PLAYWRIGHT_MCP_PING_TIMEOUT_MS??'0'});
     }
     if(name==='browser'){
       if(!fs.existsSync(p.browser))throw Error('PLAYWRIGHT_DEPENDENCIES_MISSING');
-      const extension=await this.credentials('playwrightExtension');
+      const extension=await this.extensionCredential();
       if(!extension?.token)return null;
       fs.mkdirSync(p.artifacts,{recursive:true});
       return this.node(p.browser,['--host','127.0.0.1','--port','8931',
-        '--extension','--background','--browser',this.browser,'--shared-browser-context',
+        '--extension','--background','--browser',this.browser,...extensionProfileArgs(this.browser),'--shared-browser-context',
         '--caps','vision,devtools','--block-service-workers','--no-webmcp',
-        '--output-dir',p.artifacts,'--timeout-navigation','45000'],{PLAYWRIGHT_MCP_REJECT_UNSAFE:'1',
+        '--output-dir',p.artifacts,'--timeout-navigation','45000',
+        '--timeout-settle',settleTimeout('browser'),
+        '--snapshot-mode',snapshotMode('browser')],{PLAYWRIGHT_MCP_REJECT_UNSAFE:'1',
+        PLAYWRIGHT_MCP_SESSION_NAME:'MCPGO',PLAYWRIGHT_MCP_SESSION_COLOR:'purple',
         PLAYWRIGHT_MCP_EXTENSION_TOKEN:extension.token,
         PLAYWRIGHT_MCP_PING_TIMEOUT_MS:process.env.PLAYWRIGHT_MCP_PING_TIMEOUT_MS??'0'});
     }
@@ -153,9 +299,19 @@ class Runtime {
       p=await this.plan(name);
       if(!this.running||this.entries.get(name)!==record)return;
       if(!p){record.state='unconfigured';diag(this.userData,'windows.runtime.unconfigured',{service:name});this.report();return}
+      if(ENDPOINTS[name]&&await this.portProbe(ENDPOINTS[name],350)){
+        if(!this.running||this.entries.get(name)!==record)return;
+        record.state='error: PORT_OCCUPIED';
+        diag(this.userData,'windows.runtime.port.conflict',{service:name,port:ENDPOINTS[name]});
+        this.report();return;
+      }
+      if(!this.running||this.entries.get(name)!==record)return;
     }catch(e){
       diag(this.userData,'windows.runtime.plan.failure',{service:name,error:e.message,stack:e.stack});
       record.state=e.message==='ENOENT'?'waiting':'error: '+e.message;
+      if(['browser','autosendBrowser'].includes(name)&&['SECURE_STORAGE_UNAVAILABLE','INVALID_ENCRYPTED_EXTENSION_TOKEN','EXTENSION_CONFIG_UNREADABLE'].includes(e.message)){
+        this.report();return;
+      }
       this.schedule(name,record);return;
     }
     try{
@@ -243,6 +399,23 @@ class Runtime {
     record.timer=setTimeout(()=>this.launch(name),wait);
     this.report();
   }
+  async recoverTunnel(name,{manual=false}={}){
+    if(!['terminalTunnel','browserTunnel'].includes(name)||!this.running)return false;
+    const record=this.entries.get(name);
+    if(!record?.child||record.child.exitCode!==null)return false;
+    const pid=record.child.pid,e=this.healthEvidence||{};
+    const local=name==='terminalTunnel'?e.t:e.b,health=name==='terminalTunnel'?e.tt:e.bt;
+    const key=['terminal','terminalTunnel','browser','proxy','browserTunnel'].map(n=>this.entries.get(n)?.child?.pid||0).join(':');
+    if(e.key!==key||!local||!connectionHealth.fresh(e.checkedAt,Date.now())||health==='auth'||health==='throttled')return false;
+    if(!manual&&health!=='down')return false;
+    const telemetry=await connectionHealth.readTelemetry(name==='terminalTunnel'?'http://127.0.0.1:12848/health':'http://127.0.0.1:8940/healthz');
+    const busy=name==='terminalTunnel'?(telemetry?.active!==0||telemetry?.interactive_sessions!==0):
+      (!telemetry?.browserQueue||telemetry.browserQueue.active||telemetry.browserQueue.waiting>0);
+    if(busy)return false;
+    if(this.entries.get(name)!==record||record.child?.pid!==pid)return false;
+    diag(this.userData,'windows.runtime.tunnel.recover',{service:name,manual});
+    killOwnedTree(pid);return true;
+  }
   async start(){
     diag(this.userData,'windows.runtime.start');
     if(this.running)return;
@@ -253,9 +426,37 @@ class Runtime {
     // Wait for the real local listeners, not just a spawned process.
     const pump=async()=>{
       if(!this.running||generation!==this.generation)return;
-      const t=await listening(ENDPOINTS.terminal);
-      const b=await listening(ENDPOINTS.proxy);
+      const active=name=>this.entries.get(name)?.child?.exitCode===null;
+      let terminalUrl;
+      try{terminalUrl=terminalEndpoint(this.paths.config)}catch{}
+      const key=['terminal','terminalTunnel','browser','proxy','browserTunnel'].map(n=>this.entries.get(n)?.child?.pid||0).join(':');
+      const [t,b,tt,bt,th,bh]=await Promise.all([
+        active('terminal')&&terminalUrl?mcpReady(terminalUrl,['terminal_exec']):false,
+        active('browser')&&active('proxy')?mcpReady('http://127.0.0.1:8940/mcp',['browser_tabs','browser_snapshot']):false,
+        active('terminalTunnel')?connectionHealth.tunnelHealth(path.join(this.paths.tunnels,'terminal-health.url')):'down',
+        active('browserTunnel')?connectionHealth.tunnelHealth(path.join(this.paths.tunnels,'browser-health.url')):'down',
+        active('terminal')?connectionHealth.readTelemetry('http://127.0.0.1:12848/health'):null,
+        active('proxy')?connectionHealth.readTelemetry('http://127.0.0.1:8940/healthz'):null
+      ]);
       if(!this.running||generation!==this.generation)return;
+      this.healthEvidence={key,checkedAt:Date.now(),t,b,tt,bt,th,bh};
+      const chrome=connectionHealth.browserEvidence(bh);
+      const next={terminalMcp:t===true,browserMcp:b===true,terminalTunnel:tt==='ready',browserTunnel:bt==='ready',chrome:chrome.state==='ready'?true:chrome.state==='failed'?false:null};
+      const health=this.connectionState();
+      for(const [channel,value] of Object.entries(health))this.healthHistory.observe(channel,value);
+      for(const [name,local,status] of [['terminalTunnel',t,tt],['browserTunnel',b,bt]]){
+        const budget=this.recoveryBudget[name]??={failures:0,attempts:[],next:0,successes:0};
+        if(status==='ready'){budget.failures=0;if(++budget.successes>=2){budget.attempts=[];budget.next=0}}
+        else if(status==='down'&&local&&active(name)){
+          budget.successes=0;budget.failures++;const now=Date.now();budget.attempts=budget.attempts.filter(at=>now-at<3600000);
+          if(budget.failures>=3&&budget.attempts.length<3&&now>=budget.next){
+            if(await this.recoverTunnel(name)){budget.attempts.push(now);budget.next=now+60000*budget.attempts.length;budget.failures=0}
+          }
+        }else {budget.failures=0;budget.successes=0}
+      }
+      if(JSON.stringify(next)!==JSON.stringify(this.readiness)){
+        this.readiness=next;diag(this.userData,'windows.runtime.readiness',next);this.report();
+      }
       if(t&&this.entries.get('terminal')?.child?.exitCode===null &&
          !this.entries.get('terminalTunnel')?.child && !this.entries.get('terminalTunnel')?.timer)
         this.launch('terminalTunnel');
@@ -263,7 +464,9 @@ class Runtime {
          this.entries.get('browser')?.child?.exitCode===null &&
          !this.entries.get('browserTunnel')?.child && !this.entries.get('browserTunnel')?.timer)
         this.launch('browserTunnel');
-      this.healthTimer=setTimeout(pump,2500);
+      // Passive monitoring: no periodic tab creation or session reset.
+      this.report();
+      if(this.running&&generation===this.generation)this.healthTimer=setTimeout(pump,5000);
     };
     await pump();
   }
@@ -281,7 +484,13 @@ class Runtime {
       if(item.child&&item.child.exitCode===null)killOwnedTree(item.child.pid);
     }
     this.entries.clear();
+    this.healthEvidence=null;
+    this.browserVerificationFailure=null;
+    this.recoveryBudget={};
+    this.readiness={terminalMcp:false,browserMcp:false,terminalTunnel:false,browserTunnel:false,chrome:null};
+    this.browserProbePid=null;
+    this.browserProbe=null;
     this.report();
   }
 }
-module.exports={Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,listening,killOwnedTree,CORE_SERVICES};
+module.exports={mcpReady,tunnelReady,extensionProfile,Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,listening,killOwnedTree,CORE_SERVICES};

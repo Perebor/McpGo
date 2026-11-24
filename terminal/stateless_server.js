@@ -24,6 +24,7 @@ const DEFAULT_JOB_TIMEOUT_MS=20*60*1000;
 const MAX_JOB_TIMEOUT_MS=4*60*60*1000;
 // Wire counters only; never capture command text, auth data or session tokens.
 const observedWireCalls={modern:0,legacy:0};
+let lastSuccessfulCallAt=null;
 
 const DIR = __dirname;
 const CONFIG = process.env.MCPGO_ONESHOT_CONFIG || path.join(platform.dataRoot(),'terminal','stateless-config.json');
@@ -131,7 +132,7 @@ const server = http.createServer(async (req, res) => {
       mode: 'unified-terminal-mcp',
       active,
       interactive_sessions:interactive.sessionCount(),
-      observedWireCalls:{...observedWireCalls}
+      observedWireCalls:{...observedWireCalls},lastSuccessfulCallAt
     });
   }
 
@@ -242,6 +243,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if(method==='tools/call'&&result&&!result.isError)lastSuccessfulCallAt=Date.now();
     return respond(res, 200, modernEnvelope
       ? modern.modernizeMessage({jsonrpc:'2.0',id,result},
           {cache:method==='tools/list',serverInfo:SERVER_INFO})

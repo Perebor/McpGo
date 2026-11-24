@@ -32,7 +32,7 @@ McpGo объединяет SwiftUI, Node.js, Python, Chrome и внешний tu
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@playwright/mcp": "0.0.85"
+    "@playwright/mcp": "0.0.86"
   }
 }
 ```
@@ -41,9 +41,9 @@ McpGo объединяет SwiftUI, Node.js, Python, Chrome и внешний tu
 
 | Package | Lockfile version | Обозначенная лицензия в lock |
 |---|---|---|
-| `@playwright/mcp` | `0.0.85` | Apache-2.0 |
-| `playwright` | `1.64.0-alpha-1790635538000` | Apache-2.0 |
-| `playwright-core` | `1.64.0-alpha-1790635538000` | Apache-2.0 |
+| `@playwright/mcp` | `0.0.86` | Apache-2.0 |
+| `playwright` | `1.66.0-alpha-2026-11-18` | Apache-2.0 |
+| `playwright-core` | `1.66.0-alpha-2026-11-18` | Apache-2.0 |
 
 **Предупреждение о доверии:** alpha-версия транзитивной зависимости является фактом lockfile. Документация не утверждает её пригодность для долгосрочного публичного релиза без дополнительного review. Данные о лицензиях здесь взяты из lockfile и не заменяют юридическую проверку всех upstream notices.
 

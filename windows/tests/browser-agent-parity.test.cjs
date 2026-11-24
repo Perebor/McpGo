@@ -6,7 +6,7 @@ const url=require('node:url');
 const repo=path.resolve(__dirname,'../..');
 const required=['restricted-proxy.mjs','action-guard.mjs','agent-scope.mjs',
  'portable-tab-identity.mjs','portable-agent-tabs.mjs','tab-lease-manager.mjs',
- 'browser-session-manager.mjs','browser-workspace.mjs','workspace-response.mjs','mcp-modern-protocol.mjs'];
+ 'browser-session-manager.mjs', 'mcp-response.mjs', 'page-inspection.mjs', 'inspection-conditions.mjs', 'tool-profiles.mjs', 'browser-queue.mjs','browser-workspace.mjs','workspace-response.mjs','mcp-modern-protocol.mjs'];
 
 test('Windows package includes the same portable browser-agent logic as macOS',()=>{
  const pkg=require('../package.json');
@@ -19,6 +19,8 @@ test('Windows package includes the same portable browser-agent logic as macOS',(
  const runner=fs.readFileSync(path.join(repo,'windows/app/runtime.cjs'),'utf8');
  assert.match(runner,/--shared-browser-context/);
  assert.match(runner,/--background/);
+ assert.match(runner,/--timeout-settle/);
+ assert.match(runner,/PLAYWRIGHT_MCP_SESSION_NAME:'MCPGO'/);
  assert.match(runner,/BrowserActions/);
 });
 
