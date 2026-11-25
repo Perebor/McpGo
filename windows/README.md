@@ -135,6 +135,12 @@ wait for a permitted distribution method.
 Windows ARM64 is not included in this x64 release. WSL is not required.
 
 
+## Perebor Windows preview.9
+
+- The AutoSend list shows the last confirmed delivery time, last error and a read-only readiness check. UNKNOWN stays blocked until the owner verifies the original receipt; there is no automatic resend.
+- Optional interval offsets align eligible slots to a UTC grid. For a five-minute interval, offsets of 0 and 3 minutes define separate grid positions. Busy or unavailable chats can skip slots; actual delivery times are not guaranteed. The full interval between attempts is preserved. Changing an offset requires a paused interval task with no unresolved delivery.
+- Updates are discovered only from `Perebor/McpGo` GitHub Releases. Choose the downloaded installer in the update verifier to compare its exact name, size and SHA-256 to GitHub asset metadata. CI artifacts are not automatically published as releases. Verification does not execute the installer or establish publisher identity; unsigned installers remain manual.
+
 ## Releasing a free unsigned Windows Preview
 
 From a clean, pushed `main` commit, the **Windows-native workflow** must

@@ -6,9 +6,7 @@
 
 | Исходный файл | Строки | SHA-256 prefix |
 |---|---:|---|
-| `native/build-icon.py` | 96 | `0b2e6d7941c328ac` |
 | `native/InteractiveButtonStyle.swift` | 64 | `353622d1294660bc` |
-| `native/main.swift` | 969 | `a7c6348f9c093161` |
 | `native/McpGoMark.svg` | 16 | `26a8d0fe7e1babda` |
 | `native/Messaging.swift` | 679 | `7a22813a0fa59f81` |
 | `native/OnboardingView.swift` | 2217 | `c0b68997703d787c` |
@@ -16,6 +14,8 @@
 | `native/SkillsView.swift` | 213 | `1c4a2ff7fc51d11b` |
 | `native/TunnelHelp.swift` | 194 | `29f2160c400b0277` |
 | `native/TunnelSettings.swift` | 500 | `1779c3e88fbda0ca` |
+| `native/build-icon.py` | 96 | `0b2e6d7941c328ac` |
+| `native/main.swift` | 969 | `a7c6348f9c093161` |
 | `onboarding/browser_compat.py` | 140 | `bee9096940cbbc9d` |
 | `onboarding/cli.py` | 67 | `be35c06ac8b07938` |
 | `onboarding/diagnostics.py` | 316 | `c3c03e467bcecc46` |
@@ -174,15 +174,16 @@
 | `tests/test_dev_sync_playwright_seed.py` | 59 | `13a2a5843d566568` |
 | `tests/test_dev_sync_runtime.py` | 93 | `074f4ac9373ee498` |
 | `tests/test_dmg_packaging.py` | 133 | `21650816401e2256` |
-| `tests/test_docs_release.py` | 66 | `e8443cd6e6add831` |
+| `tests/test_docs_release.py` | 75 | `dbcfaa079952d4cb` |
 | `tests/test_documentation.py` | 73 | `a17c225b3d5c9ac4` |
 | `tests/test_license.py` | 36 | `ae9ff572a78ee89f` |
 | `tests/test_onboarding_diagnostics.py` | 120 | `ddccf69da772cea9` |
 | `tests/test_onboarding_safety.py` | 103 | `c9cc4283994a09e4` |
 | `tests/test_runtime_upgrade.py` | 187 | `bb7c8c632f14f300` |
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
-| `tools/generate_source_inventory.py` | 73 | `0edda30cae188f73` |
+| `tools/generate_source_inventory.py` | 73 | `f64469474bf7681a` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
+| `windows/README.md` | 200 | `2646434e520dca3d` |
 | `windows/app/diagnostics.cjs` | 62 | `f2c012db7dac4e6e` |
 | `windows/app/index.html` | 107 | `114cdf3a2f66b0c7` |
 | `windows/app/local-api.cjs` | 46 | `92cb6a96f192769c` |
@@ -200,7 +201,6 @@
 | `windows/package-lock.json` | 3682 | `5e65bb37f274170a` |
 | `windows/package.json` | 160 | `f2620eebdcaf2c1d` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
-| `windows/README.md` | 194 | `fcc58f81019227ed` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
 | `windows/tests/diagnostics.test.cjs` | 41 | `067b0b874c1ae6cc` |

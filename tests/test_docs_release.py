@@ -34,6 +34,15 @@ class PublicDocsTests(unittest.TestCase):
         self.assertIn("Установка для обычного пользователя", landing)
         self.assertIn("технический справочник", technical)
 
+    def test_inventory_uses_platform_independent_path_order(self):
+        import runpy
+
+        source = runpy.run_path(str(ROOT / "tools/generate_source_inventory.py"))
+        paths = [p.relative_to(ROOT).as_posix() for p in source["source_files"]()]
+        for directory in source["DIRECTORIES"]:
+            rows = [p for p in paths if p.startswith(directory + "/")]
+            self.assertEqual(rows, sorted(rows))
+
     def test_source_inventory_is_current(self):
         run = subprocess.run(
             ["python3", "tools/generate_source_inventory.py", "--check"],

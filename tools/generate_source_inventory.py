@@ -33,7 +33,7 @@ OUT = ROOT / "docs/SOURCE_INVENTORY.md"
 
 def source_files():
     for dir_name, extensions in DIRECTORIES.items():
-        for p in sorted((ROOT / dir_name).rglob("*")):
+        for p in sorted((ROOT / dir_name).rglob("*"), key=lambda item: item.relative_to(ROOT).as_posix()):
             if not p.is_file() or p.is_symlink() or p.suffix not in extensions:
                 continue
             if set(p.relative_to(ROOT).parts) & EXCLUDE_PATH_PARTS:
