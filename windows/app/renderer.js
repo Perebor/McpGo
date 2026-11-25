@@ -513,7 +513,11 @@ async function refreshTasks(){
   const {tasks=[]}=await window.mcpgo.serviceRead('autosend','/api/status');
   for(const t of tasks){
    const pending=['sending','checking','verifying'].includes(t.status);
-   const buttons=pending||t.status==='unknown'?[]:
+   const buttons=pending?[]:t.status==='unknown'?
+     [{label:'Перепроверить доставку',run:()=>doTask('recheck_unknown',t.id)},
+      {label:'Подтвердить получение',run:()=>{
+       if(confirm('Вы лично проверили этот чат и увидели сообщение именно из последней попытки? Подтверждение не отправит сообщение и оставит расписание на паузе.'))doTask('confirm_received',t.id);
+      }}]:
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
      [{label:'Включить',run:()=>doTask('start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];
@@ -521,6 +525,7 @@ async function refreshTasks(){
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
     String(t.message||'').slice(0,150),
     'Интервал: '+t.interval_seconds+' сек.; следующий: '+(t.next_at||'нет'),
+    t.status==='unknown'?'Повторная отправка заблокирована. Подтвердите получение только после личной проверки чата.':'',
     t.last_error||''
    ].filter(Boolean),buttons));
   }

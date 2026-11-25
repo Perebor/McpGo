@@ -60,3 +60,54 @@ test('sidebar tools use fixed allowlisted Electron handlers, not renderer filesy
  assert.match(main,/shell\.openPath\(target\)/);
  assert.doesNotMatch(renderer,/require\(|eval\(/);
 });
+
+
+// Execute the actual renderer task-list function against a synthetic UI and API.
+// No network, browser automation, or live schedules are touched.
+async function renderAutoSendTask(status,enabled=false,accept=false){
+ const vm=require('node:vm');
+ const source=renderer.match(/async function refreshTasks\(\)\{[\s\S]*?\n\}\n(?=\$\('refresh-tasks'\)\.onclick=refreshTasks;)/);
+ assert.ok(source,'task renderer not found');
+ const rows=[],calls=[],prompts=[];
+ const task={id:'fixture-task',url:'https://example.invalid/conversation',status,enabled,interval_seconds:300};
+ const context={
+  $:()=>({replaceChildren(){rows.length=0},append(row){rows.push(row)}}),
+  window:{mcpgo:{serviceRead:async()=>({tasks:[task]})}},
+  item:(title,lines,buttons)=>({title,lines,buttons}),
+  doTask:(action,id)=>calls.push({action,id}),
+  confirm:(prompt)=>{prompts.push(prompt);return accept}
+ };
+ await vm.runInNewContext(source[0]+'\nrefreshTasks()',context,{timeout:1000});
+ assert.equal(rows.length,1);
+ return {buttons:rows[0].buttons,lines:rows[0].lines,calls,prompts};
+}
+test('UNKNOWN exposes only the manual receipt and verification-only reconciliation actions',async()=>{
+ const ui=await renderAutoSendTask('unknown');
+ assert.deepEqual(Array.from(ui.buttons,b=>b.label),['Перепроверить доставку','Подтвердить получение']);
+ assert.equal(ui.calls.length,0);
+ assert.ok(ui.lines.some(line=>line.includes('Повторная отправка заблокирована')));
+ ui.buttons[0].run();
+ assert.deepEqual(ui.calls,[{action:'recheck_unknown',id:'fixture-task'}]);
+});
+test('manual receipt requires affirmative user attestation; cancel performs no action',async()=>{
+ const cancelled=await renderAutoSendTask('unknown',false,false);
+ cancelled.buttons[1].run();
+ assert.equal(cancelled.prompts.length,1);
+ assert.equal(cancelled.calls.length,0);
+ const accepted=await renderAutoSendTask('unknown',false,true);
+ accepted.buttons[1].run();
+ assert.deepEqual(accepted.calls,[{action:'confirm_received',id:'fixture-task'}]);
+ assert.equal(accepted.prompts.length,1);
+});
+test('in-flight tasks remain locked; paused and scheduled controls are unchanged',async()=>{
+ for(const status of ['sending','checking','verifying']){
+  const ui=await renderAutoSendTask(status,true);
+  assert.equal(ui.buttons.length,0);
+  assert.equal(ui.calls.length,0);
+ }
+ const paused=await renderAutoSendTask('paused');
+ assert.deepEqual(Array.from(paused.buttons,b=>b.label),['Включить','Удалить']);
+ assert.equal(paused.calls.length,0);
+ const scheduled=await renderAutoSendTask('scheduled',true);
+ assert.deepEqual(Array.from(scheduled.buttons,b=>b.label),['Пауза']);
+});
