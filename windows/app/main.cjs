@@ -25,7 +25,7 @@ function importInstallerEvents(){
 }
 
 const {SettingsStore}=require('./settings.cjs');
-const {checkUpdates,safeReleaseUrl}=require('./updates.cjs');
+const {checkUpdates,safeReleaseUrl,verifyInstaller}=require('./updates.cjs');
 const {version:appVersion}=require('../package.json');
 if(process.platform!=='win32')throw Error('Windows only');
 app.setAppUserModelId('ru.mcpgo.desktop');
@@ -97,7 +97,15 @@ ipcMain.handle('mcpgo:save',(_event,value)=>{
 ipcMain.handle('mcpgo:restart',async()=>{await settingsSaveTail;diag('windows.runtime.restart.requested');await runtime.restart();publish();return publicStatus()});
 ipcMain.handle('mcpgo:check-updates',()=>checkUpdates(appVersion));
 ipcMain.handle('mcpgo:open-update',(_event,url)=>shell.openExternal(safeReleaseUrl(url)));
-ipcMain.handle('mcpgo:open-releases',()=>shell.openExternal('https://github.com/mcpgo1/McpGo/releases'));
+ipcMain.handle('mcpgo:open-releases',()=>shell.openExternal('https://github.com/Perebor/McpGo/releases'));
+ipcMain.handle('mcpgo:verify-update',async()=>{
+ const update=await checkUpdates(appVersion);
+ if(!update.available)throw Error('NO_VERIFIABLE_UPDATE');
+ const selected=await dialog.showOpenDialog({title:'Выберите скачанный '+update.asset.name,
+  properties:['openFile'],filters:[{name:'Windows installer',extensions:['exe']}]});
+ if(selected.canceled||selected.filePaths.length!==1)return {cancelled:true};
+ return verifyInstaller(selected.filePaths[0],update.asset);
+});
 // Fixed allowlist: never accept filesystem paths or arbitrary URLs from the renderer.
 ipcMain.handle('mcpgo:skill-read',(_event,id)=>{
  const {content}=readSkill(runtime.resourceRoot,id);

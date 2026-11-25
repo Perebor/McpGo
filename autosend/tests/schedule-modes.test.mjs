@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {validateSchedule,nextCalendarSlot,nextAfterRun,stableSlotId,recordSlot,safeSlotStatus,localSlotDay} from '../schedule.mjs';
 import {trackSmartContinuation} from '../smart-continuation.mjs';
-import {newTask,arm,rescheduleAfterAttempt,markUnknownOnBoot} from '../core.mjs';
+import {newTask,arm,rescheduleAfterAttempt,markUnknownOnBoot,setIntervalOffset} from '../core.mjs';
 import {finishVerified} from '../reconciliation.mjs';
 const url='https://chatgpt.com/c/00000000-0000-4000-8000-000000000001';
 const opts=(mode,extras={})=>({url,message:'Продолжи',schedule_mode:mode,interval_seconds:1800,...extras});
@@ -100,4 +100,34 @@ test('reboot does not auto-continue a stale smart response',()=>{
  t.next_at=new Date().toISOString();
  markUnknownOnBoot({tasks:[t]});
  assert.equal(t.next_at,null);assert.equal(t.smart_seen_busy,false);
+});
+
+
+test('optional interval phase separates schedules on a fixed UTC grid without shortening the interval',()=>{
+ const now=Date.parse('2026-11-25T15:00:00Z');
+ const a=newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:0}));
+ const b=newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:180}));
+ assert.equal(a.enabled,false);assert.equal(b.enabled,false);
+ arm(a,now);arm(b,now);
+ assert.equal(a.next_at,'2026-11-25T15:05:00.000Z');
+ assert.equal(b.next_at,'2026-11-25T15:08:00.000Z');
+ assert.equal(nextAfterRun(b,Date.parse('2026-11-25T15:08:01Z')),'2026-11-25T15:18:00.000Z');
+ assert.equal(nextAfterRun(a,Date.parse('2026-11-25T15:05:00Z')),'2026-11-25T15:10:00.000Z');
+ const legacy=newTask(opts('interval',{interval_seconds:300}));
+ arm(legacy,now+1000);assert.equal(legacy.next_at,'2026-11-25T15:05:01.000Z');
+ for(const offset of [-1,300,0.5,'180',true])
+  assert.throws(()=>newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:offset})));
+});
+
+
+test('phase editing never rearms or discards unresolved delivery evidence',()=>{
+ const t=newTask(opts('interval',{interval_seconds:300}));
+ setIntervalOffset(t,180);
+ assert.equal(t.interval_offset_seconds,180);assert.equal(t.next_at,null);assert.equal(t.enabled,false);
+ setIntervalOffset(t,null);assert.equal(t.interval_offset_seconds,null);
+ const receipt={baselineUserCount:3};t.status='unknown';t.verification=receipt;
+ assert.throws(()=>setIntervalOffset(t,0));assert.equal(t.verification,receipt);assert.equal(t.status,'unknown');
+ t.status='paused';assert.throws(()=>setIntervalOffset(t,0));
+ delete t.verification;arm(t,1000);assert.throws(()=>setIntervalOffset(t,0));
+ const daily=newTask(opts('daily',{time_zone:'UTC',local_time:'10:00'}));assert.throws(()=>setIntervalOffset(daily,0));
 });

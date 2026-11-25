@@ -489,7 +489,7 @@ $('recover-runtime').onclick=async()=>{
 function element(tag,text){
  const node=document.createElement(tag);node.textContent=String(text);return node;
 }
-function item(title,lines,buttons=[]){
+function item(title,lines,buttons=[],offsetEditor=null){
  const box=element('div','');box.className='item';box.append(element('strong',title));
  for(const line of lines)box.append(element('small',line));
  if(buttons.length){
@@ -499,13 +499,28 @@ function item(title,lines,buttons=[]){
    btn.onclick=run;bar.append(btn);
   }box.append(bar);
  }
+ if(offsetEditor){
+  const group=element('div','');group.className='group';group.dataset.offsetEditor='true';
+  const label=element('label','Смещение, мин. (пусто — обычный интервал)');
+  const input=element('input','');input.type='number';input.min='0';input.step='1';
+  input.max=String(Math.floor((offsetEditor.interval-1)/60));input.value=offsetEditor.value;
+  label.append(input);group.append(label);
+  const save=element('button','Сохранить смещение');save.type='button';save.className='minor';
+  save.onclick=()=>{if(input.checkValidity())offsetEditor.save(input.value===''?null:Number(input.value)*60);else input.reportValidity()};
+  group.append(save);box.append(group);
+ }
  return box;
 }
-async function doTask(action,id){
+async function doTask(action,id,extra={}){
  try{
-  await window.mcpgo.serviceAction('autosend','/api/tasks',{action,id});
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
   await refreshTasks();
- }catch(e){message(e.message,true)}
+  $('autosend-feedback').textContent=action==='preview'?
+   (result.ready?'Готовность подтверждена. ':'Готовность не подтверждена. ')+
+   String(result.reason||'Нет результата')+' Send не выполнялся.':
+   action==='confirm_received'?'Получение подтверждено. Расписание на паузе.':
+   action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
+ }catch(e){$('autosend-feedback').textContent=e.message;message(e.message,true)}
 }
 async function refreshTasks(){
  const list=$('tasks-list');list.replaceChildren();
@@ -521,13 +536,19 @@ async function refreshTasks(){
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
      [{label:'Включить',run:()=>doTask('start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];
+   if(!pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id)});
+   const offsetEditor=t.status==='paused'&&!t.enabled&&!t.manual_once&&!t.verification&&!t.active_slot_id&&(t.schedule_mode||'interval')==='interval'?
+    {interval:t.interval_seconds,value:t.interval_offset_seconds==null?'':String(t.interval_offset_seconds/60),
+     save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
    list.append(item(t.url,[
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
     String(t.message||'').slice(0,150),
-    'Интервал: '+t.interval_seconds+' сек.; следующий: '+(t.next_at||'нет'),
+    'Интервал: '+t.interval_seconds+' сек.; следующий: '+(t.next_at?new Date(t.next_at).toLocaleString('ru-RU'):'нет'),
+    'Смещение: '+(t.interval_offset_seconds==null?'нет':t.interval_offset_seconds+' сек.'),
+    'Последняя успешная доставка: '+(t.last_success_at?new Date(t.last_success_at).toLocaleString('ru-RU')+' (время подтверждения)':'нет'),
+    t.last_error?'Причина остановки / последнее событие: '+t.last_error:'',
     t.status==='unknown'?'Повторная отправка заблокирована. Подтвердите получение только после личной проверки чата.':'',
-    t.last_error||''
-   ].filter(Boolean),buttons));
+   ].filter(Boolean),buttons,offsetEditor));
   }
   if(!tasks.length)list.append(item('Расписания отсутствуют',[]));
  }catch(e){list.append(item('Планировщик недоступен',[e.message]))}
@@ -538,7 +559,8 @@ $('task-create').onsubmit=async event=>{
  try{
   await window.mcpgo.serviceAction('autosend','/api/tasks',{
    action:'create',url:$('task-url').value.trim(),message:$('task-message').value,
-   interval_seconds:Number($('task-interval').value)*60});
+   interval_seconds:Number($('task-interval').value)*60,
+   interval_offset_seconds:$('task-offset').value===''?null:Number($('task-offset').value)*60});
   $('task-create').reset();message('Расписание создано выключенным');await refreshTasks();
  }catch(e){message(e.message,true)}finally{btn.disabled=false}
 };
@@ -561,7 +583,7 @@ $('agent-create').onsubmit=async event=>{
  }catch(e){message(e.message,true)}finally{btn.disabled=false}
 };
 void refreshTasks();void refreshAgents();
-setInterval(()=>{if(!document.hidden){void refreshTasks();void refreshAgents()}},15000);
+setInterval(()=>{if(!document.hidden){if(!document.activeElement?.closest('[data-offset-editor]'))void refreshTasks();void refreshAgents()}},15000);
 
 
 async function refreshHistory(){
@@ -593,15 +615,25 @@ $('open-releases').onclick=()=>window.mcpgo.openReleases().catch(e=>message(e.me
 $('check-updates').onclick=async()=>{
  const button=$('check-updates');button.disabled=true;
  updatesStatus.textContent='Проверяем GitHub Releases...';
- $('open-update').hidden=true;
+ $('open-update').hidden=true;$('verify-update').hidden=true;
  try{
   const update=await window.mcpgo.checkUpdates();
   if(update.available){
    updatesStatus.textContent='Доступна версия '+update.version+
-    '. Скачайте её с официального GitHub Releases и сравните SHA-256.';
-   const open=$('open-update');open.hidden=false;
+    '. Скачайте из Perebor/McpGo, затем проверьте SHA-256 файла по метаданным релиза.';
+   const open=$('open-update');open.hidden=false;$('verify-update').hidden=false;
    open.onclick=()=>window.mcpgo.openUpdate(update.url).catch(e=>message(e.message,true));
-  }else updatesStatus.textContent='Новых Windows Preview нет. Установлено: '+update.current;
+  }else updatesStatus.textContent='Новых проверяемых Windows Preview нет. Установлено: '+update.current;
  }catch(error){updatesStatus.textContent='Не удалось проверить обновления: '+error.message}
+ finally{button.disabled=false}
+};
+
+$('verify-update').onclick=async()=>{
+ const button=$('verify-update');button.disabled=true;
+ try{
+  const result=await window.mcpgo.verifyUpdate();
+  updatesStatus.textContent=result.cancelled?'Проверка отменена.':
+   'SHA-256 совпадает: '+result.sha256+'. Файл проверен на момент чтения. Установщик не подписан; установка только вручную.';
+ }catch(error){updatesStatus.textContent='Проверка не пройдена. Не запускайте установщик: '+error.message}
  finally{button.disabled=false}
 };

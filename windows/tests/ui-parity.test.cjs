@@ -73,17 +73,17 @@ async function renderAutoSendTask(status,enabled=false,accept=false){
  const context={
   $:()=>({replaceChildren(){rows.length=0},append(row){rows.push(row)}}),
   window:{mcpgo:{serviceRead:async()=>({tasks:[task]})}},
-  item:(title,lines,buttons)=>({title,lines,buttons}),
-  doTask:(action,id)=>calls.push({action,id}),
+  item:(title,lines,buttons,offsetEditor)=>({title,lines,buttons,offsetEditor}),
+  doTask:(action,id,extra)=>calls.push(extra===undefined?{action,id}:{action,id,extra}),
   confirm:(prompt)=>{prompts.push(prompt);return accept}
  };
  await vm.runInNewContext(source[0]+'\nrefreshTasks()',context,{timeout:1000});
  assert.equal(rows.length,1);
- return {buttons:rows[0].buttons,lines:rows[0].lines,calls,prompts};
+ return {buttons:rows[0].buttons,lines:rows[0].lines,offsetEditor:rows[0].offsetEditor,calls,prompts};
 }
 test('UNKNOWN exposes only the manual receipt and verification-only reconciliation actions',async()=>{
  const ui=await renderAutoSendTask('unknown');
- assert.deepEqual(Array.from(ui.buttons,b=>b.label),['Перепроверить доставку','Подтвердить получение']);
+ assert.deepEqual(Array.from(ui.buttons,b=>b.label),['Перепроверить доставку','Подтвердить получение','Проверить без отправки']);
  assert.equal(ui.calls.length,0);
  assert.ok(ui.lines.some(line=>line.includes('Повторная отправка заблокирована')));
  ui.buttons[0].run();
@@ -106,8 +106,29 @@ test('in-flight tasks remain locked; paused and scheduled controls are unchanged
   assert.equal(ui.calls.length,0);
  }
  const paused=await renderAutoSendTask('paused');
- assert.deepEqual(Array.from(paused.buttons,b=>b.label),['Включить','Удалить']);
+ assert.deepEqual(Array.from(paused.buttons,b=>b.label),['Включить','Удалить','Проверить без отправки']);
  assert.equal(paused.calls.length,0);
  const scheduled=await renderAutoSendTask('scheduled',true);
- assert.deepEqual(Array.from(scheduled.buttons,b=>b.label),['Пауза']);
+ assert.deepEqual(Array.from(scheduled.buttons,b=>b.label),['Пауза','Проверить без отправки']);
+});
+
+
+test('paused interval task offers a read-only preview and displays last successful delivery',async()=>{
+ const ui=await renderAutoSendTask('paused');
+ assert.ok(ui.buttons.some(b=>b.label==='Проверить без отправки'));
+ assert.ok(ui.lines.some(l=>l.startsWith('Последняя успешная доставка:')));
+ assert.match(html,/id="task-offset"/);
+ assert.match(renderer,/interval_offset_seconds/);
+});
+
+
+test('preview uses only preview action and offset editor is paused-only',async()=>{
+ const paused=await renderAutoSendTask('paused');
+ paused.buttons.find(b=>b.label==='Проверить без отправки').run();
+ assert.deepEqual(paused.calls,[{action:'preview',id:'fixture-task'}]);
+ paused.offsetEditor.save(180);
+ assert.equal(paused.calls[1].action,'set_interval_offset');
+ assert.equal(paused.calls[1].extra.interval_offset_seconds,180);
+ assert.equal((await renderAutoSendTask('unknown')).offsetEditor,null);
+ assert.equal((await renderAutoSendTask('scheduled',true)).offsetEditor,null);
 });

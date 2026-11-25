@@ -6,7 +6,9 @@
 
 | Исходный файл | Строки | SHA-256 prefix |
 |---|---:|---|
+| `native/build-icon.py` | 96 | `0b2e6d7941c328ac` |
 | `native/InteractiveButtonStyle.swift` | 64 | `353622d1294660bc` |
+| `native/main.swift` | 969 | `a7c6348f9c093161` |
 | `native/McpGoMark.svg` | 16 | `26a8d0fe7e1babda` |
 | `native/Messaging.swift` | 679 | `7a22813a0fa59f81` |
 | `native/OnboardingView.swift` | 2217 | `c0b68997703d787c` |
@@ -14,8 +16,6 @@
 | `native/SkillsView.swift` | 213 | `1c4a2ff7fc51d11b` |
 | `native/TunnelHelp.swift` | 194 | `29f2160c400b0277` |
 | `native/TunnelSettings.swift` | 500 | `1779c3e88fbda0ca` |
-| `native/build-icon.py` | 96 | `0b2e6d7941c328ac` |
-| `native/main.swift` | 969 | `a7c6348f9c093161` |
 | `onboarding/browser_compat.py` | 140 | `bee9096940cbbc9d` |
 | `onboarding/cli.py` | 67 | `be35c06ac8b07938` |
 | `onboarding/diagnostics.py` | 316 | `c3c03e467bcecc46` |
@@ -127,13 +127,13 @@
 | `autosend/browser-health.mjs` | 25 | `27dcf490eea01185` |
 | `autosend/chat-state.mjs` | 115 | `d9b1a8f281ab97f1` |
 | `autosend/conversation-fsm.mjs` | 60 | `76a374d0592e0743` |
-| `autosend/core.mjs` | 222 | `5855923fee976123` |
+| `autosend/core.mjs` | 238 | `540f01f833481315` |
 | `autosend/delivery.mjs` | 525 | `878f988eebfd5b5d` |
 | `autosend/guarded-send.mjs` | 123 | `f6bbb6d7e4abd676` |
 | `autosend/preview-check.mjs` | 81 | `d60635c6b8454478` |
 | `autosend/reconciliation.mjs` | 166 | `3868299f79873cd3` |
-| `autosend/schedule.mjs` | 128 | `d04504846ed3db31` |
-| `autosend/server.mjs` | 380 | `fc0971aae27a54a8` |
+| `autosend/schedule.mjs` | 137 | `2ac56ce36511d750` |
+| `autosend/server.mjs` | 385 | `35399366e2f12f6f` |
 | `autosend/simulated-browser.mjs` | 172 | `fa399e53b5101674` |
 | `autosend/smart-continuation.mjs` | 35 | `98df60086624f562` |
 | `autosend/stream-monitor.mjs` | 116 | `e432cc528a1bc80f` |
@@ -146,7 +146,7 @@
 | `autosend/tests/no-tab-creation.test.mjs` | 18 | `96c1c6773034c1f4` |
 | `autosend/tests/preview-check.test.mjs` | 70 | `733e2b6c210578da` |
 | `autosend/tests/reconciliation.test.mjs` | 245 | `b57ff6f7eb74987d` |
-| `autosend/tests/schedule-modes.test.mjs` | 103 | `3ba38c416032f113` |
+| `autosend/tests/schedule-modes.test.mjs` | 133 | `5aa53eacf5b7a57b` |
 | `autosend/tests/server-http.test.mjs` | 270 | `90e4175f82bb7452` |
 | `autosend/tests/simulator.test.mjs` | 246 | `5a291fd7b5cd6b07` |
 | `autosend/tests/stream-monitor.test.mjs` | 110 | `7ad1d8b006a19785` |
@@ -183,24 +183,24 @@
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
 | `tools/generate_source_inventory.py` | 73 | `0edda30cae188f73` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
-| `windows/README.md` | 194 | `fcc58f81019227ed` |
 | `windows/app/diagnostics.cjs` | 62 | `f2c012db7dac4e6e` |
-| `windows/app/index.html` | 106 | `6b0655332b8960e5` |
+| `windows/app/index.html` | 107 | `114cdf3a2f66b0c7` |
 | `windows/app/local-api.cjs` | 46 | `92cb6a96f192769c` |
-| `windows/app/main.cjs` | 229 | `18da2848df6b79e7` |
+| `windows/app/main.cjs` | 237 | `4edc644c53e76c48` |
 | `windows/app/onboarding.cjs` | 63 | `bdd55607e178d03b` |
-| `windows/app/preload.cjs` | 31 | `e292e58fdcac2f8c` |
-| `windows/app/renderer.js` | 602 | `aa947acbeb1ca07e` |
+| `windows/app/preload.cjs` | 32 | `1240b1a0c7306177` |
+| `windows/app/renderer.js` | 639 | `1621ad9738433141` |
 | `windows/app/runtime.cjs` | 499 | `424e82ca05a15be7` |
 | `windows/app/settings.cjs` | 129 | `0c7cf71254ce19a7` |
 | `windows/app/skills.cjs` | 21 | `de7909af66e28156` |
 | `windows/app/style.css` | 160 | `fb839b597d10b459` |
-| `windows/app/updates.cjs` | 54 | `09dc73bf45d81206` |
+| `windows/app/updates.cjs` | 85 | `eb7d461101d1ab7f` |
 | `windows/app/wizard-doctor.cjs` | 15 | `18016e0c400ee70b` |
 | `windows/onboarding_cli.py` | 141 | `ff9d2814a868423a` |
-| `windows/package-lock.json` | 3682 | `b06140765ad74a33` |
-| `windows/package.json` | 160 | `78e8313e317e6e13` |
+| `windows/package-lock.json` | 3682 | `5e65bb37f274170a` |
+| `windows/package.json` | 160 | `f2620eebdcaf2c1d` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
+| `windows/README.md` | 194 | `fcc58f81019227ed` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
 | `windows/tests/diagnostics.test.cjs` | 41 | `067b0b874c1ae6cc` |
@@ -213,8 +213,8 @@
 | `windows/tests/settings.test.cjs` | 122 | `fd68e57b4b0c2677` |
 | `windows/tests/skills.test.cjs` | 41 | `afb59e0397546192` |
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
-| `windows/tests/ui-parity.test.cjs` | 62 | `97f221e8d2723fef` |
-| `windows/tests/updates.test.cjs` | 36 | `669ce88d7f88ea64` |
+| `windows/tests/ui-parity.test.cjs` | 134 | `015115cdc9255113` |
+| `windows/tests/updates.test.cjs` | 59 | `6a0ffbf63c57dada` |
 | `windows/verify-build.py` | 117 | `f40b9da766c1957e` |
 
 Всего файлов в выбранном source-only срезе: **210**.

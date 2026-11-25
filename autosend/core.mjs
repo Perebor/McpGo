@@ -38,7 +38,23 @@ export function validateInput(body){
   const schedule=validateSchedule(body);
   const seconds=Number(body.interval_seconds??60);
   if(!Number.isInteger(seconds) || seconds<MIN_INTERVAL || seconds>MAX_INTERVAL) throw Error('Интервал должен быть от 1 минуты до 7 дней.');
-  return {url,message:body.message,interval_seconds:seconds,...schedule};
+  const phase=validateIntervalOffset(body.interval_offset_seconds,seconds,schedule.schedule_mode);
+  return {url,message:body.message,interval_seconds:seconds,...schedule,interval_offset_seconds:phase};
+}
+// Optional phase in seconds on the UTC interval grid; null preserves legacy cadence.
+export function validateIntervalOffset(value,interval,mode='interval'){
+ if(value==null)return null;
+ if(mode!=='interval'||!Number.isInteger(interval)||interval<MIN_INTERVAL||interval>MAX_INTERVAL||
+    !Number.isInteger(value)||value<0||value>=interval)
+  throw Error('Смещение: целое число секунд от 0 до интервала (не включительно).');
+ return value;
+}
+export function setIntervalOffset(task,value){
+ if(task.enabled||task.status!=='paused'||(task.schedule_mode||'interval')!=='interval'||
+    task.manual_once||task.verification||task.active_slot_id)
+  throw Error('Смещение можно изменить только у выключенного интервального задания без незавершённой попытки.');
+ task.interval_offset_seconds=validateIntervalOffset(value,task.interval_seconds,task.schedule_mode||'interval');
+ return task.interval_offset_seconds;
 }
 export function newTask(data, now=Date.now()) {
   const d=validateInput(data);

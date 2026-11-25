@@ -80,7 +80,16 @@ function matchingInstants(y,m,d,h,min,fmt){
  */
 export function nextCalendarSlot(task,after=Date.now(),excludeDay=null){
  const mode=task.schedule_mode||'interval';
- if(mode==='interval')return new Date(after+task.interval_seconds*1000).toISOString();
+ if(mode==='interval'){
+  const period=task.interval_seconds*1000,earliest=after+period;
+  const phase=task.interval_offset_seconds;
+  // Preserve a full interval between attempts and never replay missed slots.
+  if(Number.isInteger(phase)&&phase>=0&&phase<task.interval_seconds){
+   const offset=phase*1000;
+   return new Date(Math.ceil((earliest-offset)/period)*period+offset).toISOString();
+  }
+  return new Date(earliest).toISOString();
+ }
  if(mode==='once'){
   const at=Date.parse(task.run_at);
   return Number.isFinite(at)&&at>after?new Date(at).toISOString():null;

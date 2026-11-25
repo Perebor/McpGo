@@ -4,7 +4,7 @@ import {deliverViaPlaywright,reconcileViaPlaywright,observeExistingChat} from '.
 import {probeBrowserHealth} from './browser-health.mjs';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
 import {verificationReceipt,canReconcile,expired,scheduleNextCheck,finishUnknown,finishVerified,recheckUnknown,restoreAttemptEvidence} from './reconciliation.mjs';
-import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken} from './core.mjs';
+import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset} from './core.mjs';
 import {stableSlotId,recordSlot,safeSlotStatus} from './schedule.mjs';
 import {trackSmartContinuation} from './smart-continuation.mjs';
 import {conversationState,conversationStates,eligibleToSend,nextDue,canObserveTask} from './conversation-fsm.mjs';
@@ -77,6 +77,11 @@ function operation(action,body){
   case 'update':{
    const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка: сначала дождись результата.');
    Object.assign(t,validateInput(body));t.schedule_revision=(t.schedule_revision||0)+1;delete t.watchdog;delete t.verification;pause(t);t.manual_once=false;t.safe_retry_count=0;t.last_error='';persist();return {task:t};
+  }
+  case 'set_interval_offset':{
+   const t=find(body.id);
+   setIntervalOffset(t,body.interval_offset_seconds);
+   persist();return {task:t};
   }
   case 'start':{
    const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка.');
