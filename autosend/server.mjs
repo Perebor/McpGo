@@ -4,7 +4,7 @@ import {deliverViaPlaywright,reconcileViaPlaywright,observeExistingChat} from '.
 import {probeBrowserHealth} from './browser-health.mjs';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
 import {verificationReceipt,canReconcile,expired,scheduleNextCheck,finishUnknown,finishVerified,recheckUnknown,restoreAttemptEvidence} from './reconciliation.mjs';
-import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset} from './core.mjs';
+import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset,hasUnresolvedTask,assertTaskMutable} from './core.mjs';
 import {stableSlotId,recordSlot,safeSlotStatus} from './schedule.mjs';
 import {trackSmartContinuation} from './smart-continuation.mjs';
 import {conversationState,conversationStates,eligibleToSend,nextDue,canObserveTask} from './conversation-fsm.mjs';
@@ -75,7 +75,7 @@ function operation(action,body){
    const t=newTask(body);db.tasks.push(t);persist();return {task:t};
   }
   case 'update':{
-   const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка: сначала дождись результата.');
+   const t=find(body.id);assertTaskMutable(t);
    Object.assign(t,validateInput(body));t.schedule_revision=(t.schedule_revision||0)+1;delete t.watchdog;delete t.verification;pause(t);t.manual_once=false;t.safe_retry_count=0;t.last_error='';persist();return {task:t};
   }
   case 'set_interval_offset':{
@@ -84,18 +84,17 @@ function operation(action,body){
    persist();return {task:t};
   }
   case 'start':{
-   const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка.');
-   if(t.status==='unknown')throw Error('Неизвестная отправка: проверь чат вручную и измени расписание для сброса статуса.');
+   const t=find(body.id);assertTaskMutable(t);
    const other=conversationState(db.tasks.filter(x=>x.id!==t.id),t.url);
    if(other.blocked)throw Error('В этом чате уже есть незавершённая или неизвестная отправка. Проверь её прежде, чем включать новую.');
    delete t.watchdog;arm(t);t.manual_once=false;t.safe_retry_count=0;persist();return {task:t};
   }
   case 'pause':{
-   const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка: безопасная отмена в этот момент недоступна.');
+   const t=find(body.id);assertTaskMutable(t);
    delete t.watchdog;pause(t);t.manual_once=false;persist();return {task:t};
   }
   case 'remove':{
-   const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка.');
+   const t=find(body.id);assertTaskMutable(t);
    db.tasks=db.tasks.filter(x=>x.id!==body.id);persist();return {removed:body.id};
   }
   case 'recheck_unknown':{
@@ -126,14 +125,14 @@ function operation(action,body){
    return {confirmed:true,sendBlocked:true,paused:true};
   }
   case 'clear_history':{
+   if(db.tasks.some(hasUnresolvedTask))throw Error('История содержит данные незавершённой доставки; сначала завершите проверку.');
    const cleared=db.attempts.length;
    db.attempts=[];
    persist();
    return {cleared};
   }
   case 'send_once':{
-   const t=find(body.id);if(['checking','sending','verifying'].includes(t.status))throw Error('Идёт отправка.');
-   if(t.status==='unknown')throw Error('Неизвестная доставка. Проверь чат и измени задание перед новой попыткой.');
+   const t=find(body.id);assertTaskMutable(t);
    if(t.manual_once && t.status==='scheduled')throw Error('Однократная отправка уже ожидает выполнения.');
    const other=conversationState(db.tasks.filter(x=>x.id!==t.id),t.url);
    if(other.blocked)throw Error('В этом разговоре уже есть неподтверждённое действие; отправка другого задания блокирована.');

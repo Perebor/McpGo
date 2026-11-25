@@ -115,6 +115,15 @@ export function localSlotDay(task,iso){
 export function nextAfterRun(task,after=Date.now()){
  const mode=task.schedule_mode||'interval';
  if(mode==='once'||mode==='after_response')return null;
+ if(mode==='interval'&&Number.isInteger(task.interval_offset_seconds)&&
+    task.interval_offset_seconds>=0&&task.interval_offset_seconds<task.interval_seconds&&
+    Number.isFinite(Date.parse(task.active_scheduled_at))){
+  const period=task.interval_seconds*1000,offset=task.interval_offset_seconds*1000;
+  // Anchor to the attempted scheduled slot, not to completion latency.
+  // Missed slots are skipped; no catch-up or duplicate scheduled slot.
+  const earliest=Math.max(Date.parse(task.active_scheduled_at)+period,after+1);
+  return new Date(Math.ceil((earliest-offset)/period)*period+offset).toISOString();
+ }
  return nextCalendarSlot(task,after,mode==='interval'?null:localSlotDay(task,task.active_scheduled_at));
 }
 export function stableSlotId(task,scheduledAt){

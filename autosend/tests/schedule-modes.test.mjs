@@ -131,3 +131,13 @@ test('phase editing never rearms or discards unresolved delivery evidence',()=>{
  delete t.verification;arm(t,1000);assert.throws(()=>setIntervalOffset(t,0));
  const daily=newTask(opts('daily',{time_zone:'UTC',local_time:'10:00'}));assert.throws(()=>setIntervalOffset(daily,0));
 });
+
+test('a completed phased slot does not lose the next grid position to small verification latency',()=>{
+ const a=newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:0}));
+ const b=newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:180}));
+ a.active_scheduled_at='2026-11-25T15:05:00.000Z';
+ b.active_scheduled_at='2026-11-25T15:08:00.000Z';
+ assert.equal(nextAfterRun(a,Date.parse('2026-11-25T15:05:04Z')),'2026-11-25T15:10:00.000Z');
+ assert.equal(nextAfterRun(b,Date.parse('2026-11-25T15:08:04Z')),'2026-11-25T15:13:00.000Z');
+ assert.equal(nextAfterRun(a,Date.parse('2026-11-25T15:21:03Z')),'2026-11-25T15:25:00.000Z');
+});

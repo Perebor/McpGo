@@ -57,3 +57,8 @@ test('release without a valid digest is excluded; upstream is not trusted',()=>{
  const result=latestWindowsPreview([item('2.1.0-preview.2')],'2.1.0-preview.1');
  assert.equal(result.asset.sha256,'a'.repeat(64));assert.equal(result.asset.size,160000000);
 });
+
+test('an empty fork release channel is explicitly distinguished from a current version',()=>{
+ assert.equal(latestWindowsPreview([],'2.1.0-preview.9').reason,'NO_RELEASES');
+ assert.equal(latestWindowsPreview([item('2.1.0-preview.9')],'2.1.0-preview.9').reason,'NO_VERIFIABLE_NEWER_RELEASE');
+});

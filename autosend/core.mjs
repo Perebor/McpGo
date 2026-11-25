@@ -49,6 +49,14 @@ export function validateIntervalOffset(value,interval,mode='interval'){
   throw Error('Смещение: целое число секунд от 0 до интервала (не включительно).');
  return value;
 }
+// Do not erase an unresolved receipt through an unrelated mutation.
+export function hasUnresolvedTask(task){
+ return ['unknown','checking','sending','verifying'].includes(task.status)||
+  !!task.verification||!!task.active_slot_id;
+}
+export function assertTaskMutable(task){
+ if(hasUnresolvedTask(task))throw Error('Незавершённая или неизвестная доставка. Сначала завершите проверку исходной попытки; повтор Send запрещён.');
+}
 export function setIntervalOffset(task,value){
  if(task.enabled||task.status!=='paused'||(task.schedule_mode||'interval')!=='interval'||
     task.manual_once||task.verification||task.active_slot_id)
@@ -204,6 +212,15 @@ export function markUnknownOnBoot(state){
     if(t.manual_once && !t.enabled && t.status==='scheduled'){
       pause(t);t.manual_once=false;
       t.last_error='Однократная отправка отменена при перезапуске. Она не будет запущена без нового подтверждения.';
+    }
+    // A receipt contradicting the nominal inactive/pre-click state is not
+    // permission to discard it. Quarantine the task for owner reconciliation.
+    if((t.status==='checking'&&t.verification)||
+       (!['checking','sending','verifying','unknown'].includes(t.status)&&
+        (t.verification||t.active_slot_id))){
+      t.enabled=false;t.status='unknown';t.next_at=null;t.manual_once=false;
+      t.last_error='Обнаружено незавершённое подтверждение доставки. Повтор Send запрещён.';
+      continue;
     }
     if(t.status==='checking'){
       // No click was committed: re-arm safely after one full interval.

@@ -511,22 +511,41 @@ function item(title,lines,buttons=[],offsetEditor=null){
  }
  return box;
 }
+const previewResults=new Map();
+let taskRefreshRevision=0;
 async function doTask(action,id,extra={}){
+ if(action==='preview'){
+  const pending={pending:true,targetUrl:extra.targetUrl};
+  if(previewResults.get(id)?.pending)return;
+  previewResults.set(id,pending);void refreshTasks();
+  try{
+   const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{action,id});
+   if(previewResults.get(id)===pending)previewResults.set(id,{...result,targetUrl:pending.targetUrl,checkedAt:result.checkedAt||new Date().toISOString()});
+  }catch(e){
+   if(previewResults.get(id)===pending)previewResults.set(id,{ready:false,reason:e.message,targetUrl:pending.targetUrl,checkedAt:new Date().toISOString()});
+  }finally{await refreshTasks()}
+  return;
+ }
+ previewResults.delete(id);
  try{
-  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
+  await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
   await refreshTasks();
-  $('autosend-feedback').textContent=action==='preview'?
-   (result.ready?'Готовность подтверждена. ':'Готовность не подтверждена. ')+
-   String(result.reason||'Нет результата')+' Send не выполнялся.':
+  $('autosend-feedback').textContent=
    action==='confirm_received'?'Получение подтверждено. Расписание на паузе.':
    action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
  }catch(e){$('autosend-feedback').textContent=e.message;message(e.message,true)}
 }
 async function refreshTasks(){
- const list=$('tasks-list');list.replaceChildren();
+ const list=$('tasks-list'),revision=++taskRefreshRevision;
  try{
   const {tasks=[]}=await window.mcpgo.serviceRead('autosend','/api/status');
+  if(revision!==taskRefreshRevision)return;
+  list.replaceChildren();
+  const ids=new Set(tasks.map(t=>t.id));
+  for(const id of previewResults.keys())if(!ids.has(id))previewResults.delete(id);
   for(const t of tasks){
+   const evidence=previewResults.get(t.id);
+   const checked=evidence&&evidence.targetUrl===t.url?evidence:null;
    const pending=['sending','checking','verifying'].includes(t.status);
    const buttons=pending?[]:t.status==='unknown'?
      [{label:'Перепроверить доставку',run:()=>doTask('recheck_unknown',t.id)},
@@ -536,7 +555,7 @@ async function refreshTasks(){
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
      [{label:'Включить',run:()=>doTask('start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];
-   if(!pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id)});
+   if(!pending&&!checked?.pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id,{targetUrl:t.url})});
    const offsetEditor=t.status==='paused'&&!t.enabled&&!t.manual_once&&!t.verification&&!t.active_slot_id&&(t.schedule_mode||'interval')==='interval'?
     {interval:t.interval_seconds,value:t.interval_offset_seconds==null?'':String(t.interval_offset_seconds/60),
      save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
@@ -547,11 +566,15 @@ async function refreshTasks(){
     'Смещение: '+(t.interval_offset_seconds==null?'нет':t.interval_offset_seconds+' сек.'),
     'Последняя успешная доставка: '+(t.last_success_at?new Date(t.last_success_at).toLocaleString('ru-RU')+' (время подтверждения)':'нет'),
     t.last_error?'Причина остановки / последнее событие: '+t.last_error:'',
+    checked?.pending?'Проверяем этот чат без отправки…':checked?
+     'Последняя проверка ('+new Date(checked.checkedAt).toLocaleString('ru-RU')+'): '+
+     (checked.ready?'готовность наблюдалась; ':'готовность не подтверждена; ')+String(checked.reason||'нет результата')+
+     ' Это не разрешение на Send.':'',
     t.status==='unknown'?'Повторная отправка заблокирована. Подтвердите получение только после личной проверки чата.':'',
    ].filter(Boolean),buttons,offsetEditor));
   }
   if(!tasks.length)list.append(item('Расписания отсутствуют',[]));
- }catch(e){list.append(item('Планировщик недоступен',[e.message]))}
+ }catch(e){if(revision===taskRefreshRevision){list.replaceChildren();list.append(item('Планировщик недоступен',[e.message]))}}
 }
 $('refresh-tasks').onclick=refreshTasks;
 $('task-create').onsubmit=async event=>{
@@ -623,7 +646,9 @@ $('check-updates').onclick=async()=>{
     '. Скачайте из Perebor/McpGo, затем проверьте SHA-256 файла по метаданным релиза.';
    const open=$('open-update');open.hidden=false;$('verify-update').hidden=false;
    open.onclick=()=>window.mcpgo.openUpdate(update.url).catch(e=>message(e.message,true));
-  }else updatesStatus.textContent='Новых проверяемых Windows Preview нет. Установлено: '+update.current;
+  }else updatesStatus.textContent=(update.reason==='NO_RELEASES'?
+   'В Perebor/McpGo ещё нет опубликованных Releases. CI-сборка не является релизом. ':
+   'Новых проверяемых Windows Preview нет. ')+'Установлено: '+update.current;
  }catch(error){updatesStatus.textContent='Не удалось проверить обновления: '+error.message}
  finally{button.disabled=false}
 };

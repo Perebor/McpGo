@@ -75,7 +75,7 @@ async function renderAutoSendTask(status,enabled=false,accept=false){
   window:{mcpgo:{serviceRead:async()=>({tasks:[task]})}},
   item:(title,lines,buttons,offsetEditor)=>({title,lines,buttons,offsetEditor}),
   doTask:(action,id,extra)=>calls.push(extra===undefined?{action,id}:{action,id,extra}),
-  confirm:(prompt)=>{prompts.push(prompt);return accept}
+  confirm:(prompt)=>{prompts.push(prompt);return accept},previewResults:new Map(),taskRefreshRevision:0
  };
  await vm.runInNewContext(source[0]+'\nrefreshTasks()',context,{timeout:1000});
  assert.equal(rows.length,1);
@@ -125,10 +125,24 @@ test('paused interval task offers a read-only preview and displays last successf
 test('preview uses only preview action and offset editor is paused-only',async()=>{
  const paused=await renderAutoSendTask('paused');
  paused.buttons.find(b=>b.label==='Проверить без отправки').run();
- assert.deepEqual(paused.calls,[{action:'preview',id:'fixture-task'}]);
+ assert.equal(paused.calls[0].action,'preview');assert.equal(paused.calls[0].id,'fixture-task');assert.equal(paused.calls[0].extra.targetUrl,'https://example.invalid/conversation');
  paused.offsetEditor.save(180);
  assert.equal(paused.calls[1].action,'set_interval_offset');
  assert.equal(paused.calls[1].extra.interval_offset_seconds,180);
  assert.equal((await renderAutoSendTask('unknown')).offsetEditor,null);
  assert.equal((await renderAutoSendTask('scheduled',true)).offsetEditor,null);
+});
+
+test('preview evidence is displayed on the matching task card only',async()=>{
+ const vm=require('node:vm');
+ const source=renderer.match(/async function refreshTasks\(\)\{[\s\S]*?\n\}\n(?=\$\('refresh-tasks'\)\.onclick=refreshTasks;)/);
+ const rows=[],tasks=['a','b'].map(id=>({id,url:'https://example.invalid/'+id,status:'paused',enabled:false,interval_seconds:300}));
+ const previewResults=new Map([['a',{ready:false,targetUrl:'https://example.invalid/a',reason:'fixture missing tab',checkedAt:'2026-11-25T15:00:00.000Z'}]]);
+ const context={$:()=>({replaceChildren(){rows.length=0},append(row){rows.push(row)}}),
+  window:{mcpgo:{serviceRead:async()=>({tasks})}},item:(title,lines)=>({title,lines}),doTask:()=>{},confirm:()=>false,
+  previewResults,taskRefreshRevision:0};
+ await vm.runInNewContext(source[0]+'\nrefreshTasks()',context,{timeout:1000});
+ assert.equal(rows.length,2);
+ assert.ok(rows[0].lines.some(l=>l.includes('fixture missing tab')));
+ assert.ok(!rows[1].lines.some(l=>l.includes('fixture missing tab')));
 });

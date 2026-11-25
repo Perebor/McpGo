@@ -32,7 +32,7 @@ function latestWindowsPreview(rows,current){
  });
  valid.sort((a,b)=>cmp(parseVersion(b.tag_name),parseVersion(a.tag_name)));
  const tag=valid[0]?.tag_name;
- if(!tag)return {current,available:false};
+ if(!tag)return {current,available:false,reason:rows.length===0?'NO_RELEASES':'NO_VERIFIABLE_NEWER_RELEASE'};
  const asset=valid[0].assets.find(a=>a.name==='McpGo.Setup.'+tag.slice(1)+'.exe'&&
   Number.isSafeInteger(a.size)&&a.size>10000000&&a.size<=1073741824&&
   typeof a.digest==='string'&&/^sha256:[a-f0-9]{64}$/.test(a.digest));
