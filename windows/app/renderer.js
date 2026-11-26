@@ -537,10 +537,21 @@ async function doTask(action,id,extra={}){
    action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
  }catch(e){$('autosend-feedback').textContent=e.message;message(e.message,true)}
 }
+function autosendTabHealth(status,task){
+ // A listening local MCP endpoint is not proof of an approved Chrome tab.
+ if(status.browserBackendReachable===false)
+  return 'AutoSend: локальный Playwright backend недоступен. Отправка без проверки вкладки запрещена.';
+ if(status.browserBackendReachable!==true)
+  return 'AutoSend: статус транспорта не подтверждён. Доступность Chrome не установлена.';
+ if(task.browserConfirmed===true)
+  return 'AutoSend: вкладка подтверждена в текущей сессии. Готовность ответа проверяется отдельно.';
+ return 'AutoSend: локальный backend доступен; вкладка не подтверждена. Используйте «Проверить без отправки» для нужного чата.';
+}
 async function refreshTasks(){
  const list=$('tasks-list'),revision=++taskRefreshRevision;
  try{
-  const {tasks=[]}=await window.mcpgo.serviceRead('autosend','/api/status');
+  const status=await window.mcpgo.serviceRead('autosend','/api/status');
+  const {tasks=[]}=status;
   if(revision!==taskRefreshRevision)return;
   list.replaceChildren();
   const ids=new Set(tasks.map(t=>t.id));
@@ -574,6 +585,7 @@ async function refreshTasks(){
      save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
    list.append(item(t.url,[
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
+    autosendTabHealth(status,t),
     String(t.message||'').slice(0,150),
     (t.schedule_mode==='after_response'?
      'Режим: по результату; '+(t.manual_once?'начальный запуск поставлен в очередь':

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {verificationReceipt} from '../reconciliation.mjs';
 
 const CHAT_URL='https://chatgpt.com/c/00000000-0000-4000-8000-000000000001';
@@ -29,7 +30,7 @@ async function startIsolated(state){
   MCPHUB_AUTOSEND_CHECK_MS:'50',
   NODE_ENV:'test'
  };
- const child=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname],
+ const child=spawn(process.execPath,[fileURLToPath(new URL('../server.mjs',import.meta.url))],
   {env,stdio:['ignore','pipe','pipe']});
  let stdout='',stderr='';
  child.stdout.on('data',v=>stdout+=v.toString().slice(0,1000));

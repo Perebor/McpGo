@@ -137,7 +137,7 @@
 | `autosend/preview-check.mjs` | 80 | `d0181e58cf7ef9e4` |
 | `autosend/reconciliation.mjs` | 166 | `0476f93271a06880` |
 | `autosend/schedule.mjs` | 146 | `04445c15bf9cea3d` |
-| `autosend/server.mjs` | 626 | `87dd5940c961682c` |
+| `autosend/server.mjs` | 627 | `d3e5aeee5a4925ba` |
 | `autosend/simulated-browser.mjs` | 172 | `de94c11634d4d9c0` |
 | `autosend/smart-continuation.mjs` | 35 | `4bc9841d3367a1df` |
 | `autosend/smart-v2-browser.mjs` | 82 | `2c32f7cb8d4a686f` |
@@ -150,13 +150,13 @@
 | `autosend/tests/conversation-fsm.test.mjs` | 72 | `6653531f6202cb9c` |
 | `autosend/tests/core.test.mjs` | 89 | `e4378594697f36b5` |
 | `autosend/tests/extension-delivery.test.mjs` | 367 | `37596365e2f764dd` |
-| `autosend/tests/local-security.test.mjs` | 49 | `b9e3b0cda01ba5bf` |
+| `autosend/tests/local-security.test.mjs` | 63 | `fc6ba1f736a713ac` |
 | `autosend/tests/mutation-guard.test.mjs` | 62 | `01f940841ac5132f` |
 | `autosend/tests/no-tab-creation.test.mjs` | 18 | `96c1c6773034c1f4` |
 | `autosend/tests/preview-check.test.mjs` | 71 | `9303b2d1fe909246` |
 | `autosend/tests/reconciliation.test.mjs` | 245 | `b57ff6f7eb74987d` |
 | `autosend/tests/schedule-modes.test.mjs` | 149 | `a0d7187385e8116a` |
-| `autosend/tests/server-http.test.mjs` | 270 | `90e4175f82bb7452` |
+| `autosend/tests/server-http.test.mjs` | 271 | `b2923aadcb7b6067` |
 | `autosend/tests/simulator.test.mjs` | 246 | `5a291fd7b5cd6b07` |
 | `autosend/tests/stream-monitor.test.mjs` | 110 | `7ad1d8b006a19785` |
 | `messaging/hub.py` | 429 | `fb1a5a65ed6d5e54` |
@@ -192,7 +192,7 @@
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
 | `tools/generate_source_inventory.py` | 73 | `f64469474bf7681a` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
-| `windows/HOTFIX_RELEASE_MANIFEST.json` | 30 | `8d47d3ae088e3c7e` |
+| `windows/HOTFIX_RELEASE_MANIFEST.json` | 30 | `c220c8bbb72754c3` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
 | `windows/app/index.html` | 107 | `ec2b70629a666c84` |
@@ -200,7 +200,7 @@
 | `windows/app/main.cjs` | 237 | `d984565e9d916c6f` |
 | `windows/app/onboarding.cjs` | 63 | `bc4191e562a54379` |
 | `windows/app/preload.cjs` | 32 | `39e234ed8e4e2386` |
-| `windows/app/renderer.js` | 682 | `977b15ba698cc35f` |
+| `windows/app/renderer.js` | 694 | `eb3ee4ccaf51e9fe` |
 | `windows/app/runtime.cjs` | 499 | `f46635fee14210f4` |
 | `windows/app/settings.cjs` | 129 | `b3872286f24021ff` |
 | `windows/app/skills.cjs` | 21 | `92cadd2cdc79f687` |
@@ -208,9 +208,10 @@
 | `windows/app/updates.cjs` | 87 | `2f002f3e87959bb7` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `c29057b1948f03f2` |
-| `windows/package.json` | 169 | `d6001c8687e9563f` |
+| `windows/package-lock.json` | 3682 | `604b384663ab0fae` |
+| `windows/package.json` | 169 | `4a5908e9578657c6` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
+| `windows/tests/autosend-browser-tristate.test.cjs` | 102 | `0ced6597d25fa5e6` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
@@ -225,10 +226,10 @@
 | `windows/tests/settings.test.cjs` | 122 | `fd68e57b4b0c2677` |
 | `windows/tests/skills.test.cjs` | 41 | `afb59e0397546192` |
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
-| `windows/tests/ui-parity.test.cjs` | 154 | `be52ce1cc6d45a5a` |
+| `windows/tests/ui-parity.test.cjs` | 156 | `8a6bd601e1b31940` |
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
 
-Всего файлов в выбранном source-only срезе: **222**.
+Всего файлов в выбранном source-only срезе: **223**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

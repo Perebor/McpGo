@@ -66,6 +66,7 @@ function view(){return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_effici
  deliverySupported:true,deliveryReason:!backendOnline?'Ожидание Playwright Extension AutoSend: '+(backendLastError||'проверяем подключение'):
   browserOnline?'Выделенная группа AutoSend доступна; проверьте выбранный чат.':
   'Выделенный Playwright backend запущен; выберите чат через расширение.',
+ browserBackendReachable:backendOnline,
  extensionConnected:backendOnline&&browserOnline,extensionTransport:'Playwright MCP · расширение Chrome',
  // Native client decodes this as a structured ChromePageDiagnostic, not a string.
  extensionDiagnostic:null,extensionLastSeen:browserLastSeen,
