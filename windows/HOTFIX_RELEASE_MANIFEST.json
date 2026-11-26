@@ -1,9 +1,9 @@
 {
-  "version": "2.1.0-preview.11-local.1",
+  "version": "2.1.0-preview.12-local.1",
   "kind": "UNSIGNED LOCAL PREVIEW, NOT OFFICIAL GH RELEASE",
   "head": "fc94e3f86c56a353fd2924d7da821a75f9397b5c",
-  "branch": "release/mcpgo-preview11-local-20261126",
-  "appAsarSha": "2ff441d663429cf12b36184b7f8502ba45477ad05ce73bbe9823fedab9c11712",
+  "branch": "work/mcpgo-github-ci-auto-20261126",
+  "appAsarSha": "3c322fc225755bf4092962e5c24f435c0edea82243f7d5cd83766f8d9959448e",
   "runtimeFilesCopied": 59,
   "runtimeFilesChangedFromBase": 59,
   "appEntriesExtracted": 19,
@@ -13,10 +13,17 @@
     "tunnel/tunnel-client.exe": "92812d43cbbf030f2bee30d9ad1bef26884dcf12d2ccaefc60c40fa8122501db"
   },
   "autosend": {
-    "server.mjs": "cc7965a71a497a067725e6b25b04e71e0e6ef486805d1c2bed9e5120f7d9dc74",
+    "server.mjs": "87dd5940c961682cc83c2d3171f86db29cc3cf46facc9015786f1a8d1c2bab2e",
     "smart-v2.mjs": "e7766ef73db7cb8d227e24075aaa67c19c6320d03fb49a40379d409e36fcff03",
-    "persistent-tabs.mjs": "22822279ed0b9804e069251db925e0a68c77426eff814658a33d503dc3730d43"
+    "persistent-tabs.mjs": "22822279ed0b9804e069251db925e0a68c77426eff814658a33d503dc3730d43",
+    "github-ci-evidence.mjs": "d48f96bd93609337bea6979e5afc466a04e5b9dc931c6f13c2cd154e9e564d39",
+    "smart-work-ready.mjs": "6b51ed3c7b3c7eb6fb9b079c22fae4605a34108699b96fd1636ad4b38e082e5a",
+    "smart-v2-browser.mjs": "2c32f7cb8d4a686fe0928ef4aeefee6b6810a0aee2a428e1617ab8efa755a851"
   },
   "configSource": "exact currently installed preview.10 runtime, user data in APPDATA not bundled",
-  "builtAtLocal": "2026-11-26T15:08:55.143Z"
+  "builtAtLocal": "2026-11-26T16:30:30.448Z",
+  "baseCommit": "f66984c3db94a5188dd42181a6f2164e4485f8bb",
+  "status": "verified_unsigned_NSIS_package_ready",
+  "installerSha256": "05348f359f9ec64351749fcef9645ed4e25acfcf9d0d3cc7b8cbc11bc145aec1",
+  "installerBytes": 169061011
 }

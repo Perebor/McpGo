@@ -13,7 +13,8 @@ import {deferBusyIntervalRetry,confirmedBusyRetryReason} from './busy-retry.mjs'
 import {chooseSmartAction,smartTaskMessage,promoteSmartReceipt,validateSmartConfiguration,resumeSmartTaskFromOwnerPause} from './smart-v2.mjs';
 import {readSmartBrowserOutcome} from './smart-v2-browser.mjs';
 import {requestForceRemove,finalizeForcedRemovals,visibleTasks} from './force-remove.mjs';
-import {assessWorkReadiness,commitWorkReadiness,workEfficiency} from './smart-work-ready.mjs';
+import {assessWorkReadiness,commitWorkReadiness,workEfficiency,shouldRetryExternalVerification,rearmVerifiedExternalWork} from './smart-work-ready.mjs';
+import {GitHubCIObserver} from './github-ci-evidence.mjs';
 import {TabApproval,mayAutoObserve,mayAutoDispatch} from './tab-approval.mjs';
 import {PersistentTabRecovery,loadTabConsent,allowedTarget} from './persistent-tabs.mjs';
 import {autosendMcp} from './browser-client.mjs';
@@ -21,6 +22,7 @@ import {autosendMcp} from './browser-client.mjs';
 const PORT=Number(process.env.MCPHUB_AUTOSEND_PORT || 8972);
 let backendOnline=false;let backendLastError='';let browserOnline=false;let browserLastError='';let browserLastSeen=null;let workerBusy=false;
 const approvedTabs=new TabApproval();
+const githubCI=new GitHubCIObserver();
 const tabRecovery=new PersistentTabRecovery({
  client:autosendMcp(),config:null,approval:approvedTabs,
  verify:t=>checkPreview(t,(task,options)=>observeExistingChat(task,{...options,client:autosendMcp()}))
@@ -293,14 +295,21 @@ async function monitorContinuations(){
     pause(t);t.last_error='В разговоре сообщение владельца; событийный AutoSend остановлен.';
     persist();return true;
    }
-   const decision=assessWorkReadiness(t,observed);
+   const externalEvidence=await githubCI.check(t,observed);
+   const decision=assessWorkReadiness(t,observed,{externalEvidence});
    if(decision.pause){
     pause(t);t.smart_v2_pause_reason=decision.reason;
     t.last_error='Smart V2: работа заблокирована или требуется решение владельца.';
     persist();return true;
    }
    if(decision.ready&&commitWorkReadiness(t,decision)){
-    t.last_error='Готовность по отчёту задачи (self-report); следующий Send ожидает повторной read-only проверки.';
+    t.last_error=decision.evidence.source==='github_ci_verified'
+     ?'GitHub PR и CI подтверждены независимо; ждём контрольную проверку перед Send.'
+     :'Готовность по отчёту задачи (self-report); следующий Send ожидает повторной read-only проверки.';
+    persist();return true;
+   }
+   if(rearmVerifiedExternalWork(t,observed,externalEvidence)){
+    t.last_error='GitHub PR/CI повторно подтверждены; восстановлена очередь без нового Send.';
     persist();return true;
    }
    return false;
@@ -404,11 +413,15 @@ async function runScheduled(){
    if(t.force_remove_requested_at)return true;
    let decision;
    if(t.smart_result_gate&&t.schedule_mode==='after_response'&&!t.manual_once){
-    const check=assessWorkReadiness(t,observed,{forDispatch:true});
+    const externalEvidence=await githubCI.check(t,observed,{forDispatch:true});
+    const check=assessWorkReadiness(t,observed,{forDispatch:true,externalEvidence});
     if(!check.ready){
      if(check.pause||observed.kind==='foreign_user'){
       pause(t);t.smart_v2_pause_reason=check.reason||'foreign_user';
       t.last_error='Событийный Smart V2 остановлен: '+(check.reason||'вмешательство владельца');
+     }else if(shouldRetryExternalVerification(t,observed)){
+      t.next_at=new Date(Date.now()+60000).toISOString();
+      t.last_error='GitHub CI: временно нет повторной проверки; retry через 60 секунд без Send.';
      }else if(['busy','unavailable','unstable'].includes(observed.kind)){
       t.next_at=new Date(Date.now()+60000).toISOString();
       t.last_error='Событийный Smart V2: временно занято, повторная проверка через минуту без Send.';
