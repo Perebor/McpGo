@@ -103,18 +103,24 @@ test('reboot does not auto-continue a stale smart response',()=>{
 });
 
 
-test('optional interval phase separates schedules on a fixed UTC grid without shortening the interval',()=>{
+test('optional phase keeps interval spacing after the immediate first enabled attempt',()=>{
  const now=Date.parse('2026-11-25T15:00:00Z');
  const a=newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:0}));
  const b=newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:180}));
  assert.equal(a.enabled,false);assert.equal(b.enabled,false);
  arm(a,now);arm(b,now);
- assert.equal(a.next_at,'2026-11-25T15:05:00.000Z');
- assert.equal(b.next_at,'2026-11-25T15:08:00.000Z');
- assert.equal(nextAfterRun(b,Date.parse('2026-11-25T15:08:01Z')),'2026-11-25T15:18:00.000Z');
- assert.equal(nextAfterRun(a,Date.parse('2026-11-25T15:05:00Z')),'2026-11-25T15:10:00.000Z');
+ // Owner Start always queues the initial attempt immediately, regardless of phase.
+ assert.equal(a.next_at,'2026-11-25T15:00:00.000Z');
+ assert.equal(b.next_at,'2026-11-25T15:00:00.000Z');
+ a.active_scheduled_at=a.next_at;b.active_scheduled_at=b.next_at;
+ assert.equal(nextAfterRun(a,now+1000),'2026-11-25T15:05:00.000Z');
+ assert.equal(nextAfterRun(b,now+1000),'2026-11-25T15:08:00.000Z');
+ a.active_scheduled_at='2026-11-25T15:05:00.000Z';
+ b.active_scheduled_at='2026-11-25T15:08:00.000Z';
+ assert.equal(nextAfterRun(a,Date.parse('2026-11-25T15:05:01Z')),'2026-11-25T15:10:00.000Z');
+ assert.equal(nextAfterRun(b,Date.parse('2026-11-25T15:08:01Z')),'2026-11-25T15:13:00.000Z');
  const legacy=newTask(opts('interval',{interval_seconds:300}));
- arm(legacy,now+1000);assert.equal(legacy.next_at,'2026-11-25T15:05:01.000Z');
+ arm(legacy,now+1000);assert.equal(legacy.next_at,'2026-11-25T15:00:01.000Z');
  for(const offset of [-1,300,0.5,'180',true])
   assert.throws(()=>newTask(opts('interval',{interval_seconds:300,interval_offset_seconds:offset})));
 });

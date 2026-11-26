@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import * as core from '../core.mjs';
-const source=fs.readFileSync(new URL('../server.mjs',import.meta.url),'utf8').match(/function operation\(action,body\)\{[\s\S]*?\n\}\n(?=function expireAmbiguous\()/);
+const source=fs.readFileSync(new URL('../server.mjs',import.meta.url),'utf8').match(/function operation\(action,body\)\{[\s\S]*?\r?\n\}\r?\n(?=function expireAmbiguous\()/);
 assert.ok(source,'server operation not found');
 const url='https://chatgpt.com/c/00000000-0000-4000-8000-000000000001';
 const body={url,message:'fixture',interval_seconds:300};

@@ -31,7 +31,9 @@ function fake(initial={}){
  return {client,calls,state,commit:()=>{committed=true;return 'autosend:00000000-0000-4000-8000-000000000001';}};
 }
 test('readiness fails closed for busy agent, draft, wrong conversation and ambiguous page',()=>{
- for (const p of [{stop:true},{busyText:true},{editorText:'human draft'}])assert.equal(classifyAgent({...page,...p},url).kind,'busy');
+ for (const p of [{stop:true},{busyText:true}])assert.equal(classifyAgent({...page,...p},url).kind,'busy');
+ // Stable drafts may be replaced only after the guarded preflight; active generation never is.
+ assert.equal(classifyAgent({...page,editorText:'stable human draft'},url).kind,'ready');
  for (const p of [{url:'https://chatgpt.com/'},{editorCount:0},{mainLength:5,turnCount:0},{genericTitle:true},{login:true}])assert.equal(classifyAgent({...page,...p},url).kind,'deferred');
  assert.equal(classifyAgent(page,url).kind,'ready');
 });
