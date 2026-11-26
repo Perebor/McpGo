@@ -63,10 +63,16 @@ test('sidebar tools use fixed allowlisted Electron handlers, not renderer filesy
 
 
 // Execute the actual renderer task-list function against a synthetic UI and API.
+function extractRefreshTasks(){
+ const start=renderer.indexOf('async function refreshTasks(){');
+ const end=renderer.indexOf("$('refresh-tasks').onclick=refreshTasks;",start);
+ assert.ok(start>=0&&end>start,'task renderer not found');
+ return renderer.slice(start,end);
+}
 // No network, browser automation, or live schedules are touched.
 async function renderAutoSendTask(status,enabled=false,accept=false){
  const vm=require('node:vm');
- const source=renderer.match(/async function refreshTasks\(\)\{[\s\S]*?\n\}\n(?=\$\('refresh-tasks'\)\.onclick=refreshTasks;)/);
+ const source=extractRefreshTasks();
  assert.ok(source,'task renderer not found');
  const rows=[],calls=[],prompts=[];
  const task={id:'fixture-task',url:'https://example.invalid/conversation',status,enabled,interval_seconds:300};
@@ -77,13 +83,13 @@ async function renderAutoSendTask(status,enabled=false,accept=false){
   doTask:(action,id,extra)=>calls.push(extra===undefined?{action,id}:{action,id,extra}),
   confirm:(prompt)=>{prompts.push(prompt);return accept},previewResults:new Map(),taskRefreshRevision:0
  };
- await vm.runInNewContext(source[0]+'\nrefreshTasks()',context,{timeout:1000});
+ await vm.runInNewContext(source+'\nrefreshTasks()',context,{timeout:1000});
  assert.equal(rows.length,1);
  return {buttons:rows[0].buttons,lines:rows[0].lines,offsetEditor:rows[0].offsetEditor,calls,prompts};
 }
 test('UNKNOWN exposes only the manual receipt and verification-only reconciliation actions',async()=>{
  const ui=await renderAutoSendTask('unknown');
- assert.deepEqual(Array.from(ui.buttons,b=>b.label),['Перепроверить доставку','Подтвердить получение','Проверить без отправки']);
+ assert.deepEqual(Array.from(ui.buttons,b=>b.label),['Перепроверить доставку','Подтвердить получение','Проверить без отправки','Удалить принудительно']);
  assert.equal(ui.calls.length,0);
  assert.ok(ui.lines.some(line=>line.includes('Повторная отправка заблокирована')));
  ui.buttons[0].run();
@@ -102,14 +108,14 @@ test('manual receipt requires affirmative user attestation; cancel performs no a
 test('in-flight tasks remain locked; paused and scheduled controls are unchanged',async()=>{
  for(const status of ['sending','checking','verifying']){
   const ui=await renderAutoSendTask(status,true);
-  assert.equal(ui.buttons.length,0);
+  assert.deepEqual(Array.from(ui.buttons,b=>b.label),['Удалить принудительно']);
   assert.equal(ui.calls.length,0);
  }
  const paused=await renderAutoSendTask('paused');
- assert.deepEqual(Array.from(paused.buttons,b=>b.label),['Включить','Удалить','Проверить без отправки']);
+ assert.deepEqual(Array.from(paused.buttons,b=>b.label),['Включить','Удалить','Проверить без отправки','Удалить принудительно']);
  assert.equal(paused.calls.length,0);
  const scheduled=await renderAutoSendTask('scheduled',true);
- assert.deepEqual(Array.from(scheduled.buttons,b=>b.label),['Пауза','Проверить без отправки']);
+ assert.deepEqual(Array.from(scheduled.buttons,b=>b.label),['Пауза','Проверить без отправки','Удалить принудительно']);
 });
 
 
@@ -135,13 +141,13 @@ test('preview uses only preview action and offset editor is paused-only',async()
 
 test('preview evidence is displayed on the matching task card only',async()=>{
  const vm=require('node:vm');
- const source=renderer.match(/async function refreshTasks\(\)\{[\s\S]*?\n\}\n(?=\$\('refresh-tasks'\)\.onclick=refreshTasks;)/);
+ const source=extractRefreshTasks();
  const rows=[],tasks=['a','b'].map(id=>({id,url:'https://example.invalid/'+id,status:'paused',enabled:false,interval_seconds:300}));
  const previewResults=new Map([['a',{ready:false,targetUrl:'https://example.invalid/a',reason:'fixture missing tab',checkedAt:'2026-11-25T15:00:00.000Z'}]]);
  const context={$:()=>({replaceChildren(){rows.length=0},append(row){rows.push(row)}}),
   window:{mcpgo:{serviceRead:async()=>({tasks})}},item:(title,lines)=>({title,lines}),doTask:()=>{},confirm:()=>false,
   previewResults,taskRefreshRevision:0};
- await vm.runInNewContext(source[0]+'\nrefreshTasks()',context,{timeout:1000});
+ await vm.runInNewContext(source+'\nrefreshTasks()',context,{timeout:1000});
  assert.equal(rows.length,2);
  assert.ok(rows[0].lines.some(l=>l.includes('fixture missing tab')));
  assert.ok(!rows[1].lines.some(l=>l.includes('fixture missing tab')));

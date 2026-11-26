@@ -40,7 +40,7 @@ export function classifyChatState(page,expectedUrl,now=Date.now()) {
    ?result('stalled','GENERATION_SUSPECTED_STALLED','Индикатор ответа виден, но нет подтверждённых изменений более 12 минут; отправка запрещена')
    :result('busy','GENERATION_ACTIVE_OR_UNCERTAIN','Ответ ещё активен либо индикатор генерации не исчез; отправка отложена');
  }
- if(String(page.editorText||'').trim())return result('busy','USER_DRAFT_PRESENT','В чате есть пользовательский черновик; его не трогаем');
+ // Owner-selected AutoSend may overwrite a stable draft. Active generation remains blocked.
  if(!page.editorSelector)return result('deferred','EDITOR_NOT_FOUND','Не удалось однозначно определить поле ввода');
  return result('ready','READY_TO_CHECK','Видимые признаки занятости отсутствуют; требуется повторная проверка');
 }
@@ -56,7 +56,7 @@ export function sameReadySnapshot(a,b) {
   (serverIdle||Number(a.assistantRevision||0)===Number(b.assistantRevision||0)) &&
   (!a.streamStatus&&!b.streamStatus || serverIdle) &&
   (a.streamSequence===undefined||a.streamSequence===b.streamSequence) &&
-  !String(a.editorText||'').trim()&&!String(b.editorText||'').trim();
+  String(a.editorText||'')===String(b.editorText||'');
 }
 /** Structured diagnostics without message text, URL, screenshots or tokens. */
 export function safeEvidence(e={}) {

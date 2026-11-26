@@ -24,8 +24,7 @@ export function diagnosePreview(page){
  if(!p.urlValid)return result('WRONG_CONVERSATION','Не подтверждено совпадение нужного разговора.');
  if(p.pageReady!=='complete')return result('PAGE_NOT_READY','Страница разговора ещё загружается.');
  if(p.editorCount!==1)return result('EDITOR_NOT_READY','Поле ввода не обнаружено однозначно.');
- if(String(p.editorText||'').trim())return result('USER_DRAFT_PRESENT',
-  'В поле ввода уже есть текст; McpGo не будет его перезаписывать.');
+ // Stable drafts are allowed: preview does not edit the field.
  if(p.connectionInterrupted)return result('CONNECTION_INTERRUPTED',
   'Разговор сообщает об обрыве соединения.');
  if(streamBusy(p)||p.stop||p.busyText)return result('GENERATION_ACTIVE_OR_UNCERTAIN',
@@ -39,14 +38,14 @@ export function diagnosePreview(page){
   return result('STREAM_STATUS_UNKNOWN',hint+' Отправка запрещена.',
    {retryable:p.streamStatus==='UNKNOWN'||p.streamStatus===undefined});
  }
- return result('READY_TO_CHECK','Чат найден; ответ завершён и поле ввода свободно.',{ready:true});
+ return result('READY_TO_CHECK','Чат найден; ответ завершён. Стабильный черновик разрешён для AutoSend.',{ready:true});
 }
 /** Two separate COMPLETE observations with unchanged conversation/stream state. */
 export function samePreviewReady(a,b){
  if(!a||!b||!diagnosePreview(a).ready||!diagnosePreview(b).ready)return false;
  const sameStream=a.streamSequence===b.streamSequence||
   (!Number.isInteger(a.streamSequence)&&!Number.isInteger(b.streamSequence));
- return sameStream&&a.userCount===b.userCount&&
+ return sameStream&&String(a.editorText||'')===String(b.editorText||'')&&a.userCount===b.userCount&&
   String(a.lastUserHash||'')===String(b.lastUserHash||'')&&
   String(a.lastUserId||'')===String(b.lastUserId||'');
 }

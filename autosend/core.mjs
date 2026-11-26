@@ -180,7 +180,10 @@ export function getOrCreateControlToken(file=path.join(path.dirname(stateFile),'
   return token;
 }
 export function arm(task,now=Date.now()) {
-  const next=nextCalendarSlot(task,now);
+  // Enabling an interval schedule arms the first attempt immediately.
+  // Subsequent attempts still use the configured cadence and safety checks.
+  const next=(task.schedule_mode||'interval')==='interval'
+    ?new Date(now).toISOString():nextCalendarSlot(task,now);
   if(next===null && task.schedule_mode!=='after_response')
     throw Error('В расписании нет будущих запусков. Проверь дату и время.');
   task.enabled=true;task.status='scheduled';task.last_error='';task.next_at=next;
@@ -194,6 +197,17 @@ export function rescheduleAfterAttempt(task,now=Date.now()){
   if(next){task.status='scheduled';task.next_at=next;if(!manualOnly)task.enabled=true;}
   else if(task.schedule_mode==='after_response'&&!manualOnly){
     task.status='scheduled';task.next_at=null;
+    // A committed work report has not been consumed by a confirmed pre-click
+    // refusal. Revalidate its exact fingerprint after a bounded delay.
+    // Never rearm when a click receipt exists or on a manual first-run.
+    if(!task.verification&&!task.manual_once&&task.smart_result_gate===true&&
+       task.smart_v2===true&&task.smart_v2_last_action&&
+       /^[a-f0-9]{64}$/.test(String(task.smart_work_ready_marker||''))&&
+       ['CONTINUE_DEVELOPMENT','FIX_DEFECT'].includes(task.smart_work_expected_action))
+      task.next_at=new Date(now+60000).toISOString();
+    // A confirmed pre-click deferral must not strand the owner's first-run
+    // request. Never clear it while there is an unresolved click receipt.
+    if(!task.verification)task.manual_once=false;
   }else{pause(task);task.manual_once=false;}
 }
 export function pause(task){task.enabled=false;task.next_at=null;task.status='paused'}
@@ -207,7 +221,12 @@ export function markUnknownOnBoot(state){
     // response afterwards. Do not auto-continue stale busy/ready markers.
     if(t.schedule_mode==='after_response'){
       t.smart_seen_busy=false;t.smart_ready_since=null;t.smart_last_marker=null;
-      if(t.status==='scheduled')t.next_at=null;
+      // Event-ready report was durably committed before shutdown: preserve
+      // the due slot, but runScheduled still revalidates fingerprint and
+      // safety before any Send. Idle/no-report does not auto-arm.
+      const readyEvent=t.smart_result_gate===true&&!!t.smart_work_ready_marker&&
+       !!t.smart_work_expected_action&&t.status==='scheduled'&&!!t.next_at;
+      if(t.status==='scheduled'&&!readyEvent)t.next_at=null;
     }
     if(t.manual_once && !t.enabled && t.status==='scheduled'){
       pause(t);t.manual_once=false;
@@ -221,6 +240,14 @@ export function markUnknownOnBoot(state){
       t.enabled=false;t.status='unknown';t.next_at=null;t.manual_once=false;
       t.last_error='Обнаружено незавершённое подтверждение доставки. Повтор Send запрещён.';
       continue;
+    }
+    // An explicit manual kick on an ENABLED result-driven task is not an
+    // automatically replayable event. If it was only queued (no click/receipt)
+    // before restart, retire the queue flag so the owner can restart it.
+    if(t.manual_once&&t.enabled&&t.status==='scheduled'&&
+       t.schedule_mode==='after_response'&&!t.verification&&!t.active_slot_id){
+      t.manual_once=false;t.next_at=null;
+      t.last_error='Ручной запуск отменён перезапуском до Send. Проверь чат и запусти заново при необходимости.';
     }
     if(t.status==='checking'){
       // No click was committed: re-arm safely after one full interval.

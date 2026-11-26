@@ -58,6 +58,15 @@ test('release without a valid digest is excluded; upstream is not trusted',()=>{
  assert.equal(result.asset.sha256,'a'.repeat(64));assert.equal(result.asset.size,160000000);
 });
 
+
+
+test('local unsigned hotfix version can still check for a later official preview',()=>{
+ const {parseVersion}=require('../app/updates.cjs');
+ assert.deepEqual(parseVersion('2.1.0-preview.11-local.1'),[2,1,0,11]);
+ assert.equal(latestWindowsPreview([item('2.1.0-preview.12')],'2.1.0-preview.11-local.1').version,'2.1.0-preview.12');
+ assert.equal(latestWindowsPreview([item('2.1.0-preview.12-local.1')],'2.1.0-preview.11-local.1').available,false);
+});
+
 test('an empty fork release channel is explicitly distinguished from a current version',()=>{
  assert.equal(latestWindowsPreview([],'2.1.0-preview.9').reason,'NO_RELEASES');
  assert.equal(latestWindowsPreview([item('2.1.0-preview.9')],'2.1.0-preview.9').reason,'NO_VERIFIABLE_NEWER_RELEASE');

@@ -139,10 +139,25 @@ export function normalizedMessage(value) {
  return String(value||'').replace(/[\u200b-\u200d\ufeff]/g,'')
    .replace(/\s+/g,' ').trim();
 }
+/** Compare a complete user bubble with the original sent text.
+ * ChatGPT removes inline-code backticks in its rendered user bubble and may
+ * append a UI-only "… Показать ещё" toggle. No prefix/fuzzy matching:
+ * the full remaining text MUST match character-for-character. This is used
+ * only POST-click; composer/preflight equality stays byte-strict.
+ */
+export function renderedUserTextMatches(displayed,source) {
+ const target=normalizedMessage(source),actual=normalizedMessage(displayed);
+ if(!target||!actual)return false;
+ if(target===actual)return true;
+ const suffix=/\s*…\s*(?:Показать ещё|Show more)$/u;
+ // Expanded bubbles have no UI suffix, but still omit Markdown backticks.
+ const content=actual.replace(suffix,'').trim();
+ return content===target.replace(/`/g,'');
+}
 export function confirmsNewUserMessage(before,after,message){
  const target=normalizedMessage(message);
  if(!target || !after || !before || !Number.isInteger(after.userCount))return false;
- if(normalizedMessage(after.lastUserText)!==target)return false;
+ if(!renderedUserTextMatches(after.lastUserText,target))return false;
  if(after.userCount>before.userCount)return true;
  // A changed DOM ID alone is insufficient when the previous user message
  // had the exact same text: a re-render may have changed a generated ID.
@@ -164,7 +179,7 @@ export function confirmsNewUserMessage(before,after,message){
 export function deliveryEvidence(before,after,message,expectedUrl,previousEvidence=null){
  const target=normalizedMessage(message);
  const urlMatched=!!after&&sameChatGPTConversation(after.url,expectedUrl);
- const lastTextMatched=!!target&&normalizedMessage(after?.lastUserText)===target;
+ const lastTextMatched=!!target&&renderedUserTextMatches(after?.lastUserText,target);
  const countedProof=urlMatched&&confirmsNewUserMessage(before,after,message);
  const beforeCount=Number.isInteger(before?.userCount)?before.userCount:null;
  const afterCount=Number.isInteger(after?.userCount)?after.userCount:null;
