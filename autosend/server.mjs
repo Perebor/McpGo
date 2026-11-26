@@ -16,12 +16,19 @@ import {requestForceRemove,finalizeForcedRemovals,visibleTasks} from './force-re
 import {assessWorkReadiness,commitWorkReadiness,workEfficiency,shouldRetryExternalVerification,rearmVerifiedExternalWork} from './smart-work-ready.mjs';
 import {GitHubCIObserver} from './github-ci-evidence.mjs';
 import {TabApproval,mayAutoObserve,mayAutoDispatch} from './tab-approval.mjs';
+import {BrowserGenerationGuard} from './browser-generation.mjs';
 import {PersistentTabRecovery,loadTabConsent,allowedTarget} from './persistent-tabs.mjs';
 import {autosendMcp} from './browser-client.mjs';
 
 const PORT=Number(process.env.MCPHUB_AUTOSEND_PORT || 8972);
 let backendOnline=false;let backendLastError='';let browserOnline=false;let browserLastError='';let browserLastSeen=null;let workerBusy=false;
 const approvedTabs=new TabApproval();
+const browserGenerationGuard=new BrowserGenerationGuard();
+function invalidateForBrowserGeneration(){
+ const changed=browserGenerationGuard.sync(approvedTabs);
+ if(changed)browserOnline=false;
+ return changed;
+}
 const githubCI=new GitHubCIObserver();
 const tabRecovery=new PersistentTabRecovery({
  client:autosendMcp(),config:null,approval:approvedTabs,
@@ -60,7 +67,7 @@ function historySummary(){
  }
  return counts;
 }
-function view(){return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_efficiency:workEfficiency(t),browserConfirmed:approvedTabs.has(t.id)})),attempts:db.attempts.slice(-100).reverse(),
+function view(){invalidateForBrowserGeneration();return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_efficiency:workEfficiency(t),browserConfirmed:approvedTabs.has(t.id)})),attempts:db.attempts.slice(-100).reverse(),
  historySummary:historySummary(),
  conversations:conversationStates(visibleTasks(db)),
  deliverySupported:true,deliveryReason:!backendOnline?'Ожидание Playwright Extension AutoSend: '+(backendLastError||'проверяем подключение'):
@@ -72,15 +79,16 @@ function view(){return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_effici
  extensionDiagnostic:null,extensionLastSeen:browserLastSeen,
  extensionVersion:'Playwright Extension',requiredExtensionVersion:'Playwright Extension',busyTask:db.tasks.find(t=>['checking','sending','verifying'].includes(t.status))?.id||'',serverTime:now()};}
 async function previewTask(id){
+ invalidateForBrowserGeneration();
  if(workerBusy)return {ready:false,reason:'Браузер занят текущей операцией.',sendBlocked:true};
  const t=find(id);
  workerBusy=true;
  try{
   let health;
   try{health=await probeBrowserHealth();}
-  catch(e){return {ready:false,chatFound:false,
+  catch(e){approvedTabs.update(t.id,false);browserOnline=approvedTabs.size>0;return {ready:false,chatFound:false,
     reason:'Выделенный Playwright backend недоступен: '+String(e.message||e).slice(0,120),sendBlocked:true};}
-  if(!health.connected)return {ready:false,chatFound:false,reason:health.reason,sendBlocked:true};
+  if(!health.connected){approvedTabs.update(t.id,false);browserOnline=approvedTabs.size>0;return {ready:false,chatFound:false,reason:health.reason,sendBlocked:true};}
   const result=await checkPreview(t,observeExistingChat);
   approvedTabs.update(t.id,result.chatFound===true);
   browserOnline=approvedTabs.size>0;
@@ -395,17 +403,19 @@ async function reconcilePending(){
 // Playwright Extension a 'read-only' browser_tabs(list) can open a fresh
 // chrome-extension://.../connect.html and spawn another group every 30 seconds.
 async function checkExtensionBackend(){
- // Passive port check only; never opens a Chrome tab or extension group.
+ // Passive port check and local backend process epoch: no Chrome browser tools.
+ invalidateForBrowserGeneration();
  try{
   const health=await probeBrowserHealth();
   backendOnline=health.connected;
   backendLastError=health.reason;
   if(!backendOnline){approvedTabs.reset();browserOnline=false;}
- }catch(e){backendOnline=false;browserOnline=false;backendLastError='Не удалось проверить локальный backend';}
+ }catch(e){backendOnline=false;browserOnline=false;approvedTabs.reset();backendLastError='Не удалось проверить локальный backend';}
 }
 let lastScheduledTaskId=null;
 let currentScheduledTaskId=null;
 async function runScheduled(){
+ invalidateForBrowserGeneration();
  if(workerBusy)return false;
  workerBusy=true;
  try {

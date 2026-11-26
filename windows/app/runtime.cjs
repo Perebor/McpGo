@@ -1,5 +1,6 @@
 'use strict';
 const fs=require('node:fs');
+const crypto=require('node:crypto');
 const path=require('node:path');
 const net=require('node:net');
 const {spawn,spawnSync}=require('node:child_process');
@@ -9,6 +10,22 @@ const connectionHealth=require(fs.existsSync(sourceHealth)?sourceHealth:path.joi
 
 const ENDPOINTS=Object.freeze({terminal:12848,browser:8931,autosendBrowser:8932,proxy:8940,autosend:8972,messaging:8971});
 const CORE_SERVICES=Object.freeze(['terminal','browser','proxy','autosendBrowser','autosend','messaging']);
+/** A local, atomic process-epoch signal for AutoSend tab approval.
+ * No browser API, ChatGPT URL or credential is stored here. */
+function writeBrowserGeneration(userData,pid){
+ if(typeof userData!=='string'||!userData||!Number.isInteger(pid)||pid<0)
+  throw Error('Invalid AutoSend browser generation input');
+ const directory=path.join(userData,'AutoSend');
+ fs.mkdirSync(directory,{recursive:true,mode:0o700});
+ const file=path.join(directory,'browser-generation.json');
+ const temporary=file+'.tmp';
+ const generation=crypto.randomUUID();
+ try{
+  fs.writeFileSync(temporary,JSON.stringify({version:1,generation,pid}),{mode:0o600});
+  fs.renameSync(temporary,file);
+ }catch(e){try{fs.rmSync(temporary,{force:true})}catch{};throw e;}
+ return generation;
+}
 function snapshotMode(role,env=process.env){
   const mode=env[role==='autosendBrowser'?'MCPGO_AUTOSEND_SNAPSHOT_MODE':'MCPGO_BROWSER_SNAPSHOT_MODE']??'full';
   if(!['full','none'].includes(mode))throw Error('Invalid Playwright snapshot mode');
@@ -380,6 +397,7 @@ class Runtime {
           service:name,reason,stdoutBytes,stderrBytes});
       };
       child.once('spawn',()=>{if(this.entries.get(name)!==record)return;
+        if(name==='autosendBrowser'){try{writeBrowserGeneration(this.userData,child.pid)}catch(e){diag(this.userData,'windows.runtime.browser_generation.error',{error:e.message})}}
         record.state='running';record.startedAt=Date.now();
         diag(this.userData,'windows.runtime.process.started',{service:name,pid:child.pid});this.report()});
       child.once('error',e=>{if(this.entries.get(name)!==record)return;
@@ -387,6 +405,7 @@ class Runtime {
         record.state='error: '+(e.code||'SPAWN_FAILED');record.child=null;
         this.schedule(name,record)});
       child.once('exit',(code,signal)=>{if(this.entries.get(name)!==record)return;
+        if(name==='autosendBrowser'){try{writeBrowserGeneration(this.userData,0)}catch(e){diag(this.userData,'windows.runtime.browser_generation.error',{error:e.message})}}
         flush('exit');diag(this.userData,'windows.runtime.process.exited',{service:name,code,signal});
         record.child=null;record.state='exited: '+String(code);
         if(Date.now()-(record.startedAt||Date.now())>30000)record.attempts=0;
@@ -496,4 +515,4 @@ class Runtime {
     this.report();
   }
 }
-module.exports={mcpReady,tunnelReady,extensionProfile,Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,listening,killOwnedTree,CORE_SERVICES};
+module.exports={mcpReady,tunnelReady,extensionProfile,Runtime,assertTunnelId,clientArgs,terminalEndpoint,runtimePaths,listening,killOwnedTree,CORE_SERVICES,writeBrowserGeneration};

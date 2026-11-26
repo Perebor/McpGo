@@ -17,7 +17,7 @@ const makeTask=(fields={})=>({
 });
 
 function viewWith({backendOnline=false,browserOnline=false,approved=false}={}){
- const first=serverSource.indexOf('function view(){return {');
+ const first=serverSource.indexOf('function view(){');
  const last=serverSource.indexOf('async function previewTask(id){',first);
  assert.ok(first>0&&last>first,'real production status view exists');
  const task=makeTask();
@@ -25,6 +25,7 @@ function viewWith({backendOnline=false,browserOnline=false,approved=false}={}){
   backendOnline,browserOnline,backendLastError:backendOnline?'':'port unavailable',
   browserLastSeen:null,
   approvedTabs:{has:id=>id===task.id&&approved},
+  invalidateForBrowserGeneration:()=>false,
   db:{tasks:[task],attempts:[]},
   visibleTasks:state=>state.tasks,
   workEfficiency:()=>({confirmed_deliveries:0}),
