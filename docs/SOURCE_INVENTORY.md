@@ -192,7 +192,7 @@
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
 | `tools/generate_source_inventory.py` | 73 | `f64469474bf7681a` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
-| `windows/HOTFIX_RELEASE_MANIFEST.json` | 28 | `8dfc9ee649f0ca61` |
+| `windows/HOTFIX_RELEASE_MANIFEST.json` | 30 | `8d47d3ae088e3c7e` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
 | `windows/app/index.html` | 107 | `ec2b70629a666c84` |
