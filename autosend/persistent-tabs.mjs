@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {locateChatTab} from './delivery.mjs';
+import {chatGPTConversationKey} from '../playwright/chatgpt-url.mjs';
 
 const PROJECT_SLUG=Object.freeze({TD:'td-astra6',Museum:'moi-muzei-istoriia'});
 const MAX_CHATS=2;
@@ -21,7 +22,8 @@ function validUrl(url,project){
   return parsed.protocol==='https:'&&parsed.hostname==='chatgpt.com'&&
    parsed.search===''&&parsed.hash===''&&
    /^\/g\/g-p-[a-zA-Z0-9-]+\/c\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(parsed.pathname)&&
-   parsed.pathname.includes('-'+PROJECT_SLUG[project]+'/c/');
+   parsed.pathname.includes('-'+PROJECT_SLUG[project]+'/c/')&&
+   chatGPTConversationKey(url)!==null;
  }catch{return false}
 }
 function validConfig(config){
@@ -36,6 +38,13 @@ function validConfig(config){
   ids.add(c.task_id);urls.add(c.url);projects.add(c.project);
  }
  return true;
+}
+function readableTabList(output){
+ if(typeof output!=='string'||!output.includes('### Result'))return false;
+ const result=output.split('### Result')[1]?.split(/^### /m,1)[0]||'';
+ // An error masquerading as an empty list must not authorize tab creation.
+ return /^\s*(?:-\s*)?\d+:\s+\S+/m.test(result)&&
+  !/(?:^|\n)### Error\b/m.test(output);
 }
 export function loadTabConsent(file=DEFAULT_TAB_CONSENT_FILE){
  try{
@@ -66,12 +75,15 @@ export class PersistentTabRecovery {
   if(!allowed.length)return summary;
   const duplicates=tasks.some(t=>allowed.some(a=>a.id!==t.id&&a.url===t.url));
   if(duplicates)return summary;
-  try{await this.client.connect()}catch{summary.errors++;return summary}
+  try{await this.client.connect()}catch{this.approval.reset();summary.errors++;return summary}
   const sid=String(this.client.session||'');
   if(sid!==this.lastSession){this.lastSession=sid;this.created.clear()}
   let tabs;
   try{tabs=await this.client.tool('browser_tabs',{action:'list'})}
-  catch{summary.errors++;return summary}
+  catch{this.approval.reset();summary.errors++;return summary}
+  if(!readableTabList(tabs)){
+   this.approval.reset();summary.errors++;return summary;
+  }
   for(const t of allowed){
    let match=locateChatTab(tabs,t.url);
    if(match.kind==='ambiguous'){
@@ -86,6 +98,7 @@ export class PersistentTabRecovery {
      await this.client.tool('browser_tabs',{action:'new',url:t.url});
      summary.created++;
      tabs=await this.client.tool('browser_tabs',{action:'list'});
+     if(!readableTabList(tabs)){this.approval.reset();summary.errors++;return summary;}
      match=locateChatTab(tabs,t.url);
     }catch{summary.errors++;continue}
    }
