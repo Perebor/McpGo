@@ -5,7 +5,9 @@
 const OWNER='Perebor';
 const REPO='McpGo';
 const RELEASES_API='https://api.github.com/repos/'+OWNER+'/'+REPO+'/releases?per_page=20';
-const VERSION=/^v(\d+)\.(\d+)\.(\d+)-preview\.(\d+)$/;
+// Locally built unsigned hotfixes retain a preview base for update checks.
+// GitHub release tags themselves still require canonical, signed metadata.
+const VERSION=/^v(\d+)\.(\d+)\.(\d+)-preview\.(\d+)(?:-local\.\d+)?$/;
 const ASSET=/^McpGo\.Setup\.\d+\.\d+\.\d+-preview\.\d+\.exe$/;
 
 function parseVersion(version){

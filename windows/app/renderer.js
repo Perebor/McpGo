@@ -127,7 +127,7 @@ function renderConnection(data){
    'Доступность в конкретном чате не проверена'].filter(Boolean).join(' · ');
  }
  const history=$('connection-history');
- if(history)history.textContent=(data.readiness?.history||[]).slice(-8).reverse().map(e=>new Date(e.at).toLocaleString()+' · '+(e.channel==='terminal'?'Terminal':'Playwright')+' · '+(reasonLabels[e.reason]||healthLabels[e.state]||e.state)).join('\n')||'Нет событий';
+ if(history)history.textContent=(data.readiness?.history||[]).slice(-8).reverse().map(e=>new Date(e.at).toLocaleString()+' · '+(e.channel==='terminal'?'Terminal':'Playwright')+' · '+(reasonLabels[e.reason]||healthLabels[e.state]||e.state)).join('\r\n')||'Нет событий';
  for(const [id,field,c] of [['state-terminal','terminal',h.terminal],['state-terminalTunnel','terminalTunnel',h.terminal],['state-browser','browser',h.browser],['state-proxy','proxy',h.browser],['state-browserTunnel','browserTunnel',h.browser]]){
   const el=$(id);if(!el)continue;
   const fresh=c&&Number.isFinite(c.checkedAt)&&Date.now()>=c.checkedAt&&Date.now()-c.checkedAt<=30000;
@@ -494,8 +494,9 @@ function item(title,lines,buttons=[],offsetEditor=null){
  for(const line of lines)box.append(element('small',line));
  if(buttons.length){
   const bar=element('div','');bar.className='actions';
-  for(const {label,run} of buttons){
-   const btn=element('button',label);btn.type='button';btn.className='minor';
+  for(const {label,run,danger=false} of buttons){
+    const btn=element('button',label);btn.type='button';btn.className='minor';
+    if(danger){btn.style.color='#ffb8bf';btn.style.borderColor='#a74c58';btn.style.background='rgba(130,42,54,.14)';}
    btn.onclick=run;bar.append(btn);
   }box.append(bar);
  }
@@ -528,10 +529,11 @@ async function doTask(action,id,extra={}){
  }
  previewResults.delete(id);
  try{
-  await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
-  await refreshTasks();
+   const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
+   await refreshTasks();
   $('autosend-feedback').textContent=
-   action==='confirm_received'?'Получение подтверждено. Расписание на паузе.':
+    action==='force_remove'?(result.pending?'Задание скрыто; удаление завершится после текущей проверки. Возможная отправка не отменяется.':'Расписание принудительно удалено. Диагностика сохранена. Возможная отправка не отменяется.'): 
+    action==='confirm_received'?'Получение подтверждено. Расписание на паузе.':
    action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
  }catch(e){$('autosend-feedback').textContent=e.message;message(e.message,true)}
 }
@@ -555,15 +557,31 @@ async function refreshTasks(){
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
      [{label:'Включить',run:()=>doTask('start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];
-   if(!pending&&!checked?.pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id,{targetUrl:t.url})});
+    if(!pending&&!checked?.pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id,{targetUrl:t.url})});
+    // A first event-gated task cannot have a result before the first prompt.
+    // The user must explicitly click; merely enabling the task never sends.
+    if(t.enabled&&t.status==='scheduled'&&t.smart_v2===true&&t.smart_result_gate===true&&
+       t.schedule_mode==='after_response'&&!t.smart_v2_last_action&&!t.smart_v2_pending_action&&
+       !t.manual_once&&!t.verification&&!t.active_slot_id&&!t.next_at)
+      buttons.push({label:'Запустить первый цикл',run:()=>doTask('send_once',t.id)});
+    // Emergency removal is always visible, even for unknown/checking/sending/verifying.
+    buttons.push({label:'Удалить принудительно',danger:true,run:()=>{
+     if(confirm('Принудительно удалить это расписание AutoSend?\r\n\r\nУдаление не отменяет уже начатую возможную отправку. Данные о неопределённой доставке останутся в диагностическом журнале.\r\n\r\nУдалить расписание?'))
+      void doTask('force_remove',t.id,{confirmed:true});
+    }});
    const offsetEditor=t.status==='paused'&&!t.enabled&&!t.manual_once&&!t.verification&&!t.active_slot_id&&(t.schedule_mode||'interval')==='interval'?
     {interval:t.interval_seconds,value:t.interval_offset_seconds==null?'':String(t.interval_offset_seconds/60),
      save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
    list.append(item(t.url,[
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
     String(t.message||'').slice(0,150),
-    'Интервал: '+t.interval_seconds+' сек.; следующий: '+(t.next_at?new Date(t.next_at).toLocaleString('ru-RU'):'нет'),
-    'Смещение: '+(t.interval_offset_seconds==null?'нет':t.interval_offset_seconds+' сек.'),
+    (t.schedule_mode==='after_response'?
+     'Режим: по результату; '+(t.manual_once?'начальный запуск поставлен в очередь':
+      !t.smart_v2_last_action?'ожидается первый запуск':'ожидается подтверждённый результат')+
+      '; следующий запуск: '+(t.next_at?new Date(t.next_at).toLocaleString('ru-RU'):'после результата'):
+     'Интервал: '+t.interval_seconds+' сек.; следующий: '+(t.next_at?new Date(t.next_at).toLocaleString('ru-RU'):'нет')),
+    (t.schedule_mode==='after_response'?'':
+     'Смещение: '+(t.interval_offset_seconds==null?'нет':t.interval_offset_seconds+' сек.')),
     'Последняя успешная доставка: '+(t.last_success_at?new Date(t.last_success_at).toLocaleString('ru-RU')+' (время подтверждения)':'нет'),
     t.last_error?'Причина остановки / последнее событие: '+t.last_error:'',
     checked?.pending?'Проверяем этот чат без отправки…':checked?

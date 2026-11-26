@@ -152,7 +152,7 @@ function startJob(args){
  atomicWrite(path.join(folder,'request.json'),{command:args.command,cwd,timeout_ms,resource_key});
  for(const name of ['stdout.log','stderr.log'])fs.writeFileSync(path.join(folder,name),'',{mode:0o600,flag:'wx'});
  const child=spawn(process.execPath,[WORKER,job_id],{
-   cwd:__dirname,detached:true,stdio:'ignore',
+   cwd:__dirname,detached:true,windowsHide:true,stdio:'ignore',
    env:{...platform.childEnv(),MCPGO_JOB_ROOT:ROOT}
  });
  child.on('error',e=>{

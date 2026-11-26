@@ -41,8 +41,10 @@ export function eligibleToSend(task,tasks,now=Date.now()) {
  const other=tasks.filter(t=>t.id!==task.id&&sameChatGPTConversation(t.url,task.url));
  return !other.some(t=>UNCERTAIN.has(t.status)||IN_FLIGHT.has(t.status));
 }
-export function nextDue(tasks,now=Date.now(),lastId=null){
- const eligible=tasks.filter(t=>eligibleToSend(t,tasks,now));
+export function nextDue(tasks,now=Date.now(),lastId=null,allowed=()=>true){
+ // Keep the full task set for same-conversation conflict checks, then
+ // apply the caller's eligibility gate without starving an unrelated chat.
+ const eligible=tasks.filter(t=>eligibleToSend(t,tasks,now)&&allowed(t));
  // Stable ordering prevents one chat starving another on a single Chrome
  // session, while preserving the due time for scheduled work.
  eligible.sort((a,b)=>Date.parse(a.next_at)-Date.parse(b.next_at)||
@@ -57,4 +59,16 @@ export function canObserveTask(task,tasks) {
  if(!task.enabled||task.status!=='scheduled')return false;
  return !tasks.some(t=>t.id!==task.id&&sameChatGPTConversation(t.url,task.url)&&
    (UNCERTAIN.has(t.status)||IN_FLIGHT.has(t.status)));
+}
+
+/** Prevent two independently armed AutoSend schedules targeting one ChatGPT conversation.
+ * A PAUSED, fully resolved historical task does not block its replacement.
+ * Unlike conversationState(...).blocked, a currently enabled schedule MUST block.
+ */
+export function competingScheduleForChat(tasks,proposed) {
+ return (tasks||[]).find(t=>t.id!==proposed?.id&&
+   sameChatGPTConversation(t.url,proposed?.url)&&
+   (t.enabled===true||t.manual_once===true||
+    ['unknown','checking','sending','verifying'].includes(t.status)||
+    !!t.verification||!!t.active_slot_id))||null;
 }

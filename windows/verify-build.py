@@ -96,7 +96,7 @@ def main():
             raise RuntimeError("Potential runtime user data packaged: "+str(file))
     print("Windows packaged runtime verified:",len([x for x in runtime.rglob("*") if x.is_file()]),"files")
     version=json.loads((ROOT/"windows/package.json").read_text(encoding="utf-8"))["version"]
-    if not re.fullmatch(r"\d+\.\d+\.\d+-preview\.\d+", version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+-preview\.\d+(?:-local\.\d+)?", version):
         raise RuntimeError("Invalid Windows preview version")
     installer=(pathlib.Path(args.installer) if args.installer else
                ROOT/"release/windows"/f"McpGo Setup {version}.exe")
