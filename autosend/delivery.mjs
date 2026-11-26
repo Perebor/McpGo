@@ -375,8 +375,14 @@ export async function deliverViaPlaywright(task,aboutToClick=async()=>{},deps={}
    evidence:safeEvidence({code:'READY_NOT_STABLE'}),
    error:'Состояние страницы изменялось во время проверки; отправка отложена'};
   const baseline=page.userCount;
-  await mcp.tool('browser_type',{target:page.editorSelector,text:task.message,submit:false});
-  typed=true;
+  // Reuse a previous pre-click AutoSend draft only when its ENTIRE content
+  // matches this authorized message after the canonicalization used by
+  // preClickIssue. Do not retype long prompts on a safely deferred retry.
+  // A different composer draft still goes through the normal guarded fill.
+  if(normalizedMessage(page.editorText)!==normalizedMessage(task.message)){
+   await mcp.tool('browser_type',{target:page.editorSelector,text:task.message,submit:false});
+   typed=true;
+  }
   // Retry only transient React composer readiness, never an active stream,
   // changed user message or unexpected draft. No extra typing is performed.
   let filled,issue=null;

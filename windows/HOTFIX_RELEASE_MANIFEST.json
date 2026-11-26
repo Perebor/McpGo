@@ -1,9 +1,9 @@
 {
-  "version": "2.1.0-preview.12-local.1",
+  "version": "2.1.0-preview.13-local.1",
   "kind": "UNSIGNED LOCAL PREVIEW, NOT OFFICIAL GH RELEASE",
   "head": "fc94e3f86c56a353fd2924d7da821a75f9397b5c",
   "branch": "work/mcpgo-github-ci-auto-20261126",
-  "appAsarSha": "3c322fc225755bf4092962e5c24f435c0edea82243f7d5cd83766f8d9959448e",
+  "appAsarSha": "97e0070f33ce85385330b2c6ebd6245b12e6842ba67a4c93ad97fcc4a3965a3a",
   "runtimeFilesCopied": 59,
   "runtimeFilesChangedFromBase": 59,
   "appEntriesExtracted": 19,
@@ -18,12 +18,13 @@
     "persistent-tabs.mjs": "22822279ed0b9804e069251db925e0a68c77426eff814658a33d503dc3730d43",
     "github-ci-evidence.mjs": "d48f96bd93609337bea6979e5afc466a04e5b9dc931c6f13c2cd154e9e564d39",
     "smart-work-ready.mjs": "6b51ed3c7b3c7eb6fb9b079c22fae4605a34108699b96fd1636ad4b38e082e5a",
-    "smart-v2-browser.mjs": "2c32f7cb8d4a686fe0928ef4aeefee6b6810a0aee2a428e1617ab8efa755a851"
+    "smart-v2-browser.mjs": "2c32f7cb8d4a686fe0928ef4aeefee6b6810a0aee2a428e1617ab8efa755a851",
+    "delivery.mjs": "fc473176531e955bf94d6f49ffa0705d1e48304d0edbe8ff2cd0535db888ab2b"
   },
   "configSource": "exact currently installed preview.10 runtime, user data in APPDATA not bundled",
-  "builtAtLocal": "2026-11-26T16:30:30.448Z",
-  "baseCommit": "f66984c3db94a5188dd42181a6f2164e4485f8bb",
+  "builtAtLocal": "2026-11-26T17:14:36.434Z",
+  "baseCommit": "4689c62ac146127e25d025e6201971240a309a2d",
   "status": "verified_unsigned_NSIS_package_ready",
-  "installerSha256": "05348f359f9ec64351749fcef9645ed4e25acfcf9d0d3cc7b8cbc11bc145aec1",
-  "installerBytes": 169061011
+  "installerSha256": "cff16ec09a8b80cb98fc3f9808346504cc5bd339bf0bf157080cb9640965ca02",
+  "installerBytes": 169061024
 }

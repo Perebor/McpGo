@@ -129,7 +129,7 @@
 | `autosend/chat-state.mjs` | 115 | `5ebff06a80cad2c4` |
 | `autosend/conversation-fsm.mjs` | 74 | `2fa8a08aaf79df80` |
 | `autosend/core.mjs` | 282 | `346e0aeff5c7dea7` |
-| `autosend/delivery.mjs` | 540 | `945198d4678262aa` |
+| `autosend/delivery.mjs` | 546 | `fc473176531e955b` |
 | `autosend/force-remove.mjs` | 60 | `28733b1a5a7b96ec` |
 | `autosend/github-ci-evidence.mjs` | 137 | `d48f96bd93609337` |
 | `autosend/guarded-send.mjs` | 123 | `752111ef90ae8dc7` |
@@ -149,7 +149,7 @@
 | `autosend/tests/browser-health.test.mjs` | 22 | `f54e3247a314b24f` |
 | `autosend/tests/conversation-fsm.test.mjs` | 72 | `6653531f6202cb9c` |
 | `autosend/tests/core.test.mjs` | 89 | `e4378594697f36b5` |
-| `autosend/tests/extension-delivery.test.mjs` | 353 | `674ce0314486bd83` |
+| `autosend/tests/extension-delivery.test.mjs` | 367 | `37596365e2f764dd` |
 | `autosend/tests/local-security.test.mjs` | 49 | `b9e3b0cda01ba5bf` |
 | `autosend/tests/mutation-guard.test.mjs` | 62 | `01f940841ac5132f` |
 | `autosend/tests/no-tab-creation.test.mjs` | 18 | `96c1c6773034c1f4` |
@@ -192,7 +192,7 @@
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
 | `tools/generate_source_inventory.py` | 73 | `f64469474bf7681a` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
-| `windows/HOTFIX_RELEASE_MANIFEST.json` | 29 | `a733e545661ef49f` |
+| `windows/HOTFIX_RELEASE_MANIFEST.json` | 28 | `8dfc9ee649f0ca61` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
 | `windows/app/index.html` | 107 | `ec2b70629a666c84` |
@@ -208,8 +208,8 @@
 | `windows/app/updates.cjs` | 87 | `2f002f3e87959bb7` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `c43c09d10e3b012f` |
-| `windows/package.json` | 169 | `9e90a3bf0ab886a3` |
+| `windows/package-lock.json` | 3682 | `c29057b1948f03f2` |
+| `windows/package.json` | 169 | `d6001c8687e9563f` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |

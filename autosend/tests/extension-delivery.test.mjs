@@ -131,6 +131,20 @@ test('successful send persists before click and verifies new user message',async
  assert.equal(f.calls.filter(x=>x.name==='browser_type').length,1);
  assert.ok(!f.calls.some(x=>x.name==='browser_tabs' && x.args.action==='new'),'reuse opened personal Chrome tab');
 });
+test('already composed exact message with normalized whitespace reuses AutoSend draft without retyping',async()=>{
+ const f=fake({editorText:' Test scheduler\n \nCDP ',sendEnabled:true});
+ const result=await deliverViaPlaywright(task,async()=>f.commit(),{client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'verified');
+ assert.equal(f.calls.filter(x=>x.name==='browser_type').length,0,'long pre-filled draft must not be retyped');
+ assert.equal(f.calls.filter(x=>x.name==='browser_evaluate'&&x.args.function.includes('function guardedClickInPage')).length,1);
+});
+test('unrelated stable draft must be replaced with exact AutoSend message and guarded before click',async()=>{
+ const f=fake({editorText:'different unrelated draft',sendEnabled:true});
+ const result=await deliverViaPlaywright(task,async()=>f.commit(),{client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'verified');
+ assert.equal(f.calls.filter(x=>x.name==='browser_type').length,1);
+});
+
 test('failure before click does not send or commit, and clears own draft',async()=>{
  const f=fake();const original=f.client.tool;
  f.client.tool=async(name,args)=>{
