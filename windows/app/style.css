@@ -158,3 +158,14 @@ footer{color:var(--quiet);font-size:10.5px;line-height:1.5;padding-bottom:5px}
 [data-wizard-page] summary{cursor:pointer;color:#8795ff;font-weight:600}
 .wizard-instructions{padding-left:24px;line-height:1.6}
 .wizard-footer{border-top:1px solid #303747;padding-top:12px}
+
+/* MCP-02: the ordinary AutoSend flow has only project and chat fields. */
+#task-create{display:grid;gap:14px}
+#task-create .actions{margin-top:0}
+.autosend-advanced{padding:12px 14px;border:1px solid var(--stroke);border-radius:11px;background:var(--inner)}
+.autosend-advanced summary{cursor:pointer;color:var(--accent);font-size:12px;font-weight:650}
+.autosend-advanced[open]{display:grid;gap:13px}
+.autosend-advanced .group{margin-top:13px}
+.autosend-advanced .hint{margin:12px 0 0}
+#task-timing[hidden]{display:none!important}
+#task-timing{margin-top:13px}

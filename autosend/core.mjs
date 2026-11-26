@@ -39,7 +39,16 @@ export function validateInput(body){
   const seconds=Number(body.interval_seconds??60);
   if(!Number.isInteger(seconds) || seconds<MIN_INTERVAL || seconds>MAX_INTERVAL) throw Error('Интервал должен быть от 1 минуты до 7 дней.');
   const phase=validateIntervalOffset(body.interval_offset_seconds,seconds,schedule.schedule_mode);
-  return {url,message:body.message,interval_seconds:seconds,...schedule,interval_offset_seconds:phase};
+  if(body.guided_first_run!=null&&typeof body.guided_first_run!=='boolean')
+    throw Error('Неверный тип упрощённого запуска.');
+  const guided=body.guided_first_run===true;
+  if(body.project_label!=null&&typeof body.project_label!=='string')
+    throw Error('Название проекта должно быть текстом.');
+  const projectLabel=String(body.project_label||'').trim();
+  if(projectLabel.length>64||(guided&&!projectLabel))
+    throw Error('Укажи название проекта до 64 символов.');
+  return {url,message:body.message,interval_seconds:seconds,...schedule,
+    interval_offset_seconds:phase,project_label:projectLabel||null,guided_first_run:guided};
 }
 // Optional phase in seconds on the UTC interval grid; null preserves legacy cadence.
 export function validateIntervalOffset(value,interval,mode='interval'){

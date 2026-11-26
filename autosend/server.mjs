@@ -108,7 +108,10 @@ async function recoverApprovedTabs(){
 function operation(action,body){
  switch(action){
   case 'create':{
-   const t=newTask(body);db.tasks.push(t);persist();return {task:t};
+   const t=newTask(body);
+   if(t.guided_first_run&&db.tasks.some(x=>x.url===t.url))
+    throw Error('Для этого разговора уже есть задание. Используй существующую карточку, чтобы не создавать дубль.');
+   db.tasks.push(t);persist();return {task:t};
   }
   case 'update':{
    const t=find(body.id);assertTaskMutable(t);
@@ -173,6 +176,24 @@ function operation(action,body){
     delete t.smart_v2_pause_reason;
    }else throw Error('Smart V2: enabled должен быть true/false');
    persist();return {task:t,changed:true,sendBlocked:true};
+  }
+  case 'start_first':{
+   const t=find(body.id);
+   if(t.guided_first_run!==true)throw Error('Это действие доступно только для нового упрощённого запуска.');
+   // A persisted first-run token is idempotent even after process restart.
+   if(t.first_cycle_started_at)return {task:t,alreadyStarted:true,sendBlocked:true};
+   assertTaskMutable(t);
+   if(t.enabled||t.status!=='paused'||t.manual_once||t.next_at)
+    throw Error('Для первого запуска задание должно быть выключено, без ожидающей отправки.');
+   if(workerBusy)throw Error('AutoSend занят. Повтори проверку после завершения текущей операции.');
+   if(!approvedTabs.has(t.id))
+    throw Error('Вкладка разговора не подтверждена. Сначала проверь нужный чат без отправки.');
+   const competing=competingScheduleForChat(db.tasks,t);
+   if(competing)throw Error('В разговоре уже есть другое действующее или неопределённое расписание. Повторный Send запрещён.');
+   delete t.watchdog;
+   arm(t);t.manual_once=true;t.next_at=now();
+   t.first_cycle_started_at=t.next_at;
+   t.safe_retry_count=0;persist();return {task:t,queued:true};
   }
   case 'start':{
    const t=find(body.id);assertTaskMutable(t);
@@ -592,6 +613,18 @@ const server=http.createServer(async(req,res)=>{
   }
   const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
   if(body.action==='preview')return reply(res,200,{ok:true,...await previewTask(body.id)});
+  if(body.action==='start_first'){
+   const t=find(body.id);
+   if(t.guided_first_run!==true)throw Error('Новый запуск недоступен для этого задания.');
+   if(t.first_cycle_started_at)return reply(res,200,{ok:true,...operation(body.action,body)});
+   assertTaskMutable(t);
+   if(t.enabled||t.status!=='paused'||t.manual_once||t.next_at)
+    throw Error('Для первого запуска задание должно быть выключено.');
+   const result=await previewTask(body.id);
+   if(result.chatFound!==true||result.ready!==true)
+    throw Error('Вкладка ещё не готова: '+String(result.reason||'проверь нужный чат').slice(0,200));
+   return reply(res,200,{ok:true,...operation(body.action,body)});
+  }
   return reply(res,200,{ok:true,...operation(body.action,body)});
  } catch(e) {
   return reply(res,400,{error:String(e.message||e).slice(0,500)});

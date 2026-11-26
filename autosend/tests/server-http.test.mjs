@@ -269,3 +269,31 @@ test('spoofed native header without control token is forbidden',async()=>{
   assert.equal(forged.status,403);
  }finally{await shutdown(instance);}
 });
+
+test('guided project creation is paused, deduplicated and never bootstraps without browser verification',async()=>{
+ const instance=await startIsolated();
+ try{
+  const args={action:'create',url:CHAT_URL,message:'Продолжай работу',
+   project_label:'Новый проект',guided_first_run:true,schedule_mode:'after_response',interval_seconds:600};
+  const first=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,body:JSON.stringify(args)});
+  assert.equal(first.status,200);
+  const created=(await first.json()).task;
+  assert.equal(created.project_label,'Новый проект');
+  assert.equal(created.guided_first_run,true);
+  assert.equal(created.schedule_mode,'after_response');
+  assert.equal(created.status,'paused');
+  assert.equal(created.enabled,false);
+  const duplicate=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,body:JSON.stringify(args)});
+  assert.equal(duplicate.status,400);
+  const start=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,body:JSON.stringify({action:'start_first',id:created.id})});
+  assert.equal(start.status,400,'no verified Chrome tab, no first run');
+  const view=await(await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  assert.equal(view.tasks.length,1);
+  assert.equal(view.tasks[0].enabled,false);
+  assert.equal(view.tasks[0].status,'paused');
+  assert.equal(view.tasks[0].first_cycle_started_at,undefined);
+  assert.equal(view.tasks[0].manual_once,undefined);
+  assert.equal(view.attempts.length,0);
+  assert.equal(JSON.parse(await readFile(instance.stateFile,'utf8')).tasks.length,1);
+ }finally{await shutdown(instance)}
+});

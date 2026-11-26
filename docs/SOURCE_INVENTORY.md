@@ -128,7 +128,7 @@
 | `autosend/busy-retry.mjs` | 35 | `4cb664f5eae4ebfe` |
 | `autosend/chat-state.mjs` | 115 | `5ebff06a80cad2c4` |
 | `autosend/conversation-fsm.mjs` | 74 | `2fa8a08aaf79df80` |
-| `autosend/core.mjs` | 282 | `346e0aeff5c7dea7` |
+| `autosend/core.mjs` | 291 | `03a5aa7a5a3cde76` |
 | `autosend/delivery.mjs` | 546 | `fc473176531e955b` |
 | `autosend/force-remove.mjs` | 60 | `28733b1a5a7b96ec` |
 | `autosend/github-ci-evidence.mjs` | 137 | `d48f96bd93609337` |
@@ -137,7 +137,7 @@
 | `autosend/preview-check.mjs` | 80 | `d0181e58cf7ef9e4` |
 | `autosend/reconciliation.mjs` | 166 | `0476f93271a06880` |
 | `autosend/schedule.mjs` | 146 | `04445c15bf9cea3d` |
-| `autosend/server.mjs` | 627 | `d3e5aeee5a4925ba` |
+| `autosend/server.mjs` | 660 | `e29fe3bc826145f0` |
 | `autosend/simulated-browser.mjs` | 172 | `de94c11634d4d9c0` |
 | `autosend/smart-continuation.mjs` | 35 | `4bc9841d3367a1df` |
 | `autosend/smart-v2-browser.mjs` | 82 | `2c32f7cb8d4a686f` |
@@ -156,7 +156,7 @@
 | `autosend/tests/preview-check.test.mjs` | 71 | `9303b2d1fe909246` |
 | `autosend/tests/reconciliation.test.mjs` | 245 | `b57ff6f7eb74987d` |
 | `autosend/tests/schedule-modes.test.mjs` | 149 | `a0d7187385e8116a` |
-| `autosend/tests/server-http.test.mjs` | 271 | `b2923aadcb7b6067` |
+| `autosend/tests/server-http.test.mjs` | 299 | `f8f8401054bdace2` |
 | `autosend/tests/simulator.test.mjs` | 246 | `5a291fd7b5cd6b07` |
 | `autosend/tests/stream-monitor.test.mjs` | 110 | `7ad1d8b006a19785` |
 | `messaging/hub.py` | 429 | `fb1a5a65ed6d5e54` |
@@ -192,24 +192,24 @@
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
 | `tools/generate_source_inventory.py` | 73 | `f64469474bf7681a` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
-| `windows/HOTFIX_RELEASE_MANIFEST.json` | 30 | `c220c8bbb72754c3` |
+| `windows/HOTFIX_RELEASE_MANIFEST.json` | 31 | `1adb63a379b54aa1` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
-| `windows/app/index.html` | 107 | `ec2b70629a666c84` |
+| `windows/app/index.html` | 113 | `7f59dc15a081463b` |
 | `windows/app/local-api.cjs` | 46 | `83f7a9e6b0c8bc47` |
 | `windows/app/main.cjs` | 237 | `d984565e9d916c6f` |
 | `windows/app/onboarding.cjs` | 63 | `bc4191e562a54379` |
 | `windows/app/preload.cjs` | 32 | `39e234ed8e4e2386` |
-| `windows/app/renderer.js` | 694 | `eb3ee4ccaf51e9fe` |
+| `windows/app/renderer.js` | 721 | `0c983e2a3a1d0647` |
 | `windows/app/runtime.cjs` | 499 | `f46635fee14210f4` |
 | `windows/app/settings.cjs` | 129 | `b3872286f24021ff` |
 | `windows/app/skills.cjs` | 21 | `92cadd2cdc79f687` |
-| `windows/app/style.css` | 160 | `ffc05740be59c611` |
+| `windows/app/style.css` | 171 | `14e344d7b0c48f7a` |
 | `windows/app/updates.cjs` | 87 | `2f002f3e87959bb7` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `604b384663ab0fae` |
-| `windows/package.json` | 169 | `4a5908e9578657c6` |
+| `windows/package-lock.json` | 3682 | `9e8d335b17e6be81` |
+| `windows/package.json` | 169 | `c68454414574c46e` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 102 | `0ced6597d25fa5e6` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -217,6 +217,7 @@
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
 | `windows/tests/diagnostics.test.cjs` | 41 | `067b0b874c1ae6cc` |
 | `windows/tests/github-ci-event-gate.test.cjs` | 173 | `0b8f73b3c16ed233` |
+| `windows/tests/mcp02-guided-start.test.cjs` | 184 | `63881090269df8ca` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -230,6 +231,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
 
-Всего файлов в выбранном source-only срезе: **223**.
+Всего файлов в выбранном source-only срезе: **224**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

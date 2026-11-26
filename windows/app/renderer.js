@@ -6,7 +6,7 @@ const sectionInfo=Object.freeze({
  messages:['AGENT MESSAGING','Связь агентов','Локальный обмен сообщениями между агентами'],
  settings:['TUNNEL SETTINGS','Настройки туннелей','Ключи, браузер и автозапуск Windows'],
  skills:['AGENT SKILLS','Навыки инструментов','Готовые инструкции для инструментов и агентов McpGo'],
- autosend:['SCHEDULED MESSAGES','Сообщения по таймеру','Расписания для продолжения работы в ChatGPT'],
+ autosend:['PROJECT CONTINUATION','Автопродолжение','Проекты, чаты и безопасные запуски работы в ChatGPT'],
  updates:['RELEASES','Обновления','Версии McpGo и проверка новых выпусков']
 });
 let activeSection='overview';
@@ -513,6 +513,7 @@ function item(title,lines,buttons=[],offsetEditor=null){
  return box;
 }
 const previewResults=new Map();
+const pendingFirstStarts=new Set();
 let taskRefreshRevision=0;
 async function doTask(action,id,extra={}){
  if(action==='preview'){
@@ -527,15 +528,21 @@ async function doTask(action,id,extra={}){
   }finally{await refreshTasks()}
   return;
  }
+ if(action==='start_first'){
+  if(pendingFirstStarts.has(id))return;
+  pendingFirstStarts.add(id);
+ }
  previewResults.delete(id);
  try{
-   const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
-   await refreshTasks();
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
+  await refreshTasks();
   $('autosend-feedback').textContent=
-    action==='force_remove'?(result.pending?'Задание скрыто; удаление завершится после текущей проверки. Возможная отправка не отменяется.':'Расписание принудительно удалено. Диагностика сохранена. Возможная отправка не отменяется.'): 
+    action==='start_first'?(result.alreadyStarted?'Первый запуск уже запрошен. Повторная Send не ставится.':'Первый запуск поставлен в очередь после проверки вкладки. Это ещё не квитанция доставки.'):
+    action==='force_remove'?(result.pending?'Задание скрыто; удаление завершится после текущей проверки. Возможная отправка не отменяется.':'Расписание принудительно удалено. Диагностика сохранена. Возможная отправка не отменяется.'):
     action==='confirm_received'?'Получение подтверждено. Расписание на паузе.':
-   action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
+    action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
  }catch(e){$('autosend-feedback').textContent=e.message;message(e.message,true)}
+ finally{if(action==='start_first')pendingFirstStarts.delete(id)}
 }
 function autosendTabHealth(status,task){
  // A listening local MCP endpoint is not proof of an approved Chrome tab.
@@ -566,7 +573,8 @@ async function refreshTasks(){
        if(confirm('Вы лично проверили этот чат и увидели сообщение именно из последней попытки? Подтверждение не отправит сообщение и оставит расписание на паузе.'))doTask('confirm_received',t.id);
       }}]:
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
-     [{label:'Включить',run:()=>doTask('start',t.id)},
+     [{label:t.guided_first_run===true&&!t.first_cycle_started_at?'Запустить':'Включить',
+       run:()=>doTask(t.guided_first_run===true&&!t.first_cycle_started_at?'start_first':'start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];
     if(!pending&&!checked?.pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id,{targetUrl:t.url})});
     // A first event-gated task cannot have a result before the first prompt.
@@ -583,7 +591,8 @@ async function refreshTasks(){
    const offsetEditor=t.status==='paused'&&!t.enabled&&!t.manual_once&&!t.verification&&!t.active_slot_id&&(t.schedule_mode||'interval')==='interval'?
     {interval:t.interval_seconds,value:t.interval_offset_seconds==null?'':String(t.interval_offset_seconds/60),
      save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
-   list.append(item(t.url,[
+   list.append(item(t.project_label||t.url,[
+    ...(t.project_label?['Чат: '+t.url]:[]),
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
     autosendTabHealth(status,t),
     String(t.message||'').slice(0,150),
@@ -607,15 +616,33 @@ async function refreshTasks(){
  }catch(e){if(revision===taskRefreshRevision){list.replaceChildren();list.append(item('Планировщик недоступен',[e.message]))}}
 }
 $('refresh-tasks').onclick=refreshTasks;
+function showTaskScheduleOptions(){
+ $('task-timing').hidden=$('task-mode').value!=='interval';
+}
+$('task-mode').onchange=showTaskScheduleOptions;
+showTaskScheduleOptions();
+let guidedCreatePending=false;
 $('task-create').onsubmit=async event=>{
- event.preventDefault();const btn=event.submitter;btn.disabled=true;
+ event.preventDefault();
+ if(guidedCreatePending)return;
+ const btn=event.submitter;
+ guidedCreatePending=true;
+ if(btn)btn.disabled=true;
  try{
-  await window.mcpgo.serviceAction('autosend','/api/tasks',{
-   action:'create',url:$('task-url').value.trim(),message:$('task-message').value,
+  const mode=$('task-mode').value;
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{
+   action:'create',
+   project_label:$('task-project').value.trim(),guided_first_run:true,
+   url:$('task-url').value.trim(),message:$('task-message').value,
+   schedule_mode:mode,delay_seconds:30,max_continuations:20,
    interval_seconds:Number($('task-interval').value)*60,
-   interval_offset_seconds:$('task-offset').value===''?null:Number($('task-offset').value)*60});
-  $('task-create').reset();message('Расписание создано выключенным');await refreshTasks();
- }catch(e){message(e.message,true)}finally{btn.disabled=false}
+   interval_offset_seconds:mode==='interval'&&$('task-offset').value!==''?Number($('task-offset').value)*60:null
+  });
+  $('task-create').reset();showTaskScheduleOptions();
+  $('autosend-feedback').textContent='Задание создано выключенным. Нажми «Запустить» в новой карточке: McpGo сначала проверит вкладку.';
+  await refreshTasks();
+ }catch(e){message(e.message,true)}
+ finally{guidedCreatePending=false;if(btn)btn.disabled=false}
 };
 async function refreshAgents(){
  const list=$('agents-list');list.replaceChildren();
