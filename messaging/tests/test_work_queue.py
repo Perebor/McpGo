@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from messaging.work_queue import (
     setup_queue, enqueue_task, lease_next, finish_task, fail_task,
-    queue_summary, mark_expired_unknown
+    queue_summary, mark_expired_unknown, grant_actor_scope
 )
 
 
@@ -12,6 +12,9 @@ class WorkQueueTest(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(':memory:', isolation_level=None)
         setup_queue(self.db)
+        for name in ('agent-alpha', 'agent-beta'):
+            for project in ('TD', 'Museum'):
+                grant_actor_scope(self.db, name, project)
 
     def tearDown(self):
         self.db.close()
@@ -27,7 +30,7 @@ class WorkQueueTest(unittest.TestCase):
         self.assertEqual(a['duplicate'], False)
         self.assertTrue(again['duplicate'])
         self.assertNotEqual(a['id'], b['id'])
-        self.assertEqual(queue_summary(self.db), {'QUEUED': 2, 'LEASED': 0, 'VERIFIED': 0, 'FAILED': 0, 'UNKNOWN': 0})
+        self.assertEqual(queue_summary(self.db), {'QUEUED': 2, 'LEASED': 0, 'ACKED': 0, 'VERIFIED': 0, 'FAILED': 0, 'UNKNOWN': 0})
 
     def test_one_lease_per_item_and_project_fence(self):
         a = enqueue_task(self.db, 'TD', 'a' * 64, self.payload(), now_ms=1000)
@@ -46,7 +49,7 @@ class WorkQueueTest(unittest.TestCase):
         self.assertFalse(finish_task(self.db, item['id'], 'agent-alpha', 'bad', 'c' * 64, now_ms=3000))
         self.assertTrue(finish_task(self.db, item['id'], 'agent-alpha', item['lease_token'], 'c' * 64, now_ms=3000))
         self.assertFalse(finish_task(self.db, item['id'], 'agent-alpha', item['lease_token'], 'c' * 64, now_ms=3001))
-        self.assertEqual(queue_summary(self.db)['VERIFIED'], 1)
+        self.assertEqual(queue_summary(self.db)['ACKED'], 1)
 
     def test_timeout_unknown_never_automatically_requeues_or_resends(self):
         enqueue_task(self.db, 'TD', 'a' * 64, self.payload(), now_ms=1000)
@@ -80,6 +83,8 @@ class WorkQueueTest(unittest.TestCase):
             filename = str(Path(folder) / 'queue.sqlite3')
             first = sqlite3.connect(filename, isolation_level=None)
             setup_queue(first)
+            grant_actor_scope(first, 'agent-one', 'Museum')
+            grant_actor_scope(first, 'agent-two', 'Museum')
             created = enqueue_task(first, 'Museum', 'd' * 64, self.payload(), now_ms=1000)
             leased = lease_next(first, 'Museum', 'agent-one', now_ms=2000, ttl_ms=5000)
             first.close()
@@ -90,7 +95,7 @@ class WorkQueueTest(unittest.TestCase):
                 self.assertEqual(created['id'], leased['id'])
                 self.assertTrue(finish_task(restarted, leased['id'], 'agent-one',
                                             leased['lease_token'], 'c' * 64, now_ms=3000))
-                self.assertEqual(queue_summary(restarted)['VERIFIED'], 1)
+                self.assertEqual(queue_summary(restarted)['ACKED'], 1)
             finally:
                 restarted.close()
 
