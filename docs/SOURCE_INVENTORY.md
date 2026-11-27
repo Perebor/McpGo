@@ -174,6 +174,8 @@
 | `messaging/tests/test_bus.py` | 79 | `bb84746c175ef94a` |
 | `messaging/tests/test_http.py` | 108 | `6257baad84257d24` |
 | `messaging/tests/test_lifecycle.py` | 100 | `5c4129c953f89b7f` |
+| `messaging/tests/test_work_queue.py` | 106 | `6a766abb167b6e87` |
+| `messaging/work_queue.py` | 157 | `b3b474b488593b1a` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |
@@ -253,6 +255,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
 
-Всего файлов в выбранном source-only срезе: **246**.
+Всего файлов в выбранном source-only срезе: **248**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
