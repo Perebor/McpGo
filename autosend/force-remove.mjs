@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 // An in-flight task is hidden immediately but keeps its click receipt until
 // the existing operation settles. Archived diagnostics contain NO message/URL.
 export function visibleTasks(state){
- return (state.tasks||[]).filter(task=>!task.force_remove_requested_at);
+ return (state.tasks||[]).filter(task=>!task.force_remove_requested_at && !task.handoff_archived_at);
 }
 function archiveAndRemove(state,task,time){
  const history=state.force_removed_tasks ||= [];

@@ -65,3 +65,44 @@ node --test autosend/tests/*.test.mjs playwright/tests/*.test.mjs
 ```
 
 Unit/integration тесты не выполняют real Send в рабочем разговоре. Для live-E2E требуется специально выделенный тестовый чат и явное разрешение.
+
+
+## MCP-11 · Смена чата через owner-approved handoff (27.11.2026)
+
+AutoSend now supports the **owner-token-only** `POST /api/tasks`, action `handoff_chat`. This is a safe paused state transfer, **never a ChatGPT Send or verified browser delivery**. Do not call it against real projects until the owner has approved the exact new chat URL and all pending receipts are reconciled.
+
+Example request schema (replace ALL values with owner-supplied real ones):
+```json
+{
+  "action": "handoff_chat",
+  "source_id": "existing-task-id",
+  "target_url": "https://chatgpt.com/g/g-p-example-123/c/00000000-0000-4000-8000-000000000002",
+  "owner_confirmed_target": "https://chatgpt.com/g/g-p-example-123/c/00000000-0000-4000-8000-000000000002",
+  "idempotency_key": "e99f2c39-2222-4222-8222-222222222222",
+  "checkpoint": {
+    "task_id": "MCP-11",
+    "branch": "work/mcp11-branch",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "evidence_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "receipt_id": "receipt-123",
+    "last_ack_id": "ack-456",
+    "summary": "Owner-approved brief checkpoint and evidence locations"
+  }
+}
+```
+The owner must explicitly approve the canonical new conversation URL, including its **same ChatGPT project scope**. The source must already be paused and contain no in-flight/unknown click, active slot, pending Smart V2 work or unknown ledger entry; browser worker must be idle. If any gate is uncertain, handoff is denied.
+
+The existing encrypted `tasks.json` is atomically rewritten once: source kept in archived state with ALL original delivery receipts and history, successor created with distinct ID and paused/disabled state, bound idempotency key and checkpoint fingerprint. Original messages and checkpoint notes are only present in the **AES-256-GCM encrypted message field** (not copied into a plaintext journal). The new task's instruction explicitly marks owner-provided Git/evidence/ACK references as **not independently verified**. It inherits only validated schedule configuration, **not** Smart V2 pending work, browser tab approval, active slot, send count, or any previous dispatch authorization.
+
+An identical POST after lost HTTP response/restart returns `ALREADY_STAGED`, not another task. A reused key with different context/URL or target already scheduled fails. Archived chat is excluded from active task cards and `dueTasks`; even a corrupted enabled archived record is ineligible for Send, and `start`/mutations reject it. Neither source nor successor is auto-started.
+
+**Durable cross-service coordinator:** `autosend/handoff-coordinator.mjs` exports `coordinateChatHandoff(journalDir,intent,{autoPort,hubPort,autoToken,hubToken})` and `reconcileChatHandoff(journalDir,key,clients)` for a **separately owner-invoked** two-service handoff. This calls the existing AutoSend owner-only HTTP `handoff_chat` and then Messaging Hub owner-only `/api/agents/replace` exactly once per intent, with a pre-claimed durable journal (private file, no URL/message/secret), strong request fingerprint, and no autonomous Send. Hub's replacement transaction copies unread messages to the new agent and archives the old. If a response is lost, coordinator returns `UNKNOWN` and **does not retry POST**. Read-only recovery GETs independently inspect the exact new chat URL, archived predecessor, successor registration, and paused AutoSend replacement; inconsistent state returns `NEED_OWNER`.
+
+**Residual gate:** the two state stores (SQLite Hub and encrypted JSON AutoSend) cannot commit in one distributed transaction, so the first state change can succeed while the second is `NEED_OWNER`/ `UNKNOWN`. Both chat schedules stay paused, no Send happens, and the journal preserves evidence for manual reconciliation. Tests exercise a fixture HTTP Hub with unread-message forwarding and independent real Hub lifecycle tests; a real owner-approved two-chat browser E2E and native owner UI are still pending. This is **SOURCE_VERIFIED**, not an accepted full production chat migration.
+
+
+### Explicitly unlocking the successor after real owner verification
+
+The successor is initially `handoff_requires_owner_reconfigure=true`. `arm`, `send_once` and `dueTasks` all reject this pending state (including an incorrectly re-enabled disk record); `start` cannot bypass the restriction. After the coordinator confirms **COMPLETE** and the owner has independently inspected the **specific new ChatGPT tab** through the read-only `preview` action, the native owner can call `POST /api/tasks` with `action="unlock_handoff"`, exact `id`, `owner_confirmed_target`, `checkpoint_sha256`, `owner_confirmed_hub=true`, and `owner_confirmed_browser=true`. The backend also requires a live approved tab lease for the successor; owner assertions alone cannot bypass this check. Unlock merely clears the gate **and leaves the new schedule paused**. A separate explicit Start is still required. Without connected Chrome, unlocking cannot pass, by design.
+
+The full fixture E2E now uses **real Python Messaging Hub HTTP + real Node AutoSend HTTP** in isolated temporary databases, verifying that one previously read message is *not* copied while two unread messages reach the new agent exactly once, old agent gets archived, and the new schedule remains paused. In contrast, the independent coordinator fault-injection fixtures use a simulated Hub to test ambiguous replies, lost receipts, cross-service recovery, and owner/URL mismatch refusal. **Real production/browser migration still NOT_RUN**; MCP-11 cannot be fully closed without an owner-approved test pair and working Chrome extension.

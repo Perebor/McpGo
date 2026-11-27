@@ -63,7 +63,7 @@ def main():
                     "files_tools.cjs","platform.js","job_worker.js",
                     "job_runtime.js","resource_locks.js","resource_policy.js","mcp-version.json"],
         "autosend":["server.mjs","delivery.mjs","browser-client.mjs","preview-check.mjs","browser-health.mjs","schedule.mjs","smart-continuation.mjs","core.mjs","conversation-fsm.mjs",
-                    "reconciliation.mjs","guarded-send.mjs","chat-state.mjs","browser-events.mjs","stream-monitor.mjs"],
+                    "reconciliation.mjs","guarded-send.mjs","chat-state.mjs","browser-events.mjs","stream-monitor.mjs","chat-handoff.mjs","handoff-coordinator.mjs"],
         "messaging":["hub.py","work_queue.py","delegated_auth.py","autosend_bridge.py"],
         "execution":["role_engine.py","role_worker.py","hub_role_adapter.py"],
         "onboarding":["setup_engine.py","runtime_provision.py","cli.py","browser_compat.py","diagnostics.py"],

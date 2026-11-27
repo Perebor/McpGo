@@ -65,6 +65,7 @@ export function hasUnresolvedTask(task){
   !!task.verification||!!task.active_slot_id;
 }
 export function assertTaskMutable(task){
+ if(task.handoff_archived_at)throw Error('Разговор архивирован после handoff: повторный Send запрещён.');
  if(hasUnresolvedTask(task))throw Error('Незавершённая или неизвестная доставка. Сначала завершите проверку исходной попытки; повтор Send запрещён.');
 }
 export function setIntervalOffset(task,value){
@@ -204,6 +205,8 @@ export function getOrCreateControlToken(file=path.join(path.dirname(stateFile),'
   return token;
 }
 export function arm(task,now=Date.now()) {
+  assertTaskMutable(task);
+  if(task.handoff_requires_owner_reconfigure)throw Error('Chat handoff awaits owner approval and browser verification.');
   // Enabling an interval schedule arms the first attempt immediately.
   // Subsequent attempts still use the configured cadence and safety checks.
   const next=(task.schedule_mode||'interval')==='interval'
@@ -302,5 +305,5 @@ export function markUnknownOnBoot(state){
 }
 
 export function dueTasks(state,now=Date.now()) {
-  return state.tasks.filter(t=>t.enabled && t.status==='scheduled' && t.next_at && Date.parse(t.next_at)<=now);
+  return state.tasks.filter(t=>!t.handoff_archived_at && !t.handoff_requires_owner_reconfigure && t.enabled && t.status==='scheduled' && t.next_at && Date.parse(t.next_at)<=now);
 }

@@ -14,6 +14,7 @@ import {deferBusyIntervalRetry,confirmedBusyRetryReason} from './busy-retry.mjs'
 import {chooseSmartAction,smartTaskMessage,promoteSmartReceipt,validateSmartConfiguration,resumeSmartTaskFromOwnerPause} from './smart-v2.mjs';
 import {readSmartBrowserOutcome} from './smart-v2-browser.mjs';
 import {requestForceRemove,finalizeForcedRemovals,visibleTasks} from './force-remove.mjs';
+import {planChatHandoff} from './chat-handoff.mjs';
 import {assessWorkReadiness,commitWorkReadiness,workEfficiency,shouldRetryExternalVerification,rearmVerifiedExternalWork} from './smart-work-ready.mjs';
 import {KNOWN_WORK_POLICIES,inspectWorkResult,commitObservedWorkResult} from './work-result.mjs';
 import {verifyGitHubWork} from './github-work-adapter.mjs';
@@ -58,7 +59,8 @@ function persist(){
 }
 persist();
 function now(){return new Date().toISOString()}
-function find(id){const t=db.tasks.find(t=>t.id===id);if(!t)throw Error('Расписание не найдено.');return t}
+function find(id){const t=db.tasks.find(t=>t.id===id);if(!t)throw Error('Расписание не найдено.');
+ if(t.handoff_archived_at)throw Error('Чат архивирован при передаче контекста: повторный запуск запрещён.');return t}
 function authenticated(req){
  const provided=req.headers['x-mcphub-token'];
  return req.headers['x-mcphub-client']==='native' && !req.headers.origin &&
@@ -129,6 +131,50 @@ async function recoverApprovedTabs(){
 }
 function operation(action,body){
  switch(action){
+  case 'handoff_chat':{
+   const keys=['action','source_id','target_url','owner_confirmed_target','idempotency_key','checkpoint'];
+   if(Object.keys(body).length!==keys.length||Object.keys(body).some(k=>!keys.includes(k)))
+    throw Error('Unsupported chat handoff request fields');
+   const {state:next,receipt}=planChatHandoff(db,{
+    source_id:body.source_id,target_url:body.target_url,
+    owner_confirmed_target:body.owner_confirmed_target,
+    idempotency_key:body.idempotency_key,checkpoint:body.checkpoint
+   },{workerBusy,currentTaskId:currentScheduledTaskId});
+   if(receipt.status==='ALREADY_STAGED')return receipt;
+   // One encrypted atomic snapshot contains BOTH old archive and new paused
+   // task; on persistence error keep the original in-memory store as well.
+   const oldTasks=db.tasks;db.tasks=next.tasks;
+   try{persist()}catch(e){db.tasks=oldTasks;throw e}
+   approvedTabs.update(receipt.source_id,false);
+   browserOnline=approvedTabs.size>0;
+   return receipt;
+  }
+  case 'unlock_handoff':{
+   const keys=['action','id','owner_confirmed_target','checkpoint_sha256',
+    'owner_confirmed_hub','owner_confirmed_browser'];
+   if(Object.keys(body).length!==keys.length||Object.keys(body).some(k=>!keys.includes(k)))
+    throw Error('Unsupported handoff unlock fields');
+   const target=find(body.id);
+   const source=db.tasks.find(x=>x.id===target.handoff_origin_task_id);
+   if(!source?.handoff_archived_at||source.handoff_replaced_by!==target.id||
+      target.handoff_checkpoint_sha256!==source.handoff_checkpoint_sha256)
+    throw Error('Handoff archival chain not verified');
+   if(body.owner_confirmed_target!==target.url||
+      body.checkpoint_sha256!==target.handoff_checkpoint_sha256||
+      body.owner_confirmed_hub!==true||body.owner_confirmed_browser!==true)
+    throw Error('Owner approval missing or does not match the saved handoff');
+   if(workerBusy||target.status!=='paused'||target.enabled||
+      target.manual_once||hasUnresolvedTask(target))
+    throw Error('New chat is busy, not paused, or has an unresolved receipt');
+   if(!approvedTabs.has(target.id))
+    throw Error('New browser tab is not verified; owner must inspect it first');
+   if(target.handoff_requires_owner_reconfigure!==true)
+    return {alreadyUnlocked:true,paused:true,sendBlocked:true};
+   target.handoff_requires_owner_reconfigure=false;
+   target.handoff_owner_confirmed_at=now();
+   persist();
+   return {unlocked:true,paused:true,sendBlocked:true};
+  }
   case 'create':{
    const t=newTask(body);
    if(t.guided_first_run&&db.tasks.some(x=>x.url===t.url))
@@ -286,6 +332,8 @@ function operation(action,body){
   }
   case 'send_once':{
    const t=find(body.id);assertTaskMutable(t);
+   if(t.handoff_requires_owner_reconfigure)
+    throw Error('New chat handoff requires verified owner approval before any Send.');
    if(t.manual_once && t.status==='scheduled')throw Error('Однократная отправка уже ожидает выполнения.');
    const competing=competingScheduleForChat(db.tasks,t);
    if(competing)throw Error('В том же чате уже есть другое действующее или неопределённое задание (ID '+
