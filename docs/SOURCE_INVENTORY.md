@@ -218,10 +218,11 @@
 | `windows/app/style.css` | 171 | `14e344d7b0c48f7a` |
 | `windows/app/updates.cjs` | 87 | `2f002f3e87959bb7` |
 | `windows/app/upgrade-safety.cjs` | 126 | `c7ed22a76f4f85d3` |
+| `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `700569fa8f255908` |
-| `windows/package.json` | 169 | `263880dc8508ef22` |
+| `windows/package-lock.json` | 3682 | `3ce7fce37b151afc` |
+| `windows/package.json` | 169 | `47db6d86840ecc82` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -235,6 +236,7 @@
 | `windows/tests/mcp06-health-contract.test.cjs` | 173 | `5b29e4b7d1cddf36` |
 | `windows/tests/mcp06-health-ui.test.cjs` | 38 | `333abe27e83df0f5` |
 | `windows/tests/mcp06-persistent-restart-budget.test.cjs` | 105 | `42dc9877c40d4b46` |
+| `windows/tests/mcp07-transaction.test.cjs` | 102 | `60b6020a062e2898` |
 | `windows/tests/mcp07-upgrade-preflight.test.cjs` | 119 | `3fd6564b31412f8c` |
 | `windows/tests/mcp07-upgrade-ui.test.cjs` | 50 | `fd26d262e93dbdfb` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
@@ -250,6 +252,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
 
-Всего файлов в выбранном source-only срезе: **243**.
+Всего файлов в выбранном source-only срезе: **245**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
