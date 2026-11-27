@@ -317,3 +317,20 @@ test('MCP-04 HTTP migration journals pre-existing click proof without any new Se
   assert.doesNotMatch(JSON.stringify(disk.transition_log),/DO_NOT_SEND|chatgpt.com/);
  }finally{await shutdown(s)}
 });
+
+test('MCP-05 HTTP status presents independent result counters, not self-reported claims as verified',async()=>{
+ const task={id:'museum-metric',url:CHAT_URL,message:'do not send',interval_seconds:900,
+  enabled:false,status:'paused',manual_once:false,next_at:null,delivery_count:0,
+  smart_v2_project:'Museum',work_result:{version:1,project:'Museum',status:'SELF_REPORT',fingerprint:'a'.repeat(64)},
+  work_result_metrics:{self_report_only:1,verified:0}};
+ const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
+ try{
+  const result=await (await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  const metrics=result.tasks[0].work_efficiency;
+  assert.equal(metrics.last_work_result_status,'SELF_REPORT');
+  assert.equal(metrics.self_report_only_results,1);
+  assert.equal(metrics.verified_work_results,0);
+  assert.equal(result.tasks[0].status,'paused');
+  assert.equal(result.tasks[0].delivery_count,0);
+ }finally{await shutdown(instance)}
+});

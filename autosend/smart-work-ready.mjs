@@ -94,6 +94,9 @@ export function workEfficiency(task){
   reported_tests_passed:m.reported_tests_passed||0,
   reported_tests_failed:m.reported_tests_failed||0,
   externally_verified_runs:m.externally_verified_runs||0,
+  verified_work_results:task?.work_result_metrics?.verified||0,
+  self_report_only_results:task?.work_result_metrics?.self_report_only||0,
+  last_work_result_status:task?.work_result?.status||'UNKNOWN',
   reported_files_per_delivery:count?(m.reported_files_changed||0)/count:null,
   reported_tests_per_delivery:count?(m.reported_tests_passed||0)/count:null,
   source:(m.externally_verified_runs||0)>0?'github_ci_verified+assistant_self_report':'assistant_self_report_NOT_GIT_CI_VERIFIED'
