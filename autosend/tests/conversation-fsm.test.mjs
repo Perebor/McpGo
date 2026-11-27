@@ -70,3 +70,47 @@ test('verification finished in chat A cannot unlock an unresolved B state',()=>{
  assert.equal(eligibleToSend(a,[a,b,c],now),true);
  assert.equal(conversationState([a,b,c],b.url).state,STATES.UNKNOWN);
 });
+
+test('MCP-04 duplicate scheduled tasks for one conversation fail closed but other chats advance',()=>{
+ const p='b'.repeat(32),chat='00000000-0000-4000-8000-000000000005';
+ const first={...task(5),url:'https://chatgpt.com/g/g-p-'+p+'/c/'+chat};
+ const duplicate={...task(6),url:'https://chatgpt.com/g/g-p-'+p+'-owner-project/c/'+chat};
+ const unrelated=task(7);
+ const tasks=[first,duplicate,unrelated];
+ assert.equal(eligibleToSend(first,tasks,now),false);
+ assert.equal(eligibleToSend(duplicate,tasks,now),false);
+ assert.equal(canObserveTask(first,tasks),false);
+ assert.equal(canObserveTask(duplicate,tasks),false);
+ assert.equal(conversationState(tasks,first.url).state,STATES.CONFLICT);
+ assert.equal(conversationState(tasks,duplicate.url).blocked,true);
+ assert.equal(nextDue(tasks,now)?.id,unrelated.id);
+});
+
+test('MCP-04 a paused task with unresolved receipt never allows a second Send',()=>{
+ const active=task(8);
+ const interrupted={...task(9,'paused'),url:active.url,enabled:false,
+   verification:{startedAt:'2026-11-09T11:00:00Z',messageHash:'receipt'}};
+ const tasks=[active,interrupted];
+ assert.equal(eligibleToSend(active,tasks,now),false);
+ assert.equal(canObserveTask(active,tasks),false);
+ assert.equal(conversationState(tasks,active.url).blocked,true);
+});
+
+test('MCP-04 completed paused historic schedule does not block a new one',()=>{
+ const active=task(10);
+ const old={...task(11,'paused'),url:active.url,enabled:false,
+   verification:null,active_slot_id:null,manual_once:false};
+ const tasks=[active,old];
+ assert.equal(eligibleToSend(active,tasks,now),true);
+ assert.equal(canObserveTask(active,tasks),true);
+ assert.equal(conversationState(tasks,active.url).state,STATES.READY);
+ assert.equal(nextDue(tasks,now)?.id,active.id);
+});
+test('MCP-04 duplicated IDs cannot bypass the conversation guard',()=>{
+ const a={...task(12),id:'collision'};
+ const b={...task(13),id:'collision',url:a.url};
+ const unrelated=task(14);
+ assert.equal(eligibleToSend(a,[a,b,unrelated],now),false);
+ assert.equal(eligibleToSend(b,[a,b,unrelated],now),false);
+ assert.equal(nextDue([a,b,unrelated],now)?.id,unrelated.id);
+});

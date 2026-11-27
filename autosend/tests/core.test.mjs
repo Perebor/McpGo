@@ -87,3 +87,19 @@ test('pending manual one-shot is not delivered unexpectedly after scheduler rebo
  assert.equal(t.next_at,null);
  assert.match(t.last_error,/отменена при перезапуске/);
 });
+
+test('MCP-04 duplicate task IDs in durable store fail closed before read or write',()=>{
+ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'mcp04-duplicate-id-'));
+ try {
+  const file=path.join(folder,'tasks.json');
+  const state={version:1,tasks:[
+   {id:'same-id',url:target,enabled:true,status:'scheduled'},
+   {id:'same-id',url:project,enabled:true,status:'scheduled'}
+  ],attempts:[]};
+  const original=JSON.stringify(state)+'\n';
+  fs.writeFileSync(file,original);
+  assert.throws(()=>readState(file),/duplicate.*task.*id/i);
+  assert.throws(()=>writeState(state,file),/duplicate.*task.*id/i);
+  assert.equal(fs.readFileSync(file,'utf8'),original);
+ } finally {fs.rmSync(folder,{recursive:true,force:true});}
+});

@@ -129,12 +129,23 @@ function unseal(entry,id,key){
  dec.setAAD(Buffer.from(id,'utf8'));dec.setAuthTag(Buffer.from(entry.tag,'base64'));
  return Buffer.concat([dec.update(Buffer.from(entry.ciphertext,'base64')),dec.final()]).toString('utf8');
 }
+// Duplicate IDs make owner lookups and receipts ambiguous: refuse the
+// entire store rather than risking a Send against the wrong task record.
+function assertDistinctTaskIds(tasks){
+ const ids=new Set();
+ for(const t of tasks){
+  if(typeof t?.id!=='string'||!t.id||ids.has(t.id))
+   throw Error('Duplicate or invalid AutoSend task ID');
+  ids.add(t.id);
+ }
+}
 export function readState(file=stateFile){
   ensurePrivateDir(path.dirname(file));
   if(!fs.existsSync(file)) return {version:1,tasks:[],attempts:[]};
   if(fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const obj=JSON.parse(fs.readFileSync(file,'utf8'));
   if(obj.version!==1 || !Array.isArray(obj.tasks) || !Array.isArray(obj.attempts)) throw Error('Unexpected task store format');
+ assertDistinctTaskIds(obj.tasks);
   if(obj.tasks.some(t=>t.sealed_message)){
     const key=messageKey(file,false);
     for(const t of obj.tasks){
@@ -148,6 +159,7 @@ export function readState(file=stateFile){
   return obj;
 }
 export function writeState(state,file=stateFile){
+  assertDistinctTaskIds(state.tasks);
   const dir=path.dirname(file);ensurePrivateDir(dir);
   if(fs.existsSync(file)&&fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const tmp=path.join(dir,'.tasks-'+crypto.randomUUID()+'.tmp');
