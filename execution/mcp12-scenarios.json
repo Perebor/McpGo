@@ -1,0 +1,38 @@
+[
+  {
+    "local": "VERIFIED",
+    "normal": "AVAILABLE",
+    "limited": "AVAILABLE",
+    "paid": false
+  },
+  {
+    "local": "VERIFIED",
+    "normal": "AVAILABLE",
+    "limited": "AVAILABLE",
+    "paid": false
+  },
+  {
+    "local": "BLOCKED",
+    "normal": "AVAILABLE",
+    "limited": "AVAILABLE",
+    "paid": false
+  },
+  {
+    "local": "EXHAUSTED",
+    "normal": "AVAILABLE",
+    "limited": "AVAILABLE",
+    "paid": false
+  },
+  {
+    "local": "EXHAUSTED",
+    "normal": "UNKNOWN",
+    "limited": "AVAILABLE",
+    "paid": false
+  },
+  {
+    "local": "EXHAUSTED",
+    "normal": "UNAVAILABLE",
+    "limited": "AVAILABLE",
+    "paid": true
+  }
+]

@@ -1,0 +1,267 @@
+"""MCP-12 owner-local evidence ledger and non-dispatching model route advisor.
+
+Neither this module nor its callers bypass quotas, make model calls, retry
+unknown sends, infer tokens, or assert provider-side completion without proof.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+
+PROJECT_ACTORS = {
+    'TD': frozenset(('td_coder','td_tester','td_auditor','mcpgo_lead')),
+    'Museum': frozenset(('museum_coder','museum_tester','museum_auditor','mcpgo_lead')),
+}
+IDENT = re.compile(r'[a-zA-Z][a-zA-Z0-9_.:-]{2,99}\Z')
+TASK = re.compile(r'[a-z][a-z0-9_-]{1,39}\Z')
+SHA256 = re.compile(r'[a-f0-9]{64}\Z')
+GIT_SHA = re.compile(r'[a-f0-9]{40}\Z')
+STATES = frozenset(('AVAILABLE','UNAVAILABLE','UNKNOWN'))
+LOCAL = frozenset(('VERIFIED','PENDING','EXHAUSTED','BLOCKED'))
+REASONS = {
+    'MODEL_CLAIMED': frozenset(('REQUEST_PENDING',)),
+    'BLOCKED': frozenset(('QUOTA_UNKNOWN','OWNER_PERMISSION','UNAVAILABLE',
+                         'PENDING_RECEIPT','LOCAL_CHECK_FAILED')),
+    'RETRY_PRECLICK': frozenset(('CONFIRMED_PRECLICK_NO_SEND',)),
+}
+KINDS = frozenset((*REASONS,'GIT_VERIFIED'))
+
+
+class UsageConflict(ValueError):
+    """Same durable event ID submitted with different content."""
+
+
+class UsageDenied(ValueError):
+    """A missing receipt, unsafe account/route or forged event was rejected."""
+
+
+def choose_route(local: str, ordinary: str, limited: str, owner_paid: bool) -> dict:
+    """Advisory only. Never opens a model or dispatches queued work.
+
+    UNKNOWN ordinary availability never triggers an escalation. Limited-cost
+    tiers require explicit owner permission and provider availability.
+    """
+    if local not in LOCAL or ordinary not in STATES or limited not in STATES or type(owner_paid) is not bool:
+        raise UsageDenied('Invalid routing evidence; no model dispatch')
+    if local == 'VERIFIED':
+        action,reason='NO_MODEL','INDEPENDENT_LOCAL_RESULT'
+    elif local == 'PENDING':
+        action,reason='LOCAL_CHECK','LOCAL_WORK_NOT_FINISHED'
+    elif local == 'BLOCKED':
+        action,reason='BLOCKED','RESOLVE_LOCAL_BLOCKER'
+    elif ordinary == 'AVAILABLE':
+        action,reason='NORMAL_CHAT','LOCAL_CHECKS_EXHAUSTED'
+    elif ordinary == 'UNKNOWN':
+        action,reason='WAIT_UNKNOWN','ORDINARY_QUOTA_NOT_VERIFIED'
+    elif not owner_paid:
+        action,reason='NEED_OWNER','LIMITED_TIER_NOT_AUTHORIZED'
+    elif limited == 'AVAILABLE':
+        action,reason='LIMITED_MODEL','OWNER_AUTHORIZED_AFTER_ORDINARY_UNAVAILABLE'
+    elif limited == 'UNKNOWN':
+        action,reason='WAIT_UNKNOWN','LIMITED_QUOTA_NOT_VERIFIED'
+    else:
+        action,reason='BLOCKED','NO_AVAILABLE_MODEL_TIER'
+    return {'action':action,'reason':reason,'dispatch_performed':False,
+            'tokens':'UNKNOWN','cost':'UNKNOWN'}
+
+
+def compare_fixture(fixtures: list[dict]) -> dict:
+    """Compare hypothetical claims on identical fixtures, not real savings."""
+    if not isinstance(fixtures,list) or len(fixtures)>1000:
+        raise UsageDenied('Invalid bounded fixture')
+    choices=[]
+    for item in fixtures:
+        if not isinstance(item,dict) or set(item) != {'local','normal','limited','paid'}:
+            raise UsageDenied('Invalid fixture schema')
+        choices.append(choose_route(item['local'],item['normal'],item['limited'],item['paid'])['action'])
+    proposed=sum(x in ('NORMAL_CHAT','LIMITED_MODEL') for x in choices)
+    local_only=sum(x == 'NO_MODEL' for x in choices)
+    return {
+        'kind':'SIMULATION_NOT_ACTUAL_SAVINGS',
+        'fixture_count':len(fixtures),
+        'baseline_hypothetical_model_claims':len(fixtures),
+        'policy_model_claims':proposed,
+        'policy_local_no_model':local_only,
+        'policy_wait_or_blocked':len(fixtures)-proposed-local_only,
+        'tokens':'UNKNOWN','money_saved':'UNKNOWN',
+        'verified_commits_from_fixture':None,
+    }
+
+
+def _identity(project,agent,run_id,task_id):
+    if project not in PROJECT_ACTORS or agent not in PROJECT_ACTORS[project] or (
+        not isinstance(run_id,str) or not IDENT.fullmatch(run_id)) or (
+        not isinstance(task_id,str) or not TASK.fullmatch(task_id)):
+        raise UsageDenied('Invalid project/agent/run/task scope')
+
+
+def _digest(obj):
+    return hashlib.sha256(json.dumps(obj,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+
+
+class UsageLedger:
+    """Durable, append-only owner-local run events. No prompts or tokens stored."""
+    def __init__(self,path):
+        self.path=Path(path).absolute()
+        if self.path.is_symlink() or self.path.parent.is_symlink():
+            raise UsageDenied('Unsafe ledger path')
+        self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        with self._db() as db:
+            db.execute('''CREATE TABLE IF NOT EXISTS usage_events(
+                event_id TEXT PRIMARY KEY,project TEXT NOT NULL,agent TEXT NOT NULL,
+                run_id TEXT NOT NULL,task_id TEXT NOT NULL,kind TEXT NOT NULL,
+                route TEXT NOT NULL,reason TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,commit_sha TEXT,test_sha TEXT,audit_sha TEXT,
+                created_utc TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )''')
+            db.execute('CREATE INDEX IF NOT EXISTS usage_project_agent ON usage_events(project,agent)')
+        if os.name!='nt':
+            os.chmod(self.path,0o600)
+
+    def _db(self):
+        class Connection:
+            def __init__(inner,filepath):
+                inner.filepath=filepath
+            def __enter__(inner):
+                inner.con=sqlite3.connect(str(inner.filepath),timeout=10)
+                inner.con.execute('PRAGMA busy_timeout=10000')
+                inner.con.execute('PRAGMA journal_mode=WAL')
+                inner.con.execute('BEGIN IMMEDIATE')
+                return inner.con
+            def __exit__(inner,exc_type,exc,tb):
+                try:
+                    if exc_type is None: inner.con.commit()
+                    else: inner.con.rollback()
+                finally: inner.con.close()
+        return Connection(self.path)
+
+    def _insert(self,event,allow_verification=False):
+        ident=event['event_id']
+        if not isinstance(ident,str) or not IDENT.fullmatch(ident):
+            raise UsageDenied('Invalid stable event identity')
+        _identity(event['project'],event['agent'],event['run_id'],event['task_id'])
+        kind,route,reason=event['kind'],event['route'],event['reason']
+        if kind not in KINDS or (
+            kind == 'GIT_VERIFIED' and not allow_verification):
+            raise UsageDenied('Verification requires independent local role-engine evidence')
+        if kind == 'GIT_VERIFIED':
+            if route!='NONE' or reason!='INDEPENDENT_GIT_TEST_AUDIT' or any(
+                not SHA256.fullmatch(event[k]) for k in ('test_sha','audit_sha')
+            ) or not GIT_SHA.fullmatch(event['commit_sha']):
+                raise UsageDenied('Invalid verified proof')
+        elif (kind not in REASONS or reason not in REASONS[kind] or
+              (route not in ('NORMAL_CHAT','LIMITED_MODEL') if kind=='MODEL_CLAIMED'
+               else route!='NONE') or
+              any(event[k] is not None for k in ('commit_sha','test_sha','audit_sha'))):
+            raise UsageDenied('Invalid evidence or tier for run event')
+        fingerprint=_digest(event)
+        with self._db() as con:
+            row=con.execute('SELECT fingerprint FROM usage_events WHERE event_id=?',(ident,)).fetchone()
+            if row:
+                if row[0]!=fingerprint:
+                    raise UsageConflict('Conflicting replay of already recorded usage event')
+                return 'ALREADY_RECORDED'
+            if kind=='RETRY_PRECLICK':
+                if con.execute('''SELECT 1 FROM usage_events WHERE
+                    project=? AND agent=? AND run_id=? AND kind='MODEL_CLAIMED' LIMIT 1''',
+                    (event['project'],event['agent'],event['run_id'])).fetchone():
+                    raise UsageDenied('Unknown model claim cannot be retried automatically')
+            try:
+                con.execute('''INSERT INTO usage_events
+                    (event_id,project,agent,run_id,task_id,kind,route,reason,
+                     fingerprint,commit_sha,test_sha,audit_sha)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',(
+                    ident,event['project'],event['agent'],event['run_id'],event['task_id'],
+                    kind,route,reason,fingerprint,event['commit_sha'],
+                    event['test_sha'],event['audit_sha']))
+            except sqlite3.IntegrityError as e:
+                raise UsageConflict('Duplicate event identity') from e
+        return 'RECORDED'
+
+    def record_event(self,*,event_id,project,agent,run_id,task_id,kind,route,reason,**extras):
+        if extras:
+            raise UsageDenied('Untrusted token counts, costs, or extra fields forbidden')
+        return self._insert(dict(event_id=event_id,project=project,agent=agent,
+                                 run_id=run_id,task_id=task_id,kind=kind,
+                                 route=route,reason=reason,
+                                 commit_sha=None,test_sha=None,audit_sha=None))
+
+    def capture_verified_role_run(self,engine,project,agent,run_id,task_id):
+        """Recheck the owner-registered repo, RoleEngine SQLite and Git commit.
+
+        A model/agent's JSON self-report is *never* a verified work receipt.
+        The local coder's Git SHA and independent tester/auditor receipts must
+        be durably present. This does not certify external CI/provider usage.
+        """
+        _identity(project,agent,run_id,task_id)
+        try:
+            from execution.role_engine import PROJECT_ROLES,_git
+            if PROJECT_ROLES[project]['coder']!=agent:
+                raise UsageDenied('Only the registered coder may own this verified run')
+            engine.check_scope(agent,project,'coder')
+            repo=engine._repo(project)
+            with engine._connect() as con:
+                row=con.execute('SELECT plan_sha,status,receipt FROM runs WHERE project=? AND task=?',
+                                (project,task_id)).fetchone()
+            if not row or row[1]!='VERIFIED' or not row[2]:
+                raise UsageDenied('Independent role execution has no VERIFIED receipt')
+            rec=json.loads(row[2])
+            commit=rec.get('commit')
+            tests=rec.get('test_sha256')
+            audit=rec.get('audit_sha256')
+            if (rec.get('status')!='VERIFIED' or rec.get('project')!=project or
+                rec.get('task_id')!=task_id or rec.get('plan_sha256')!=row[0] or
+                rec.get('tester_pass') is not True or rec.get('auditor_pass') is not True or
+                not isinstance(commit,str) or not GIT_SHA.fullmatch(commit) or
+                not isinstance(tests,str) or not SHA256.fullmatch(tests) or
+                not isinstance(audit,str) or not SHA256.fullmatch(audit)):
+                raise UsageDenied('Invalid independent role/test/audit receipt')
+            branch=rec.get('branch')
+            base=rec.get('base_commit')
+            if (branch != 'mcpgo/'+project+'/'+task_id or not isinstance(base,str)
+                or not GIT_SHA.fullmatch(base) or
+                _git(repo,'rev-parse',branch)!=commit or
+                _git(repo,'rev-parse',commit+'^')!=base):
+                raise UsageDenied('Git branch or parent does not match verified receipt')
+            paths=_git(repo,'diff','--name-only',base,commit).splitlines()
+            if not any(x.startswith('src/') and x.endswith('.py') for x in paths) or (
+                not any(x.startswith('tests/test_') and x.endswith('.py') for x in paths)):
+                raise UsageDenied('No independent source and test changes in Git commit')
+            event=dict(event_id='verified:'+project+':'+agent+':'+task_id,
+                       project=project,agent=agent,run_id=run_id,task_id=task_id,
+                       kind='GIT_VERIFIED',route='NONE',
+                       reason='INDEPENDENT_GIT_TEST_AUDIT',
+                       commit_sha=commit,test_sha=tests,audit_sha=audit)
+            return self._insert(event,allow_verification=True)
+        except UsageDenied:
+            raise
+        except (OSError,ValueError,RuntimeError,KeyError,sqlite3.Error) as e:
+            raise UsageDenied('Local proof unavailable or inconsistent') from e
+
+    def summary(self,project,agent):
+        _identity(project,agent,'summary','summary')
+        with self._db() as con:
+            rows=con.execute('''SELECT kind,COUNT(*)
+                FROM usage_events WHERE project=? AND agent=? GROUP BY kind''',
+                (project,agent)).fetchall()
+            commits=con.execute('''SELECT COUNT(DISTINCT commit_sha) FROM usage_events
+                WHERE project=? AND agent=? AND kind='GIT_VERIFIED' ''',
+                (project,agent)).fetchone()[0]
+        counts=dict(rows)
+        model=counts.get('MODEL_CLAIMED',0)
+        return {'project':project,'agent':agent,
+                'model_claims':model,'confirmed_model_calls':0,
+                'unverified_model_claims':model,
+                'blocked':counts.get('BLOCKED',0),
+                'preclick_retries':counts.get('RETRY_PRECLICK',0),
+                'verified_commits':commits,
+                'verified_test_runs':counts.get('GIT_VERIFIED',0),
+                'useful_verified_per_model_claim':commits/model if model else None,
+                'input_tokens':None,'output_tokens':None,
+                'token_measurement':'UNKNOWN','cost_measurement':'UNKNOWN',
+                'evidence_source':'owner_local_git_role_engine_not_provider',
+                'model_claim_note':'claims are NOT confirmed provider invocations'}

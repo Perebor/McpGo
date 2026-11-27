@@ -195,6 +195,12 @@
 | `execution/role_worker.py` | 135 | `0d2f2fd42fd1a3c9` |
 | `execution/tests/test_hub_role_adapter.py` | 107 | `8ebcd773b5c73750` |
 | `execution/tests/test_role_engine.py` | 115 | `a5dc9517be46e1fb` |
+| `execution/tests/test_usage_adapter.py` | 78 | `e0b4e6856e222882` |
+| `execution/tests/test_usage_cli.py` | 51 | `849e7085cda55924` |
+| `execution/tests/test_usage_ledger.py` | 153 | `8a5362414bcbd074` |
+| `execution/usage_adapter.py` | 62 | `362af1be63a188ff` |
+| `execution/usage_cli.py` | 48 | `7cfb674df8280d5d` |
+| `execution/usage_ledger.py` | 267 | `cdfe3751d3cf5f0f` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |
@@ -242,8 +248,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `72a24acac82388dd` |
-| `windows/package.json` | 181 | `0f84f68d0b372df4` |
+| `windows/package-lock.json` | 3682 | `d883b9caaa25c263` |
+| `windows/package.json` | 184 | `cba62e65f37f887a` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -265,6 +271,7 @@
 | `windows/tests/mcp09-queue-packaging.test.cjs` | 15 | `04f61e6da561a7aa` |
 | `windows/tests/mcp10-execution-packaging.test.cjs` | 17 | `ba18751a9bfed122` |
 | `windows/tests/mcp11-handoff-packaging.test.cjs` | 17 | `681edb8c8687b8b8` |
+| `windows/tests/mcp12-usage-packaging.test.cjs` | 16 | `7c0e933ee91a2c81` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -276,8 +283,8 @@
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 156 | `8a6bd601e1b31940` |
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
-| `windows/verify-build.py` | 118 | `f667ee645d60b399` |
+| `windows/verify-build.py` | 118 | `05ea88b7c5087c77` |
 
-Всего файлов в выбранном source-only срезе: **271**.
+Всего файлов в выбранном source-only срезе: **278**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
