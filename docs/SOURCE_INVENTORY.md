@@ -205,21 +205,22 @@
 | `windows/HOTFIX_RELEASE_MANIFEST.json` | 31 | `1adb63a379b54aa1` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
-| `windows/app/index.html` | 113 | `7f59dc15a081463b` |
+| `windows/app/health-contract.cjs` | 150 | `6ca11ed9683150f8` |
+| `windows/app/index.html` | 114 | `e9e7e84a80c1ba84` |
 | `windows/app/local-api.cjs` | 46 | `83f7a9e6b0c8bc47` |
 | `windows/app/main.cjs` | 237 | `d984565e9d916c6f` |
 | `windows/app/onboarding.cjs` | 63 | `bc4191e562a54379` |
 | `windows/app/preload.cjs` | 32 | `39e234ed8e4e2386` |
-| `windows/app/renderer.js` | 732 | `4dd5afa589375e65` |
-| `windows/app/runtime.cjs` | 518 | `7fcdc9b71293fdcb` |
+| `windows/app/renderer.js` | 747 | `5985e7d93393db15` |
+| `windows/app/runtime.cjs` | 558 | `09ebec17ca3208da` |
 | `windows/app/settings.cjs` | 129 | `b3872286f24021ff` |
 | `windows/app/skills.cjs` | 21 | `92cadd2cdc79f687` |
 | `windows/app/style.css` | 171 | `14e344d7b0c48f7a` |
 | `windows/app/updates.cjs` | 87 | `2f002f3e87959bb7` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `8de70287960eeffc` |
-| `windows/package.json` | 169 | `bed4eef23df71609` |
+| `windows/package-lock.json` | 3682 | `0a7510f25c6b60cc` |
+| `windows/package.json` | 169 | `57f97e1227cfa6ad` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -230,6 +231,8 @@
 | `windows/tests/mcp02-guided-start.test.cjs` | 184 | `63881090269df8ca` |
 | `windows/tests/mcp03-browser-generation.test.cjs` | 25 | `92986f7a53ebd3c5` |
 | `windows/tests/mcp05-work-result-ui.test.cjs` | 43 | `e4c8760273c39657` |
+| `windows/tests/mcp06-health-contract.test.cjs` | 173 | `5b29e4b7d1cddf36` |
+| `windows/tests/mcp06-health-ui.test.cjs` | 38 | `333abe27e83df0f5` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -243,6 +246,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
 
-Всего файлов в выбранном source-only срезе: **236**.
+Всего файлов в выбранном source-only срезе: **239**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

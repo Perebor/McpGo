@@ -7,6 +7,7 @@ const {spawn,spawnSync}=require('node:child_process');
 const {record:diag,register,scrub}=require('./diagnostics.cjs');
 const sourceHealth=path.resolve(__dirname,'../../dashboard/connection-health.cjs');
 const connectionHealth=require(fs.existsSync(sourceHealth)?sourceHealth:path.join(process.resourcesPath,'mcpgo-runtime/dashboard/connection-health.cjs'));
+const {buildHealthContract,planSafeRestart,autoSendStateSafety,readOnlyProbe}=require('./health-contract.cjs');
 
 const ENDPOINTS=Object.freeze({terminal:12848,browser:8931,autosendBrowser:8932,proxy:8940,autosend:8972,messaging:8971});
 const CORE_SERVICES=Object.freeze(['terminal','browser','proxy','autosendBrowser','autosend','messaging']);
@@ -127,6 +128,7 @@ class Runtime {
     this.browserVerificationFailure=null;
     this.healthHistory=new connectionHealth.HealthHistory(path.join(userData,'connection-health-history.json'));
     this.recoveryBudget={};
+    this.serviceProbes={};
   }
   report() {
     const state={};
@@ -154,11 +156,13 @@ class Runtime {
     };
   }
   readinessState(){
-    const h=this.connectionState();
+    const now=Date.now(),h=this.connectionState();
     return {...this.readiness,terminalMcp:h.terminal.mcp,terminalTunnel:h.terminal.tunnel==='ready',
       browserMcp:h.browser.mcp,browserTunnel:h.browser.tunnel==='ready',
       chrome:h.browser.browser==='ready'?true:h.browser.browser==='failed'?false:null,
-      connectionHealth:h,history:this.healthHistory.snapshot()};
+      connectionHealth:h,history:this.healthHistory.snapshot(),
+      healthContract:buildHealthContract({processes:this.state(),connections:h,
+        probes:this.serviceProbes},now)};
   }
   state(){const snapshot={};for(const name of ['terminal','browser','proxy','autosendBrowser','autosend','messaging','terminalTunnel','browserTunnel']){
     snapshot[name]=this.entries.get(name)?.state||'stopped';
@@ -416,6 +420,26 @@ class Runtime {
   }
   schedule(name,record){
     if(!this.running||this.entries.get(name)!==record||record.timer)return;
+    const service=name==='messaging'?'hub':
+      ['terminal','autosend'].includes(name)?name:
+      name==='terminalTunnel'||name==='browserTunnel'?'transport':'chrome';
+    // A previous local failure never authorizes repeating a possibly sent
+    // ChatGPT message. AutoSend restart requires all stored tasks paused.
+    const stateSafe=service==='autosend'?
+      autoSendStateSafety(path.join(this.userData,'AutoSend','tasks.json')).safe:true;
+    const clock=Date.now(),key='process:'+name;
+    const budget=this.recoveryBudget[key]??={attempts:[]};
+    budget.attempts=budget.attempts.filter(t=>Number.isFinite(t)&&t<=clock&&clock-t<3600000);
+    const plan=planSafeRestart({service,owned:true,health:'FAIL',
+      stateSafe,now:clock,recentAttempts:budget.attempts});
+    if(!plan.autoRestart){
+      record.state='blocked: '+(plan.reason==='RETRY_BUDGET_EXHAUSTED'?
+        'RETRY_BUDGET_EXHAUSTED':'NEED_OWNER');
+      diag(this.userData,'windows.runtime.retry.blocked',{
+        service:name,reason:plan.reason,nextSafeAction:plan.nextSafeAction});
+      this.report();return;
+    }
+    budget.attempts.push(clock);
     const wait=Math.min(60000,1500*2**Math.min(record.attempts++,5));
     diag(this.userData,'windows.runtime.retry.scheduled',{service:name,afterMs:wait,attempt:record.attempts});
     record.timer=setTimeout(()=>this.launch(name),wait);
@@ -452,14 +476,29 @@ class Runtime {
       let terminalUrl;
       try{terminalUrl=terminalEndpoint(this.paths.config)}catch{}
       const key=['terminal','terminalTunnel','browser','proxy','browserTunnel'].map(n=>this.entries.get(n)?.child?.pid||0).join(':');
-      const [t,b,tt,bt,th,bh]=await Promise.all([
+      let autosendToken=null;
+      try{
+        const file=path.join(this.userData,'AutoSend','control-token');
+        const stat=fs.lstatSync(file);
+        if(stat.isFile()&&!stat.isSymbolicLink()&&stat.size<=80){
+          const value=fs.readFileSync(file,'utf8').trim();
+          if(/^[a-f0-9]{64}$/.test(value))autosendToken=value;
+        }
+      }catch{}
+      const [t,b,tt,bt,th,bh,hubProbe,autosendProbe]=await Promise.all([
         active('terminal')&&terminalUrl?mcpReady(terminalUrl,['terminal_exec']):false,
         active('browser')&&active('proxy')?mcpReady('http://127.0.0.1:8940/mcp',['browser_tabs','browser_snapshot']):false,
         active('terminalTunnel')?connectionHealth.tunnelHealth(path.join(this.paths.tunnels,'terminal-health.url')):'down',
         active('browserTunnel')?connectionHealth.tunnelHealth(path.join(this.paths.tunnels,'browser-health.url')):'down',
         active('terminal')?connectionHealth.readTelemetry('http://127.0.0.1:12848/health'):null,
-        active('proxy')?connectionHealth.readTelemetry('http://127.0.0.1:8940/healthz'):null
+        active('proxy')?connectionHealth.readTelemetry('http://127.0.0.1:8940/healthz'):null,
+        active('messaging')?readOnlyProbe('hub'):null,
+        active('autosend')&&autosendToken?
+          readOnlyProbe('autosend',{token:autosendToken}):null
       ]);
+      if(!this.running||generation!==this.generation)return;
+      this.serviceProbes={hub:hubProbe,autosend:autosendProbe};
+
       if(!this.running||generation!==this.generation)return;
       this.healthEvidence={key,checkedAt:Date.now(),t,b,tt,bt,th,bh};
       const chrome=connectionHealth.browserEvidence(bh);
@@ -509,6 +548,7 @@ class Runtime {
     this.healthEvidence=null;
     this.browserVerificationFailure=null;
     this.recoveryBudget={};
+    this.serviceProbes={};
     this.readiness={terminalMcp:false,browserMcp:false,terminalTunnel:false,browserTunnel:false,chrome:null};
     this.browserProbePid=null;
     this.browserProbe=null;

@@ -114,6 +114,21 @@ let lastOverview=null;
 const healthLabels={ready:'Готов',down:'Недоступен',starting:'Ожидание',auth:'Ошибка авторизации',throttled:'Ограничение запросов',unmonitored:'Не проверяется',unknown:'Не подтверждён',failed:'Ошибка'};
 const reasonLabels={SERVICE_STOPPED:'Служба остановлена',HEALTH_STALE:'Данные устарели',LOCAL_MCP_UNAVAILABLE:'MCP не отвечает',TUNNEL_AUTH:'Ошибка авторизации',TUNNEL_DOWN:'Туннель не отвечает',TUNNEL_STARTING:'Туннель не готов',TUNNEL_UNMONITORED:'Нет проверки туннеля',TUNNEL_THROTTLED:'Ограничение запросов',BROWSER_CONNECTION_FAILED:'Нет связи с расширением',BROWSER_NOT_RECENTLY_VERIFIED:'Браузер давно не проверялся',BROWSER_TELEMETRY_UNAVAILABLE:'Нет данных браузера'};
 function renderConnection(data){
+ const contract=data.readiness?.healthContract;
+ const healthTarget=$('health-contract-list');
+ if(healthTarget){
+  const actions={NONE:'действий не требуется',RECHECK:'повторная проверка',
+   NEED_OWNER:'нужен владелец',WAIT_RECEIPT:'ожидание квитанции',
+   KEEP_PAUSED:'сохранить паузу',RESTART_OWNED_SERVICE:'безопасный перезапуск'};
+  const names=[['terminal','Terminal'],['chrome','Chrome'],['hub','Hub'],['autosend','AutoSend']];
+  healthTarget.textContent=names.map(([key,name])=>{
+   const c=contract?.components?.[key],status=['PASS','FAIL','UNKNOWN'].includes(c?.status)?c.status:'UNKNOWN';
+   const next=actions[c?.nextSafeAction]||'нужна проверка';
+   const stamp=c?.lastAttempt&&!Number.isNaN(Date.parse(c.lastAttempt))?
+    new Date(c.lastAttempt).toLocaleTimeString('ru-RU'):'не проверялся';
+   return name+': '+status+' · '+next+' · '+stamp;
+  }).join('\n');
+ }
  const h=data.readiness?.connectionHealth||{};
  for(const [id,c] of [['terminal-health-detail',h.terminal],['browser-health-detail',h.browser]]){
   const el=$(id);if(!el)continue;
