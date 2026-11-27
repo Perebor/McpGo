@@ -21,6 +21,28 @@ export const KNOWN_WORK_POLICIES=Object.freeze({
     job:'browser',step:'Browser XSS negative cases + positive proof on localhost only'})
   })})
 });
+// Narrow, independently checked GitHub evidence profile for the TD Bencho
+// experiment. Not the generic TD release policy: no CI on TD main is known.
+// Deliberately NOT chosen by server's generic TD work-result observer.
+export const KNOWN_WORK_PROFILES=Object.freeze({
+ TD_BENCHO_VARIANTS:Object.freeze({
+  project:'TD',repo:'Perebor/teplyedaty',
+  baseBranch:'feature/bencho-mit-ui-preview-20261126',
+  branchPrefix:'experiment/bencho-design-variants-',
+  requiredWorkflows:Object.freeze([
+   'Bencho MIT preview checks','Bencho design variants (isolated)'
+  ]),
+  requiredTestJobs:Object.freeze({
+   'Bencho MIT preview checks':Object.freeze({
+    job:'test',step:'Run isolated Bencho preview checks'
+   }),
+   'Bencho design variants (isolated)':Object.freeze({
+    job:'test',step:'Verify original preview and three visual variants'
+   })
+  })
+ })
+});
+
 const hash=parts=>createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 
 function reportedWork(outcome){
@@ -33,7 +55,7 @@ function reportedWork(outcome){
   testsFailed:w.tests_failed};
 }
 function validTrustedProof(proof,task,outcome,policy,now){
- if(!proof||proof.verified!==true||proof.source!=='github_ci_verified'||
+ if(!proof||proof.verified!==true||proof.testsVerified!==true||proof.source!=='github_ci_verified'||
     proof.project!==policy.project||proof.repo!==policy.repo||
     proof.fingerprint!==outcome.fingerprint||!SHA.test(proof.sha||'')||
     !Number.isSafeInteger(proof.prNumber)||proof.prNumber<1||proof.prNumber>999999||

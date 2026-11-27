@@ -334,3 +334,49 @@ test('MCP-05 HTTP status presents independent result counters, not self-reported
   assert.equal(result.tasks[0].delivery_count,0);
  }finally{await shutdown(instance)}
 });
+
+test('MCP-05 isolated HTTP end-to-end: TD and Museum independently verified results survive encrypted fixture store without Send',async()=>{
+ const {KNOWN_WORK_PROFILES,KNOWN_WORK_POLICIES,inspectWorkResult,commitObservedWorkResult}=
+  await import('../work-result.mjs');
+ const policies=[KNOWN_WORK_PROFILES.TD_BENCHO_VARIANTS,KNOWN_WORK_POLICIES.Museum];
+ const now=Date.now();
+ const tasks=[];
+ for(let i=0;i<policies.length;i++){
+  const p=policies[i];
+  const task={id:'isolated-'+p.project,url:'https://chatgpt.com/c/00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+   message:'DO_NOT_SEND',interval_seconds:900,enabled:false,status:'paused',
+   manual_once:false,next_at:null,delivery_count:0,smart_v2_project:p.project,
+   last_success_at:new Date(now-60000).toISOString()};
+  const outcome={kind:'report',fingerprint:String(i+1).repeat(64),
+   report:{status:'VERIFIED',task:'EXTERNAL-FIXTURE'},
+   workEvidence:{source:'assistant_self_report',files_changed:1,tests_passed:2,tests_failed:0,commit:'a'.repeat(40)}};
+  const proof={verified:true,testsVerified:true,source:'github_ci_verified',
+   project:p.project,repo:p.repo,fingerprint:outcome.fingerprint,
+   sha:'a'.repeat(40),prNumber:i+10,provenAt:new Date(now).toISOString(),
+   workflows:p.requiredWorkflows.map((name,j)=>({name,runId:100+i*10+j}))};
+  const classified=await inspectWorkResult(task,outcome,{policy:p,now,verify:async()=>proof});
+  assert.equal(classified.status,'VERIFIED');
+  assert.equal(commitObservedWorkResult(task,classified,now),true);
+  tasks.push(task);
+ }
+ const instance=await startIsolated({version:1,tasks,attempts:[]});
+ try{
+  const result=await (await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  assert.equal(result.tasks.length,2);
+  assert.deepEqual(result.tasks.map(t=>t.smart_v2_project).sort(),['Museum','TD']);
+  for(const t of result.tasks){
+   assert.equal(t.work_efficiency.verified_work_results,1);
+   assert.equal(t.work_efficiency.self_report_only_results,0);
+   assert.equal(t.work_efficiency.last_work_result_status,'VERIFIED');
+   assert.equal(t.delivery_count,0);
+   assert.equal(t.status,'paused');
+   assert.equal(t.enabled,false);
+  }
+  assert.equal(result.attempts.length,0);
+  const disk=JSON.parse(await readFile(instance.stateFile,'utf8'));
+  assert.equal(disk.tasks.length,2);
+  assert.equal(disk.tasks.every(t=>t.work_result_seen.length===1),true);
+  assert.equal(disk.tasks.every(t=>t.work_result_metrics.verified===1),true);
+  assert.equal(disk.transition_log.length,2);
+ }finally{await shutdown(instance)}
+});

@@ -14,10 +14,10 @@ const outcome=()=>({kind:'report',fingerprint:fp,githubPrNumber:159,
  report:{status:'VERIFIED',task:'RR-001'},
  workEvidence:{source:'assistant_self_report',files_changed:2,tests_passed:3,tests_failed:0,commit:sha}});
 function fixtures(policy){
- const branch=policy.project==='Museum'?'integration/museum-mvp-20261127':'work/td-mvp';
+ const branch=policy.project==='Museum'?'integration/museum-mvp-20261127':policy.branchPrefix+'fixture';
  const pr={number:159,state:'open',draft:true,merged:false,
   created_at:'2026-11-27T06:10:00Z',updated_at:'2026-11-27T06:40:00Z',
-  base:{ref:'main',repo:{full_name:policy.repo}},
+  base:{ref:policy.baseBranch,repo:{full_name:policy.repo}},
   head:{ref:branch,sha,repo:{full_name:policy.repo}}};
  const commit={sha,commit:{committer:{date:'2026-11-27T06:20:00Z'}},
   files:[{filename:'src/app.js',status:'modified',changes:12}]};
@@ -132,4 +132,34 @@ test('MCP-05 HTTP GitHub client refuses URLs and unapproved paths before fetch',
  for(const route of ['/pulls/159/../../other','/actions/runs/0/jobs?per_page=100','https://evil.example/'])
   assert.equal(await get(route),null);
  assert.deepEqual(calls,['https://api.github.com/repos/Perebor/Museum/pulls/159']);
+});
+
+test('MCP-05 TD verified experimental Bencho policy has exact real branch, workflows and passing test steps',async()=>{
+ const {KNOWN_WORK_PROFILES}=await import('../work-result.mjs');
+ const p=KNOWN_WORK_PROFILES.TD_BENCHO_VARIANTS;
+ assert.equal(p.project,'TD');
+ assert.equal(p.repo,'Perebor/teplyedaty');
+ assert.equal(p.baseBranch,'feature/bencho-mit-ui-preview-20261126');
+ assert.equal(p.branchPrefix,'experiment/bencho-design-variants-');
+ assert.deepEqual(p.requiredWorkflows,['Bencho MIT preview checks','Bencho design variants (isolated)']);
+ assert.deepEqual(p.requiredTestJobs['Bencho MIT preview checks'],
+  {job:'test',step:'Run isolated Bencho preview checks'});
+ assert.deepEqual(p.requiredTestJobs['Bencho design variants (isolated)'],
+  {job:'test',step:'Verify original preview and three visual variants'});
+ assert.deepEqual(KNOWN_WORK_POLICIES.TD.requiredWorkflows,[],
+  'generic TD still fails closed, experiment is not the whole TD product');
+});
+
+test('MCP-05 scoped trusted TD subbranch base verifies, untrusted base fails before network',async()=>{
+ const {KNOWN_WORK_PROFILES}=await import('../work-result.mjs');
+ const policy=KNOWN_WORK_PROFILES.TD_BENCHO_VARIANTS;
+ const o=outcome(),p=provider(policy);
+ const ok=await verifyGitHubWork(task('TD'),o,{policy,getJson:p.getJson,now});
+ assert.equal(ok?.verified,true,'trusted exact non-main base must be supported');
+ assert.equal(ok?.workflows.length,2);
+ const unsafePolicy={...policy,baseBranch:'../../untrusted'};
+ const bad=provider(unsafePolicy);
+ assert.equal(await verifyGitHubWork(task('TD'),o,{
+  policy:unsafePolicy,getJson:bad.getJson,now}),null);
+ assert.equal(bad.seen.length,0);
 });

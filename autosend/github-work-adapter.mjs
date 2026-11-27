@@ -52,7 +52,8 @@ export async function createGitHubReadOnlyGetter({repo,token=null,fetchImpl=fetc
 }
 function trustworthyPolicy(policy,task){
  if(!policy||policy.project!==task.smart_v2_project||!REPO.test(policy.repo||'')||
-    typeof policy.baseBranch!=='string'||policy.baseBranch!=='main'||
+    typeof policy.baseBranch!=='string'||!/^([A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+$/.test(policy.baseBranch)||
+    policy.baseBranch.includes('..')||policy.baseBranch.length>120||
     typeof policy.branchPrefix!=='string'||!/^[A-Za-z0-9_/-]+$/.test(policy.branchPrefix)||
     !Array.isArray(policy.requiredWorkflows)||policy.requiredWorkflows.length<1||
     policy.requiredWorkflows.length>5||!policy.requiredTestJobs)return false;

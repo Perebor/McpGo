@@ -11,7 +11,7 @@ const task=(project)=>({id:project+'-task',smart_v2_project:project,last_success
 const outcome=(status='VERIFIED')=>({kind:'report',fingerprint:FP,
  report:{status,action:'CONTINUE_DEVELOPMENT',task:'RR-001'},
  workEvidence:{files_changed:4,tests_passed:27,tests_failed:0,commit:SHA,source:'assistant_self_report'}});
-const proof=(p)=>({verified:true,source:'github_ci_verified',project:p.project,repo:p.repo,
+const proof=(p)=>({verified:true,testsVerified:true,source:'github_ci_verified',project:p.project,repo:p.repo,
  fingerprint:FP,sha:SHA,prNumber:17,provenAt:'2026-11-27T06:44:00.000Z',
  workflows:p.requiredWorkflows.map((name,i)=>({name,runId:101+i}))});
 
@@ -156,4 +156,16 @@ test('MCP-05 production observer uses independent Git/CI/test adapter for work a
   'legacy Send gate must remain separately protected');
  assert.match(browser,/githubPrNumber:parseGitHubPrNumber\(second\.assistantText\)/,
   'PR number may be parsed for both read-only project observers');
+});
+
+test('MCP-05 a green workflow alone is NOT verified without independently passing test jobs',async()=>{
+ const p=projects.Museum,t=task('Museum'),o=outcome();
+ for(const missing of [undefined,false,null]){
+  const candidate={...proof(p),testsVerified:missing};
+  const r=await inspectWorkResult(t,o,{policy:p,now,verify:async()=>candidate});
+  assert.equal(r.verified,false);
+  assert.equal(r.status,'SELF_REPORT');
+ }
+ assert.equal((await inspectWorkResult(t,o,{policy:p,now,
+  verify:async()=>({...proof(p),testsVerified:true})})).verified,true);
 });
