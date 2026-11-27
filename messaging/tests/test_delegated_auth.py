@@ -2,7 +2,7 @@ import importlib.util
 import pathlib
 import sqlite3
 import tempfile
-import unittes
+import unittest
 
 SPEC = importlib.util.spec_from_file_location('delegated_auth', pathlib.Path(__file__).resolve().parents[1] / 'delegated_auth.py')
 if SPEC.origin and pathlib.Path(SPEC.origin).exists():
