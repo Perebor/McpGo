@@ -1,3 +1,4 @@
+import {validateTransitionJournal} from './transition-journal.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -145,6 +146,7 @@ export function readState(file=stateFile){
   if(fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const obj=JSON.parse(fs.readFileSync(file,'utf8'));
   if(obj.version!==1 || !Array.isArray(obj.tasks) || !Array.isArray(obj.attempts)) throw Error('Unexpected task store format');
+  validateTransitionJournal(obj.transition_log,obj.transition_sequence);
  assertDistinctTaskIds(obj.tasks);
   if(obj.tasks.some(t=>t.sealed_message)){
     const key=messageKey(file,false);
@@ -159,6 +161,7 @@ export function readState(file=stateFile){
   return obj;
 }
 export function writeState(state,file=stateFile){
+  validateTransitionJournal(state.transition_log,state.transition_sequence);
   assertDistinctTaskIds(state.tasks);
   const dir=path.dirname(file);ensurePrivateDir(dir);
   if(fs.existsSync(file)&&fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');

@@ -297,3 +297,23 @@ test('guided project creation is paused, deduplicated and never bootstraps witho
   assert.equal(JSON.parse(await readFile(instance.stateFile,'utf8')).tasks.length,1);
  }finally{await shutdown(instance)}
 });
+
+test('MCP-04 HTTP migration journals pre-existing click proof without any new Send',async()=>{
+ const task={id:'legacy-click',url:CHAT_URL,message:'DO_NOT_SEND',interval_seconds:900,
+  enabled:true,status:'sending',manual_once:false,next_at:null,
+  last_attempt_at:new Date().toISOString(),last_error:'',delivery_count:0,
+  delivery_stage:'click-committed',verification:verificationReceipt({userCount:1,lastUserText:'old'})};
+ const s=await startIsolated({version:1,tasks:[task],attempts:[]});
+ try{
+  const response=await (await fetch(s.base+'/api/status',{headers:s.headers})).json();
+  assert.equal(response.tasks[0].status,'verifying');
+  assert.equal(response.tasks[0].delivery_count,0);
+  const disk=JSON.parse(await readFile(s.stateFile,'utf8'));
+  assert.equal(disk.transition_sequence,2);
+  assert.deepEqual(disk.transition_log.map(x=>x.kind),['BASELINE_IMPORTED','STATUS_CHANGED']);
+  assert.equal(disk.transition_log.at(-1).from.status,'sending');
+  assert.equal(disk.transition_log.at(-1).to.status,'verifying');
+  assert.equal(disk.transition_log.at(-1).to.receipt,true);
+  assert.doesNotMatch(JSON.stringify(disk.transition_log),/DO_NOT_SEND|chatgpt.com/);
+ }finally{await shutdown(s)}
+});

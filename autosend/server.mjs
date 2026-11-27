@@ -5,6 +5,7 @@ import {probeBrowserHealth} from './browser-health.mjs';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
 import {verificationReceipt,canReconcile,expired,scheduleNextCheck,finishUnknown,finishVerified,recheckUnknown,restoreAttemptEvidence} from './reconciliation.mjs';
 import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset,hasUnresolvedTask,assertTaskMutable} from './core.mjs';
+import {nextTransitionJournal} from './transition-journal.mjs';
 import {stableSlotId,recordSlot,safeSlotStatus} from './schedule.mjs';
 import {trackSmartContinuation} from './smart-continuation.mjs';
 import {conversationState,conversationStates,eligibleToSend,nextDue,canObserveTask,competingScheduleForChat} from './conversation-fsm.mjs';
@@ -38,11 +39,22 @@ let lastTabRecoveryCheck=0;
 const CHECK_MS=Number(process.env.MCPHUB_AUTOSEND_CHECK_MS||10000);
 const CONTROL_TOKEN=getOrCreateControlToken();
 const db=readState();
+// Capture the last durable state BEFORE startup recovery: both migration and
+// recovery transitions must be recorded, never silently rewritten.
+let lastPersistedTasks=db.tasks.map(t=>({...t}));
 markUnknownOnBoot(db);
 finalizeForcedRemovals(db);
-writeState(db);
 const MAX_IN_FLIGHT=240000;
-function persist(){writeState(db)}
+function persist(){
+ const update=nextTransitionJournal({before:lastPersistedTasks,after:db.tasks,
+  journal:db.transition_log,sequence:db.transition_sequence});
+ // Commit the journal and task mutation in ONE atomic tasks.json rename.
+ // Do not advance the checkpoint until the encrypted state write succeeds.
+ writeState({...db,transition_log:update.log,transition_sequence:update.sequence});
+ db.transition_log=update.log;db.transition_sequence=update.sequence;
+ lastPersistedTasks=db.tasks.map(t=>({...t}));
+}
+persist();
 function now(){return new Date().toISOString()}
 function find(id){const t=db.tasks.find(t=>t.id===id);if(!t)throw Error('Расписание не найдено.');return t}
 function authenticated(req){
