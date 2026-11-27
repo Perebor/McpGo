@@ -65,6 +65,7 @@ def main():
         "autosend":["server.mjs","delivery.mjs","browser-client.mjs","preview-check.mjs","browser-health.mjs","schedule.mjs","smart-continuation.mjs","core.mjs","conversation-fsm.mjs",
                     "reconciliation.mjs","guarded-send.mjs","chat-state.mjs","browser-events.mjs","stream-monitor.mjs"],
         "messaging":["hub.py","work_queue.py","delegated_auth.py","autosend_bridge.py"],
+        "execution":["role_engine.py","role_worker.py","hub_role_adapter.py"],
         "onboarding":["setup_engine.py","runtime_provision.py","cli.py","browser_compat.py","diagnostics.py"],
         "dashboard":["connection-health.cjs"],
         "playwright":["probe.mjs","restricted-proxy.mjs","action-guard.mjs","browser-session-manager.mjs", "mcp-response.mjs", "page-inspection.mjs", "inspection-conditions.mjs", "tool-profiles.mjs", "browser-queue.mjs",

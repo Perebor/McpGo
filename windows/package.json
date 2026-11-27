@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.30-local.1",
+  "version": "2.1.0-preview.31-local.1",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -111,6 +111,15 @@
           "work_queue.py",
           "delegated_auth.py",
           "autosend_bridge.py"
+        ]
+      },
+      {
+        "from": "../execution",
+        "to": "mcpgo-runtime/execution",
+        "filter": [
+          "role_engine.py",
+          "role_worker.py",
+          "hub_role_adapter.py"
         ]
       },
       {

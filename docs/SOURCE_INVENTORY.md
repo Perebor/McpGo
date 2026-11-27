@@ -182,7 +182,12 @@
 | `messaging/tests/test_lifecycle.py` | 100 | `5c4129c953f89b7f` |
 | `messaging/tests/test_work_queue.py` | 111 | `446cdedbc03943f6` |
 | `messaging/tests/test_work_queue_trust.py` | 114 | `7c019cd5b7ca4747` |
-| `messaging/work_queue.py` | 253 | `67dcee9967c8cc38` |
+| `messaging/work_queue.py` | 254 | `257b0bdd8b670b70` |
+| `execution/hub_role_adapter.py` | 120 | `6b7570686b927160` |
+| `execution/role_engine.py` | 323 | `cc01bf07c982e1d2` |
+| `execution/role_worker.py` | 135 | `0d2f2fd42fd1a3c9` |
+| `execution/tests/test_hub_role_adapter.py` | 107 | `8ebcd773b5c73750` |
+| `execution/tests/test_role_engine.py` | 115 | `a5dc9517be46e1fb` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |
@@ -209,7 +214,7 @@
 | `tests/test_onboarding_safety.py` | 103 | `c9cc4283994a09e4` |
 | `tests/test_runtime_upgrade.py` | 187 | `bb7c8c632f14f300` |
 | `tests/test_terminal_tunnel.py` | 90 | `6e5ac3655b2f81b9` |
-| `tools/generate_source_inventory.py` | 73 | `f64469474bf7681a` |
+| `tools/generate_source_inventory.py` | 74 | `2cfb9d86e54bd359` |
 | `tools/sync_readme.py` | 23 | `fa026188f89f64b8` |
 | `windows/HOTFIX_RELEASE_MANIFEST.json` | 31 | `1adb63a379b54aa1` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
@@ -230,8 +235,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `26807ae25d9e3a4d` |
-| `windows/package.json` | 172 | `3456cff72830cc5b` |
+| `windows/package-lock.json` | 3682 | `db06438065177078` |
+| `windows/package.json` | 181 | `e663c8f576f61ef8` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -251,6 +256,7 @@
 | `windows/tests/mcp08-09-runtime-packaging.test.cjs` | 15 | `19d590f3dce8c2e3` |
 | `windows/tests/mcp08-native-auth.test.cjs` | 60 | `2322cafcb53a7310` |
 | `windows/tests/mcp09-queue-packaging.test.cjs` | 15 | `04f61e6da561a7aa` |
+| `windows/tests/mcp10-execution-packaging.test.cjs` | 17 | `ba18751a9bfed122` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -262,8 +268,8 @@
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 156 | `8a6bd601e1b31940` |
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
-| `windows/verify-build.py` | 117 | `fa3d3c8b1cb02f25` |
+| `windows/verify-build.py` | 118 | `ca72f317a6016af5` |
 
-Всего файлов в выбранном source-only срезе: **257**.
+Всего файлов в выбранном source-only срезе: **263**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

@@ -36,6 +36,7 @@ jobs:
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s onboarding/tests -v
           python3 -m unittest discover -s messaging/tests -v
+          python3 -m unittest discover -s execution/tests -v
           python3 tools/generate_source_inventory.py --check
       - name: Node MCP regression
         run: |

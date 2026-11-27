@@ -17,6 +17,7 @@ DIRECTORIES = {
     "playwright": {".mjs", ".sh"},
     "autosend": {".mjs", ".js", ".py", ".swift", ".html"},
     "messaging": {".py", ".mjs"},
+    "execution": {".py"},
     "launchers": {".mjs", ".sh"},
     "launchagents": {".plist"},
     "tests": {".py"},

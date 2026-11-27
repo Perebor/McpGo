@@ -141,7 +141,7 @@ def lease_next(db, project, agent, *, now_ms, ttl_ms):
         if not _has_scope(db, agent, project):
             db.execute('COMMIT')
             return None
-        row = db.execute("""SELECT id,payload FROM mcpgo_work_queue
+        row = db.execute("""SELECT id,payload,fingerprint FROM mcpgo_work_queue
             WHERE project=? AND state='QUEUED' ORDER BY created_ms,id LIMIT 1""", (project,)).fetchone()
         if row is None:
             db.execute('COMMIT')
@@ -156,6 +156,7 @@ def lease_next(db, project, agent, *, now_ms, ttl_ms):
             raise RuntimeError('Lost queue lease')
         db.execute('COMMIT')
         return {'id': row[0], 'project': project, 'agent': agent,
+                'fingerprint': row[2],
                 'lease_token': lease_token, 'lease_expires_ms': expires,
                 'payload': json.loads(row[1])}
     except Exception:
