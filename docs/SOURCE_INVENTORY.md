@@ -53,7 +53,7 @@
 | `terminal/interactive_runtime.cjs` | 162 | `e8b1bf2a9c8c1d6b` |
 | `terminal/job_runtime.js` | 375 | `1c35a81ead3b543d` |
 | `terminal/job_worker.js` | 177 | `a415ca0b0aff654c` |
-| `terminal/platform.js` | 45 | `cd22a43d0b5073dd` |
+| `terminal/platform.js` | 45 | `7a03c4f54fc0e138` |
 | `terminal/pty_worker.py` | 101 | `b0c583da2e789dae` |
 | `terminal/pty_worker_win.js` | 58 | `45071928b97e3cfc` |
 | `terminal/resource_locks.js` | 115 | `b6321dc0cb7c7188` |
@@ -221,8 +221,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `f05340b9ed1cb400` |
-| `windows/package.json` | 169 | `9e22282dc066724d` |
+| `windows/package-lock.json` | 3682 | `ab31f773c657707a` |
+| `windows/package.json` | 169 | `bb74ea6ad55e4d39` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -244,7 +244,7 @@
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
 | `windows/tests/package.test.cjs` | 84 | `2adedcaf3f3a6a46` |
-| `windows/tests/python-runtime.test.cjs` | 48 | `9ec42ea867eb3cc9` |
+| `windows/tests/python-runtime.test.cjs` | 54 | `939bbb842abb750c` |
 | `windows/tests/runtime.test.cjs` | 157 | `64fad290003c06fe` |
 | `windows/tests/settings.test.cjs` | 122 | `fd68e57b4b0c2677` |
 | `windows/tests/skills.test.cjs` | 41 | `afb59e0397546192` |

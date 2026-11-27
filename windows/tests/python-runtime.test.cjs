@@ -28,21 +28,27 @@ test('embedded Windows Python supports tunnel onboarding journal and SQLite agen
  t.after(()=>{if(processHub.pid)spawnSync('taskkill.exe',
   ['/PID',String(processHub.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',timeout:5000})});
  let ready=false;
+ let ownerToken=null;
  for(let i=0;i<60;i++){
   try{
+   const tokenFile=path.join(temp,'Messaging','control-token');
+   if(!fs.existsSync(tokenFile)){await new Promise(resolve=>setTimeout(resolve,150));continue}
+   const candidate=fs.readFileSync(tokenFile,'utf8').trim();
+   if(!/^[a-f0-9]{64}$/.test(candidate))throw Error('Invalid Hub owner token');
+   ownerToken=candidate;
    const r=await fetch('http://127.0.0.1:8971/api/status',
-    {headers:{'X-MCPHub-Client':'native'}});
+    {headers:{'X-MCPHub-Client':'native','X-MCPHub-Token':ownerToken}});
    if(r.ok){ready=true;break}
   }catch{}
   await new Promise(resolve=>setTimeout(resolve,150));
  }
- assert.ok(ready,'SQLite hub did not start');
+ assert.ok(ready,'SQLite hub did not start with native owner token');
  const register=await fetch('http://127.0.0.1:8971/api/agents',{
-  method:'POST',headers:{'X-MCPHub-Client':'native','Content-Type':'application/json'},
+  method:'POST',headers:{'X-MCPHub-Client':'native','X-MCPHub-Token':ownerToken,'Content-Type':'application/json'},
   body:JSON.stringify({id:'windowsci',label:'Windows CI',role:'agent'})});
  assert.equal(register.status,201);
  const responseAgents=await fetch('http://127.0.0.1:8971/api/agents',
-  {headers:{'X-MCPHub-Client':'native'}});
+  {headers:{'X-MCPHub-Client':'native','X-MCPHub-Token':ownerToken}});
  assert.equal(responseAgents.status,200);
  assert.ok((await responseAgents.json()).agents.some(x=>x.id==='windowsci'));
 });
