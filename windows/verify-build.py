@@ -64,7 +64,7 @@ def main():
                     "job_runtime.js","resource_locks.js","resource_policy.js","mcp-version.json"],
         "autosend":["server.mjs","delivery.mjs","browser-client.mjs","preview-check.mjs","browser-health.mjs","schedule.mjs","smart-continuation.mjs","core.mjs","conversation-fsm.mjs",
                     "reconciliation.mjs","guarded-send.mjs","chat-state.mjs","browser-events.mjs","stream-monitor.mjs"],
-        "messaging":["hub.py"],
+        "messaging":["hub.py","work_queue.py"],
         "onboarding":["setup_engine.py","runtime_provision.py","cli.py","browser_compat.py","diagnostics.py"],
         "dashboard":["connection-health.cjs"],
         "playwright":["probe.mjs","restricted-proxy.mjs","action-guard.mjs","browser-session-manager.mjs", "mcp-response.mjs", "page-inspection.mjs", "inspection-conditions.mjs", "tool-profiles.mjs", "browser-queue.mjs",

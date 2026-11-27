@@ -225,8 +225,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `ab31f773c657707a` |
-| `windows/package.json` | 169 | `bb74ea6ad55e4d39` |
+| `windows/package-lock.json` | 3682 | `1e9b59072682656e` |
+| `windows/package.json` | 170 | `42b66cdaf40e0fe8` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -244,6 +244,7 @@
 | `windows/tests/mcp07-upgrade-preflight.test.cjs` | 119 | `3fd6564b31412f8c` |
 | `windows/tests/mcp07-upgrade-ui.test.cjs` | 50 | `fd26d262e93dbdfb` |
 | `windows/tests/mcp08-native-auth.test.cjs` | 60 | `2322cafcb53a7310` |
+| `windows/tests/mcp09-queue-packaging.test.cjs` | 15 | `d0d7cf01802a47f0` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -255,8 +256,8 @@
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 156 | `8a6bd601e1b31940` |
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
-| `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
+| `windows/verify-build.py` | 117 | `be7ad4eacbdbe65b` |
 
-Всего файлов в выбранном source-only срезе: **250**.
+Всего файлов в выбранном source-only срезе: **251**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
