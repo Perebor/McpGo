@@ -121,7 +121,7 @@ test('MCP-06 local probes require validated structured status and never write',a
  const probe=await readOnlyProbe('hub',{fetchImpl:async(url,params)=>{
   calls.push({url,method:params.method,headers:params.headers});
   return {ok:true,json:async()=>({ok:true,agents:1})};
- },now:NOW});
+ },token:'a'.repeat(64),now:NOW});
  assert.equal(probe.ok,true);
  assert.equal(probe.checkedAt,NOW);
  assert.equal(calls[0].method,'GET');

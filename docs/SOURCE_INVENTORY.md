@@ -169,10 +169,10 @@
 | `autosend/tests/work-result.test.mjs` | 171 | `dc1a2c25d082b3d2` |
 | `autosend/transition-journal.mjs` | 109 | `10ebd36b61e32320` |
 | `autosend/work-result.mjs` | 150 | `1fb62b31abdb7185` |
-| `messaging/hub.py` | 429 | `fb1a5a65ed6d5e54` |
+| `messaging/hub.py` | 478 | `80116e21ca34a89d` |
 | `messaging/start.mjs` | 12 | `ae5feb8b2e914508` |
-| `messaging/tests/test_bus.py` | 60 | `fe68364e10a22133` |
-| `messaging/tests/test_http.py` | 93 | `5e2d25c3c4ca249d` |
+| `messaging/tests/test_bus.py` | 79 | `bb84746c175ef94a` |
+| `messaging/tests/test_http.py` | 108 | `6257baad84257d24` |
 | `messaging/tests/test_lifecycle.py` | 100 | `5c4129c953f89b7f` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
@@ -205,14 +205,14 @@
 | `windows/HOTFIX_RELEASE_MANIFEST.json` | 31 | `1adb63a379b54aa1` |
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
-| `windows/app/health-contract.cjs` | 204 | `969b2295100fcbd5` |
+| `windows/app/health-contract.cjs` | 204 | `d0900646ecd47af4` |
 | `windows/app/index.html` | 116 | `8ce152456722e86b` |
-| `windows/app/local-api.cjs` | 46 | `83f7a9e6b0c8bc47` |
+| `windows/app/local-api.cjs` | 55 | `9a6dc55b1d117c5e` |
 | `windows/app/main.cjs` | 250 | `0ea31db4b48cc860` |
 | `windows/app/onboarding.cjs` | 63 | `bc4191e562a54379` |
 | `windows/app/preload.cjs` | 33 | `964342a9f7cef15d` |
 | `windows/app/renderer.js` | 765 | `858f67aa0cc502f1` |
-| `windows/app/runtime.cjs` | 569 | `0512f839931ee977` |
+| `windows/app/runtime.cjs` | 574 | `31dbba1599c44273` |
 | `windows/app/settings.cjs` | 129 | `b3872286f24021ff` |
 | `windows/app/skills.cjs` | 21 | `92cadd2cdc79f687` |
 | `windows/app/style.css` | 171 | `14e344d7b0c48f7a` |
@@ -221,8 +221,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `3ce7fce37b151afc` |
-| `windows/package.json` | 169 | `47db6d86840ecc82` |
+| `windows/package-lock.json` | 3682 | `f05340b9ed1cb400` |
+| `windows/package.json` | 169 | `9e22282dc066724d` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -233,12 +233,13 @@
 | `windows/tests/mcp02-guided-start.test.cjs` | 184 | `63881090269df8ca` |
 | `windows/tests/mcp03-browser-generation.test.cjs` | 25 | `92986f7a53ebd3c5` |
 | `windows/tests/mcp05-work-result-ui.test.cjs` | 43 | `e4c8760273c39657` |
-| `windows/tests/mcp06-health-contract.test.cjs` | 173 | `5b29e4b7d1cddf36` |
+| `windows/tests/mcp06-health-contract.test.cjs` | 173 | `2c22ae2080c6a661` |
 | `windows/tests/mcp06-health-ui.test.cjs` | 38 | `333abe27e83df0f5` |
 | `windows/tests/mcp06-persistent-restart-budget.test.cjs` | 105 | `42dc9877c40d4b46` |
 | `windows/tests/mcp07-transaction.test.cjs` | 102 | `60b6020a062e2898` |
 | `windows/tests/mcp07-upgrade-preflight.test.cjs` | 119 | `3fd6564b31412f8c` |
 | `windows/tests/mcp07-upgrade-ui.test.cjs` | 50 | `fd26d262e93dbdfb` |
+| `windows/tests/mcp08-native-auth.test.cjs` | 60 | `2322cafcb53a7310` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -252,6 +253,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 117 | `8620e2f859fbf96f` |
 
-Всего файлов в выбранном source-only срезе: **245**.
+Всего файлов в выбранном source-only срезе: **246**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

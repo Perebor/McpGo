@@ -5,6 +5,8 @@ No ChatGPT transcript access or message injection. Uses SQLite and loopback HTTP
 import argparse
 import datetime
 import json
+import hmac
+import secrets
 import os
 import re
 import sqlite3
@@ -19,6 +21,47 @@ DATA = Path(os.environ.get('MCPHUB_MESSAGE_DB', str(Path.home() / 'Library/Appli
 PORT = 8971
 NAME = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,31}$')
 MAX_MESSAGE = 16000
+
+OWNER_TOKEN_RE = re.compile(r'^[0-9a-f]{64}$')
+
+
+def ensure_owner_token():
+    """OS-user-scoped native HTTP secret; never expose it through HTTP."""
+    folder = DATA.parent
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if folder.is_symlink():
+        raise ValueError('Unsafe Messaging token directory')
+    file = folder / 'control-token'
+    if file.is_symlink():
+        raise ValueError('Unsafe Messaging token symlink')
+    if not file.exists():
+        secret = secrets.token_hex(32)
+        try:
+            descriptor = os.open(str(file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            try:
+                os.write(descriptor, secret.encode('ascii'))
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    if file.is_symlink() or not file.is_file() or file.stat().st_size != 64:
+        raise ValueError('Unsafe Messaging control token')
+    token = file.read_text(encoding='ascii')
+    if not OWNER_TOKEN_RE.fullmatch(token):
+        raise ValueError('Invalid Messaging control token')
+    os.chmod(file, 0o600)
+    return token
+
+
+def authorized_owner(headers):
+    candidate = headers.get('X-MCPHub-Token', '')
+    # Do not let the native marker alone authenticate the caller.
+    if not isinstance(candidate, str) or not OWNER_TOKEN_RE.fullmatch(candidate):
+        return False
+    return hmac.compare_digest(candidate, ensure_owner_token())
+
 
 
 def now():
@@ -304,6 +347,11 @@ class Handler(BaseHTTPRequestHandler):
             self.result({'error':'Invalid host'},403);return False
         if self.headers.get('X-MCPHub-Client')!='native' or self.headers.get('Origin'):
             self.result({'error':'Native client header required; browser requests disabled'},403);return False
+        try:
+            if not authorized_owner(self.headers):
+                self.result({'error':'Authenticated native owner required'},403);return False
+        except (ValueError, OSError):
+            self.result({'error':'Native owner credential unavailable'},503);return False
         if writing:
             if not self.headers.get('Content-Type','').startswith('application/json'):
                 self.result({'error':'JSON required'},415);return False
@@ -351,6 +399,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def service():
+    ensure_owner_token()
     with ThreadingHTTPServer(('127.0.0.1',PORT),Handler) as s:
         print('MCP Hub messages ready on 127.0.0.1:'+str(PORT),flush=True)
         s.serve_forever()

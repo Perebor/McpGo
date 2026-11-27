@@ -116,12 +116,12 @@ function autoSendStateSafety(file){
 async function readOnlyProbe(component,{fetchImpl=fetch,token=null,now=Date.now()}={}){
  const result={ok:false,checkedAt:now};
  if(!['hub','autosend'].includes(component))return result;
- if(component==='autosend'&&(typeof token!=='string'||!/^[a-f0-9]{64}$/.test(token)))
+ if(typeof token!=='string'||!/^[a-f0-9]{64}$/.test(token))
   return result;
  const url=component==='hub'?'http://127.0.0.1:8971/api/status':
   'http://127.0.0.1:8972/api/status';
  const headers={'X-MCPHub-Client':'native'};
- if(component==='autosend')headers['X-MCPHub-Token']=token;
+ headers['X-MCPHub-Token']=token;
  try{
   const response=await fetchImpl(url,{method:'GET',headers,redirect:'error',
    signal:AbortSignal.timeout(1500)});

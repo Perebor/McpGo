@@ -487,15 +487,20 @@ class Runtime {
       let terminalUrl;
       try{terminalUrl=terminalEndpoint(this.paths.config)}catch{}
       const key=['terminal','terminalTunnel','browser','proxy','browserTunnel'].map(n=>this.entries.get(n)?.child?.pid||0).join(':');
-      let autosendToken=null;
-      try{
-        const file=path.join(this.userData,'AutoSend','control-token');
-        const stat=fs.lstatSync(file);
-        if(stat.isFile()&&!stat.isSymbolicLink()&&stat.size<=80){
-          const value=fs.readFileSync(file,'utf8').trim();
-          if(/^[a-f0-9]{64}$/.test(value))autosendToken=value;
-        }
-      }catch{}
+      let autosendToken=null,hubToken=null;
+      for(const folder of ['AutoSend','Messaging']){
+        try{
+          const file=path.join(this.userData,folder,'control-token');
+          const stat=fs.lstatSync(file);
+          if(stat.isFile()&&!stat.isSymbolicLink()&&stat.size===64){
+            const value=fs.readFileSync(file,'utf8').trim();
+            if(/^[a-f0-9]{64}$/.test(value)){
+              if(folder==='AutoSend')autosendToken=value;
+              else hubToken=value;
+            }
+          }
+        }catch{}
+      }
       const [t,b,tt,bt,th,bh,hubProbe,autosendProbe]=await Promise.all([
         active('terminal')&&terminalUrl?mcpReady(terminalUrl,['terminal_exec']):false,
         active('browser')&&active('proxy')?mcpReady('http://127.0.0.1:8940/mcp',['browser_tabs','browser_snapshot']):false,
@@ -503,7 +508,7 @@ class Runtime {
         active('browserTunnel')?connectionHealth.tunnelHealth(path.join(this.paths.tunnels,'browser-health.url')):'down',
         active('terminal')?connectionHealth.readTelemetry('http://127.0.0.1:12848/health'):null,
         active('proxy')?connectionHealth.readTelemetry('http://127.0.0.1:8940/healthz'):null,
-        active('messaging')?readOnlyProbe('hub'):null,
+        active('messaging')&&hubToken?readOnlyProbe('hub',{token:hubToken}):null,
         active('autosend')&&autosendToken?
           readOnlyProbe('autosend',{token:autosendToken}):null
       ]);

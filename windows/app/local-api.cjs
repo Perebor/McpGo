@@ -14,9 +14,18 @@ function localRequest(service,route,body,userData){
  const allowed=body===undefined?target.read:target.write;
  if(!allowed.includes(route))throw Error('FORBIDDEN_LOCAL_ENDPOINT');
  const data=body===undefined?null:Buffer.from(JSON.stringify(body));
- const token=service==='autosend'&&userData?
-  fs.readFileSync(path.join(userData,'AutoSend','control-token'),'utf8').trim():null;
- if(service==='autosend'&&(!token||!/^[a-f0-9]{64}$/.test(token)))throw Error('AUTOSEND_CONTROL_TOKEN_MISSING');
+ let token=null;
+ if(service==='autosend'||service==='messaging'){
+  const code=service==='autosend'?'AUTOSEND_CONTROL_TOKEN_MISSING':'MESSAGING_CONTROL_TOKEN_MISSING';
+  const file=path.join(userData||'',service==='autosend'?'AutoSend':'Messaging','control-token');
+  try{
+   if(!userData)throw Error(code);
+   const stat=fs.lstatSync(file);
+   if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==64)throw Error(code);
+   token=fs.readFileSync(file,'utf8').trim();
+  }catch{throw Error(code)}
+  if(!/^[a-f0-9]{64}$/.test(token))throw Error(code);
+ }
  if(data?.length>26000)throw Error('REQUEST_TOO_LARGE');
  return new Promise((resolve,reject)=>{
   const req=http.request({host:'127.0.0.1',port:target.port,path:route,
