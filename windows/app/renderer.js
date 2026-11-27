@@ -591,6 +591,16 @@ async function refreshTasks(){
    const offsetEditor=t.status==='paused'&&!t.enabled&&!t.manual_once&&!t.verification&&!t.active_slot_id&&(t.schedule_mode||'interval')==='interval'?
     {interval:t.interval_seconds,value:t.interval_offset_seconds==null?'':String(t.interval_offset_seconds/60),
      save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
+   const wm=t.work_efficiency;
+   const workKnown=wm&&['VERIFIED','SELF_REPORT','UNVERIFIED'].includes(wm.last_work_result_status);
+   const verified=workKnown&&Number.isSafeInteger(wm.verified_work_results)&&wm.verified_work_results>=0?
+    wm.verified_work_results:0;
+   const selfReport=workKnown&&Number.isSafeInteger(wm.self_report_only_results)&&wm.self_report_only_results>=0?
+    wm.self_report_only_results:0;
+   const workSummary=workKnown?'Подтверждено Git/CI/тестами: '+verified+
+    '; самоотчёты без проверки: '+selfReport+
+    '. Последний результат: '+(wm.last_work_result_status==='VERIFIED'?'проверен':
+     wm.last_work_result_status==='SELF_REPORT'?'самоотчёт':'нет внешнего подтверждения'):'';
    list.append(item(t.project_label||t.url,[
     ...(t.project_label?['Чат: '+t.url]:[]),
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
@@ -604,6 +614,7 @@ async function refreshTasks(){
     (t.schedule_mode==='after_response'?'':
      'Смещение: '+(t.interval_offset_seconds==null?'нет':t.interval_offset_seconds+' сек.')),
     'Последняя успешная доставка: '+(t.last_success_at?new Date(t.last_success_at).toLocaleString('ru-RU')+' (время подтверждения)':'нет'),
+    workSummary,
     t.last_error?'Причина остановки / последнее событие: '+t.last_error:'',
     checked?.pending?'Проверяем этот чат без отправки…':checked?
      'Последняя проверка ('+new Date(checked.checkedAt).toLocaleString('ru-RU')+'): '+
