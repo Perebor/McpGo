@@ -26,6 +26,7 @@ function importInstallerEvents(){
 
 const {SettingsStore}=require('./settings.cjs');
 const {checkUpdates,safeReleaseUrl,verifyInstaller}=require('./updates.cjs');
+const {assessUpgradeSafety}=require('./upgrade-safety.cjs');
 const {version:appVersion}=require('../package.json');
 if(process.platform!=='win32')throw Error('Windows only');
 app.setAppUserModelId('ru.mcpgo.desktop');
@@ -95,6 +96,18 @@ ipcMain.handle('mcpgo:save',(_event,value)=>{
  return action;
 });
 ipcMain.handle('mcpgo:restart',async()=>{await settingsSaveTail;diag('windows.runtime.restart.requested');await runtime.restart();publish();return publicStatus()});
+ipcMain.handle('mcpgo:upgrade-preflight',async()=>{
+ const userData=app.getPath('userData');
+ let live=null;
+ try{live=await localRequest('autosend','/api/status',undefined,userData)}
+ catch(e){diag('windows.update.preflight.api_unavailable',{code:e.code||e.name})}
+ const result=assessUpgradeSafety({
+  stateFile:path.join(userData,'AutoSend','tasks.json'),
+  live,healthEvidence:runtime?.healthEvidence,now:Date.now()
+ });
+ diag('windows.update.preflight.readonly',{status:result.status,reason:result.reason});
+ return result;
+});
 ipcMain.handle('mcpgo:check-updates',()=>checkUpdates(appVersion));
 ipcMain.handle('mcpgo:open-update',(_event,url)=>shell.openExternal(safeReleaseUrl(url)));
 ipcMain.handle('mcpgo:open-releases',()=>shell.openExternal('https://github.com/Perebor/McpGo/releases'));

@@ -717,6 +717,24 @@ $('agent-message').onsubmit=async event=>{
 void refreshHistory();
 
 const updatesStatus=$('updates-status');
+const upgradePreflightButton=$('upgrade-preflight');
+upgradePreflightButton.onclick=async()=>{
+ upgradePreflightButton.disabled=true;
+ const target=$('upgrade-preflight-result');
+ target.textContent='Проверяем квитанции и занятость сервисов без изменения задач...';
+ try{
+  const result=await window.mcpgo.upgradePreflight();
+  if(result.status==='READY_FOR_BACKUP')
+   target.textContent='Задания выключены и локальные операции завершены. Можно делать резервную копию. Установка не запускается автоматически.';
+  else if(result.status==='BLOCKED')
+   target.textContent=result.reason==='ACTIVE_LOCAL_OPERATION'?
+    'Есть активная локальная операция. Дождитесь её завершения и повторите проверку.':
+    'Есть активная или неопределённая отправка. Нужен владелец: проверьте квитанции и паузу.';
+  else
+   target.textContent='Проверка неполная: нет подтверждённого простоя служб или актуального состояния. Повторите после проверки соединения.';
+ }catch(error){target.textContent='Проверка неполная: '+error.message}
+ finally{upgradePreflightButton.disabled=false}
+};
 $('open-releases').onclick=()=>window.mcpgo.openReleases().catch(e=>message(e.message,true));
 $('check-updates').onclick=async()=>{
  const button=$('check-updates');button.disabled=true;

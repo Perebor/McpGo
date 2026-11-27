@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('mcpgo',Object.freeze({
  save:data=>ipcRenderer.invoke('mcpgo:save',data),
  restart:()=>ipcRenderer.invoke('mcpgo:restart'),
  checkUpdates:()=>ipcRenderer.invoke('mcpgo:check-updates'),
+ upgradePreflight:()=>ipcRenderer.invoke('mcpgo:upgrade-preflight'),
  verifyUpdate:()=>ipcRenderer.invoke('mcpgo:verify-update'),
  openUpdate:url=>ipcRenderer.invoke('mcpgo:open-update',url),
  openReleases:()=>ipcRenderer.invoke('mcpgo:open-releases'),
