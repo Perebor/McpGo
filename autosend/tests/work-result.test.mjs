@@ -126,3 +126,34 @@ test('MCP-05 production monitor records distinct work verdicts for TD and Museum
  assert.match(source,/KNOWN_WORK_POLICIES\[t\.smart_v2_project\]/);
  assert.match(source,/if\(commitObservedWorkResult\(t,workResult\)\)persist\(\)/);
 });
+
+test('MCP-05 A → B → A replay cannot count twice, and old self-report upgrades once',async()=>{
+ const t=task('Museum'),p=projects.Museum,a=outcome(),b={...outcome(),fingerprint:'c'.repeat(64)};
+ const first=await inspectWorkResult(t,a,{policy:p,now});
+ assert.equal(commitObservedWorkResult(t,first,now),true);
+ assert.equal(commitObservedWorkResult(t,await inspectWorkResult(t,b,{policy:p,now}),now),true);
+ assert.equal(t.work_result_metrics.self_report_only,2);
+ assert.equal(commitObservedWorkResult(t,first,now),false);
+ assert.equal(t.work_result_metrics.self_report_only,2);
+ const upgraded=await inspectWorkResult(t,a,{policy:p,now,verify:async()=>proof(p)});
+ assert.equal(commitObservedWorkResult(t,upgraded,now),true);
+ assert.equal(t.work_result_metrics.self_report_only,1);
+ assert.equal(t.work_result_metrics.verified,1);
+ assert.equal(commitObservedWorkResult(t,first,now),false);
+ assert.equal(commitObservedWorkResult(t,upgraded,now),false);
+ assert.equal(t.work_result_metrics.verified,1);
+});
+
+test('MCP-05 production observer uses independent Git/CI/test adapter for work accounting only',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {fileURLToPath}=await import('node:url');
+ const {dirname,join}=await import('node:path');
+ const folder=join(dirname(fileURLToPath(import.meta.url)),'..');
+ const server=readFileSync(join(folder,'server.mjs'),'utf8');
+ const browser=readFileSync(join(folder,'smart-v2-browser.mjs'),'utf8');
+ assert.match(server,/verifyGitHubWork\(t,observed,\{policy\}\)/);
+ assert.match(server,/const decision=assessWorkReadiness\(t,observed,\{externalEvidence\}\)/,
+  'legacy Send gate must remain separately protected');
+ assert.match(browser,/githubPrNumber:parseGitHubPrNumber\(second\.assistantText\)/,
+  'PR number may be parsed for both read-only project observers');
+});

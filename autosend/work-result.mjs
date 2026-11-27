@@ -10,9 +10,16 @@ const MAX_PROOF_AGE=5*60*1000;
 // Application-owned allowlist. TD workflow names are not yet confirmed,
 // therefore its CI cannot be marked verified; its reports stay SELF_REPORT.
 export const KNOWN_WORK_POLICIES=Object.freeze({
- TD:Object.freeze({project:'TD',repo:'Perebor/teplyedaty',requiredWorkflows:Object.freeze([])}),
- Museum:Object.freeze({project:'Museum',repo:'Perebor/Museum',requiredWorkflows:Object.freeze([
-  'Museum starter checks','Fictional museum XSS Chromium guard'])})
+ TD:Object.freeze({project:'TD',repo:'Perebor/teplyedaty',baseBranch:'main',
+  branchPrefix:'work/td-',requiredWorkflows:Object.freeze([]),requiredTestJobs:Object.freeze({})}),
+ Museum:Object.freeze({project:'Museum',repo:'Perebor/Museum',baseBranch:'main',
+  branchPrefix:'integration/museum-',requiredWorkflows:Object.freeze([
+   'Museum starter checks','Fictional museum XSS Chromium guard']),
+  requiredTestJobs:Object.freeze({
+   'Museum starter checks':Object.freeze({job:'test',step:'JavaScript and SQLite tests (no secrets)'}),
+   'Fictional museum XSS Chromium guard':Object.freeze({
+    job:'browser',step:'Browser XSS negative cases + positive proof on localhost only'})
+  })})
 });
 const hash=parts=>createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 
@@ -85,21 +92,37 @@ export function commitObservedWorkResult(task,result,now=Date.now()){
     result.project!==task.smart_v2_project||!FP.test(result.fingerprint||'')||
     !['VERIFIED','SELF_REPORT','UNVERIFIED'].includes(result.status)||
     !Number.isFinite(now))return false;
- const prev=task.work_result;
- if(prev?.fingerprint===result.fingerprint){
-  if(prev.status==='VERIFIED'||result.status!=='VERIFIED')return false;
+ const previous=task.work_result;
+ // A last-fingerprint comparison is insufficient: A -> B -> A replays must
+ // not inflate work. Persist a bounded history (no prompts, repo or SHA).
+ const seen=Array.isArray(task.work_result_seen)?task.work_result_seen
+  .filter(x=>x&&FP.test(x.fingerprint||'')&&
+    ['VERIFIED','SELF_REPORT','UNVERIFIED'].includes(x.status)).slice(-255):[];
+ if(previous&&FP.test(previous.fingerprint||'')&&
+    !seen.some(x=>x.fingerprint===previous.fingerprint))
+  seen.push({fingerprint:previous.fingerprint,status:previous.status});
+ const found=seen.find(x=>x.fingerprint===result.fingerprint);
+ if(found){
+  if(found.status==='VERIFIED'||result.status==='UNVERIFIED'||
+     found.status===result.status)return false;
+  if(found.status==='SELF_REPORT'&&result.status!=='VERIFIED')return false;
+  if(found.status==='UNVERIFIED'&&!['SELF_REPORT','VERIFIED'].includes(result.status))
+   return false;
  }
- const priorMetrics=task.work_result_metrics||{};
- let reportedOnly=priorMetrics.self_report_only||0;
- let verifiedCount=priorMetrics.verified||0;
- if(prev?.fingerprint===result.fingerprint){
-  if(prev.status==='SELF_REPORT')reportedOnly=Math.max(0,reportedOnly-1);
- }else if(result.status==='SELF_REPORT')reportedOnly++;
- if(result.status==='VERIFIED')verifiedCount++;
+ const current=task.work_result_metrics||{};
+ let selfReportOnly=current.self_report_only||0;
+ let verified=current.verified||0;
+ if(found?.status==='SELF_REPORT')selfReportOnly=Math.max(0,selfReportOnly-1);
+ if(result.status==='SELF_REPORT'&&found?.status!=='SELF_REPORT')selfReportOnly++;
+ if(result.status==='VERIFIED')verified++;
+ const entry={fingerprint:result.fingerprint,status:result.status};
+ const updated=found?seen.map(x=>x.fingerprint===result.fingerprint?entry:x)
+  :[...seen,entry];
+ task.work_result_seen=updated.slice(-256);
  task.work_result={version:1,taskId:result.taskId,project:result.project,
   status:result.status,fingerprint:result.fingerprint,
   proofFingerprint:result.proofFingerprint,updatedAt:new Date(now).toISOString()};
- task.work_result_metrics={self_report_only:reportedOnly,verified:verifiedCount,
+ task.work_result_metrics={self_report_only:selfReportOnly,verified,
   lastUpdatedAt:new Date(now).toISOString()};
  return true;
 }

@@ -77,6 +77,6 @@ export async function readSmartBrowserOutcome(task,deps={}) {
   ].join('\0')).digest('hex');
   return {kind:'report',report,fingerprint,
     workEvidence:parseWorkEvidence(second.assistantText),
-    githubPrNumber:task.smart_v2_project==='Museum'?parseGitHubPrNumber(second.assistantText):null};
+    githubPrNumber:parseGitHubPrNumber(second.assistantText)};
  }catch{return {kind:'unavailable'};}
 }

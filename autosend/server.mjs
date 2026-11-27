@@ -16,6 +16,7 @@ import {readSmartBrowserOutcome} from './smart-v2-browser.mjs';
 import {requestForceRemove,finalizeForcedRemovals,visibleTasks} from './force-remove.mjs';
 import {assessWorkReadiness,commitWorkReadiness,workEfficiency,shouldRetryExternalVerification,rearmVerifiedExternalWork} from './smart-work-ready.mjs';
 import {KNOWN_WORK_POLICIES,inspectWorkResult,commitObservedWorkResult} from './work-result.mjs';
+import {verifyGitHubWork} from './github-work-adapter.mjs';
 import {GitHubCIObserver} from './github-ci-evidence.mjs';
 import {TabApproval,mayAutoObserve,mayAutoDispatch} from './tab-approval.mjs';
 import {BrowserGenerationGuard} from './browser-generation.mjs';
@@ -342,8 +343,9 @@ async function monitorContinuations(){
    // MCP-05 read-only result accounting. Only a trusted verifier can
    // produce a VERIFIED outcome; TD CI workflow policy is not assumed.
    const policy=KNOWN_WORK_POLICIES[t.smart_v2_project];
+   const workProof=policy?await verifyGitHubWork(t,observed,{policy}):null;
    const workResult=policy?await inspectWorkResult(t,observed,{policy,
-    verify:externalEvidence?async()=>({...externalEvidence,project:policy.project}):null}):null;
+    verify:workProof?async()=>workProof:null}):null;
    if(commitObservedWorkResult(t,workResult))persist();
    const decision=assessWorkReadiness(t,observed,{externalEvidence});
    if(decision.pause){
