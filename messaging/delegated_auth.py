@@ -41,32 +41,41 @@ def valid_name(value):
     return isinstance(value, str) and IDENTIFIER.fullmatch(value) is not None
 
 
-def payload(actor, project, method, path, timestamp, nonce):
+def payload(actor, project, method, path, timestamp, nonce, *, body=b''):
     if not all(map(valid_name, (actor, project))) or method not in ('GET', 'POST'):
         raise ValueError('Invalid actor, project, or method')
     if not isinstance(path, str) or not path.startswith('/api/') or '\n' in path or '\r' in path or len(path) > 1024:
         raise ValueError('Invalid request path')
     if type(timestamp) is not int or timestamp < 0 or not isinstance(nonce, str) or not NONCE.fullmatch(nonce):
         raise ValueError('Invalid timestamp or nonce')
-    return '\n'.join((actor, project, method, path, str(timestamp), nonce)).encode('utf-8')
+    if not isinstance(body, bytes):
+        raise ValueError('Invalid signed body')
+    if method == 'GET':
+        # Legacy message inbox has no project tag; never delegate its contents.
+        if path != '/api/work/pending?project=' + project or body:
+            raise ValueError('Delegated GET is restricted to own inbox')
+        fields = (actor, project, method, path, str(timestamp), nonce)
+    elif path in ('/api/work/claim', '/api/work/ack'):
+        # Authenticate the raw POST bytes, not a mutable parsed JSON object.
+        fields = (actor, project, method, path, str(timestamp), nonce, hashlib.sha256(body).hexdigest())
+    else:
+        raise ValueError('Delegated route is forbidden')
+    return '\n'.join(fields).encode('utf-8')
 
 
-def sign(secret, actor, project, method, path, timestamp, nonce):
+def sign(secret, actor, project, method, path, timestamp, nonce, *, body=b''):
     if not isinstance(secret, bytes) or len(secret) != 32:
         raise ValueError('Invalid signing key')
-    return hmac.new(secret, payload(actor, project, method, path, timestamp, nonce), hashlib.sha256).hexdigest()
+    return hmac.new(secret, payload(actor, project, method, path, timestamp, nonce, body=body), hashlib.sha256).hexdigest()
 
 
-def verify_and_consume(db, actor, project, method, path, timestamp, nonce, signature, *, now):
+def verify_and_consume(db, actor, project, method, path, timestamp, nonce, signature, *, now, body=b''):
     """Fail closed; nonce is committed before success and persists across restarts."""
     try:
         if type(now) is not int or abs(now - timestamp) > TTL_SECONDS:
             return False
-        signed_payload = payload(actor, project, method, path, timestamp, nonce)
+        signed_payload = payload(actor, project, method, path, timestamp, nonce, body=body)
         if not isinstance(signature, str) or not SIGNATURE.fullmatch(signature):
-            return False
-        # Strictly scoped to the requesting actor's own inbox; no arbitrary commands.
-        if method != 'GET' or path != '/api/inbox?agent=' + actor:
             return False
         with db:
             row = db.execute('SELECT secret FROM delegated_grants WHERE actor=? AND project=? AND enabled=1', (actor, project)).fetchone()

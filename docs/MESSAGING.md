@@ -103,3 +103,26 @@ python3 messaging/hub.py ack --as AGENT_ID 123 124
 Запуск: `python3 -m unittest discover -s messaging/tests -v`. Тесты покрывают логику очереди, HTTP и lifecycle, но не доказывают перенос приватной истории ChatGPT (она технически недоступна).
 
 См. [DATA.md](DATA.md), [INTERFACES.md](INTERFACES.md), [SECURITY.md](SECURITY.md).
+
+
+## MCP-08/09 — delegated HTTP and read-only AutoSend preparation (27.11.2026)
+
+This is a **local loopback** protocol. The existing native-owner API remains protected by `X-MCPHub-Client: native` and the private `X-MCPHub-Token`. Project-scoped agents MUST NOT receive that owner token.
+
+Owner-only routes on `127.0.0.1:8971`:
+
+- `POST /api/work/grant`: exact JSON `{"agent":"workerA","project":"TD"}`, only for an active regular agent. Returns a randomly generated, single-use-display 256-bit `secret` (hex); it must be stored privately by the owner/client. Regrant rotates the key. It is not a ChatGPT authorization.
+- `POST /api/work/revoke`: exact `agent` and `project`, disables project lease and HMAC requests.
+- `POST /api/work/enqueue`: exact `project`, 64-hex `fingerprint` and allowlisted `payload` (intent `run_tests|inspect_code|audit|build`, context `McpGo`, optional bounded branch). Conflicting payload with reused fingerprint is rejected; no arbitrary commands or ChatGPT messages.
+- `GET /api/work/summary`: owner-visible queue state counts.
+- `GET /api/work/preview?id=<queue-uuid>`: reads the typed queue item and **only performs an authenticated GET to AutoSend `/api/status`**, never POST. Returns a fail-closed `preview.decision`, `preview.can_send=false`, `preview.mode=READ_ONLY`.
+
+Delegated agent routes:
+
+- `GET /api/work/pending?project=TD`: only the authorized project's queued count.
+- `POST /api/work/claim`: exact JSON `{"agent":"workerA","project":"TD"}`, atomic 60-second lease of an allowlisted queue item, or `task:null`.
+- `POST /api/work/ack`: exact JSON `agent,project,id,lease_token,result_fingerprint`; the state becomes **ACKED**, never VERIFIED. Independent owner-side evidence verification is intentionally NOT available through HTTP.
+
+For each delegated request use headers `X-MCPHub-Client: delegate`, `X-MCPHub-Actor`, `X-MCPHub-Project`, `X-MCPHub-Time` (Unix seconds), `X-MCPHub-Nonce` (fresh 8–128-character token), and `X-MCPHub-Signature` (hex HMAC-SHA256 using the project's 32-byte delegated key). Sign the UTF-8 fields separated by newline: `actor, project, uppercase HTTP method, exact request path including query string, timestamp, nonce`; for POST append SHA256 hex of the **exact raw JSON request bytes** as a seventh line. GET has six lines. The server persists used nonces in SQLite and rejects duplicate, expired (outside 60 seconds), invalid, revoked, cross-project and path/body-tampered requests. Never retry a request after an unknown outcome using a new nonce without first checking durable queue state.
+
+**Isolation:** old `/api/inbox` and `/api/history` have no per-project message labels and remain **native owner-only**. The actor token never unlocks legacy messages or role management. The authenticated queue can be inspected and leased, but it does not instantiate a ChatGPT agent, trigger AutoSend, resume paused schedules, send messages, promote ACK to VERIFIED, or perform a release. Actual delivery requires later explicit browser/owner E2E and safe receipt reconciliation. Backups and rollback are required before installing new runtime files.

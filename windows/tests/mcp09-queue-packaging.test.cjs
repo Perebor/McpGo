@@ -10,6 +10,6 @@ test('MCP-09 owner-local queue ships with Messaging runtime and is independently
  assert.ok(messaging.filter.includes('work_queue.py'),
   'typed queue is missing from installed Messaging runtime');
  const verifier=fs.readFileSync(path.join(root,'windows/verify-build.py'),'utf8');
- assert.match(verifier,/"messaging":\["hub\.py","work_queue\.py"\]/,
+ assert.match(verifier,/"messaging":\["hub\.py","work_queue\.py"/,
   'packaged runtime verifier must detect missing queue');
 });

@@ -11,12 +11,19 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
 ROOT = Path(__file__).resolve().parent
+# Works for both direct packaged script execution and importlib-based tests.
+sys.path.insert(0, str(ROOT))
+import delegated_auth
+import work_queue
+import autosend_bridge
+
 DATA = Path(os.environ.get('MCPHUB_MESSAGE_DB', str(Path.home() / 'Library/Application Support/McpGo/Messaging/messages.sqlite3')))
 PORT = 8971
 NAME = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,31}$')
@@ -111,6 +118,10 @@ def connect():
         conn.execute("ALTER TABLE agents ADD COLUMN replaced_by TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS only_one_active_orchestrator ON agents(role) WHERE role='orchestrator' AND archived_at=''")
     conn.execute("INSERT OR IGNORE INTO agents (id,label,role,created_at,last_seen) VALUES ('hub','MCP Hub','hub',?,?)", (now(),now()))
+    conn.commit()
+    # Additive schemas only. Legacy LEASED/UNKNOWN remain durable through migration.
+    work_queue.setup_queue(conn)
+    delegated_auth.initialize(conn)
     conn.commit()
     if DATA.exists():
         os.chmod(DATA, 0o600)
@@ -357,7 +368,52 @@ class Handler(BaseHTTPRequestHandler):
                 self.result({'error':'JSON required'},415);return False
         return True
 
+    def allow_delegate(self, body=b''):
+        """Strictly bounded HMAC permission, never equivalent to native owner."""
+        if (self.headers.get('Host') not in ('127.0.0.1:8971', 'localhost:8971')
+                or self.headers.get('Origin')
+                or self.headers.get('X-MCPHub-Client') != 'delegate'
+                or self.headers.get('X-MCPHub-Token')):
+            self.result({'error': 'Delegated authorization denied'}, 403)
+            return None
+        actor = self.headers.get('X-MCPHub-Actor', '')
+        project = self.headers.get('X-MCPHub-Project', '')
+        try:
+            stamp = int(self.headers.get('X-MCPHub-Time', ''))
+            if not NAME.fullmatch(actor) or project not in work_queue.PROJECTS:
+                raise ValueError('Invalid delegated actor')
+            with database() as conn:
+                row = conn.execute('SELECT role,archived_at FROM agents WHERE id=?', (actor,)).fetchone()
+                allowed = (row is not None and row['role'] == 'agent' and not row['archived_at']
+                    and conn.execute('SELECT 1 FROM mcpgo_actor_scopes WHERE agent=? AND project=?',
+                                     (actor, project)).fetchone() is not None)
+                permitted = allowed and delegated_auth.verify_and_consume(
+                    conn, actor, project, self.command, self.path, stamp,
+                    self.headers.get('X-MCPHub-Nonce', ''),
+                    self.headers.get('X-MCPHub-Signature', ''),
+                    now=int(time.time()), body=body)
+            if permitted:
+                return actor, project
+        except (ValueError, TypeError, sqlite3.Error):
+            pass
+        self.result({'error': 'Delegated authorization denied'}, 403)
+        return None
+
     def do_GET(self):
+        if self.headers.get('X-MCPHub-Client') == 'delegate':
+            # Unscoped legacy messages cannot be safely read with project keys.
+            if urlsplit(self.path).path != '/api/work/pending':
+                return self.result({'error': 'Delegated route forbidden'}, 403)
+            identity = self.allow_delegate()
+            if identity is None:
+                return
+            try:
+                with database() as conn:
+                    queued=conn.execute("SELECT COUNT(*) FROM mcpgo_work_queue WHERE project=? AND state='QUEUED'",
+                                        (identity[1],)).fetchone()[0]
+                    return self.result({'project':identity[1], 'queued':queued})
+            except (ValueError, sqlite3.Error):
+                return self.result({'error': 'Delegated work unavailable'}, 403)
         if not self.allow():return
         url=urlsplit(self.path)
         q=parse_qs(url.query)
@@ -370,11 +426,67 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path=='/api/history':
                     obj={'messages':history(conn,viewer=param('viewer','hub'),agent=param('agent'),limit=int(param('limit','150')))}
                 elif url.path=='/api/inbox': obj={'messages':inbox(conn,param('agent'),int(param('limit','80')))}
+                elif url.path=='/api/work/summary':
+                    obj=work_queue.queue_summary(conn)
+                elif url.path=='/api/work/preview':
+                    item_id=param('id')
+                    if len(item_id) > 80 or not item_id:
+                        raise ValueError('Invalid work item')
+                    row=conn.execute('SELECT id,project,state,payload FROM mcpgo_work_queue WHERE id=?', (item_id,)).fetchone()
+                    if row is None:
+                        return self.result({'error': 'Work item not found'}, 404)
+                    try:
+                        status=autosend_bridge.fetch_status()
+                    except (OSError,ValueError,TypeError,json.JSONDecodeError):
+                        status=None
+                    obj={'preview':autosend_bridge.preview(dict(row),status)}
                 else:return self.result({'error':'Not found'},404)
                 self.result(obj)
         except (ValueError,sqlite3.Error) as ex:self.result({'error':str(ex)},400)
 
     def do_POST(self):
+        if self.headers.get('X-MCPHub-Client') == 'delegate':
+            if self.path not in ('/api/work/claim', '/api/work/ack'):
+                return self.result({'error': 'Delegated route forbidden'}, 403)
+            if not self.headers.get('Content-Type', '').startswith('application/json'):
+                return self.result({'error': 'JSON required'}, 415)
+            try:
+                n=int(self.headers.get('Content-Length', '-1'))
+                if n < 0 or n > 26000:
+                    return self.result({'error': 'Invalid payload size'}, 413)
+                raw=self.rfile.read(n)
+            except (ValueError, OSError):
+                return self.result({'error': 'Invalid payload size'}, 413)
+            identity=self.allow_delegate(body=raw)
+            if identity is None:
+                return
+            try:
+                b=json.loads(raw)
+                if not isinstance(b, dict) or b.get('agent') != identity[0] or b.get('project') != identity[1]:
+                    return self.result({'error': 'Delegated scope mismatch'}, 403)
+                with database() as conn:
+                    if self.path == '/api/work/claim':
+                        if set(b) != {'agent', 'project'}:
+                            raise ValueError('Unexpected delegated payload')
+                        item=work_queue.lease_next(conn, identity[1], identity[0],
+                                                   now_ms=int(time.time()*1000), ttl_ms=60000)
+                        obj={'task': item}
+                    else:
+                        if set(b) != {'agent','project','id','lease_token','result_fingerprint'}:
+                            raise ValueError('Unexpected delegated payload')
+                        project_row=conn.execute('SELECT project FROM mcpgo_work_queue WHERE id=?',
+                                                 (b['id'],)).fetchone()
+                        if project_row is None or project_row['project'] != identity[1]:
+                            return self.result({'error': 'Delegated scope mismatch'}, 403)
+                        accepted=work_queue.finish_task(conn, b['id'], identity[0],
+                            b['lease_token'], b['result_fingerprint'], now_ms=int(time.time()*1000))
+                        if not accepted:
+                            return self.result({'error': 'Invalid or expired lease'}, 409)
+                        # Never promote agent ACK to VERIFIED on any HTTP route.
+                        obj={'state':'ACKED'}
+                return self.result(obj)
+            except (ValueError,TypeError,KeyError,sqlite3.Error,json.JSONDecodeError):
+                return self.result({'error': 'Invalid delegated request'}, 400)
         if not self.allow(writing=True):return
         try:
             n=int(self.headers.get('Content-Length','-1'))
@@ -393,6 +505,28 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/messages':
                     obj=send(conn,b.get('sender','hub'),b.get('recipient'),b.get('body'),b.get('kind','message'))
                 elif self.path=='/api/ack':obj=mark_read(conn,b.get('agent'),b.get('ids',[]))
+                elif self.path=='/api/work/grant':
+                    if set(b) != {'agent','project'} or b.get('project') not in work_queue.PROJECTS:
+                        raise ValueError('Invalid grant')
+                    actor=active(conn,b.get('agent'))
+                    if actor['role'] != 'agent':
+                        raise ValueError('Only regular agents can receive delegation')
+                    secret=secrets.token_bytes(32)
+                    work_queue.grant_actor_scope(conn,b['agent'],b['project'])
+                    delegated_auth.grant(conn,b['agent'],b['project'],secret)
+                    # Owner-authenticated response only; callers must store this key privately.
+                    obj={'agent':b['agent'],'project':b['project'],'secret':secret.hex()}
+                elif self.path=='/api/work/revoke':
+                    if set(b) != {'agent','project'}:
+                        raise ValueError('Invalid revoke')
+                    work_queue.revoke_actor_scope(conn,b['agent'],b['project'])
+                    delegated_auth.revoke(conn,b['agent'],b['project'])
+                    obj={'revoked':True}
+                elif self.path=='/api/work/enqueue':
+                    if set(b) != {'project','fingerprint','payload'}:
+                        raise ValueError('Invalid queued work envelope')
+                    obj=work_queue.enqueue_task(conn,b['project'],b['fingerprint'],b['payload'],
+                        now_ms=int(time.time()*1000))
                 else:return self.result({'error':'Not found'},404)
                 self.result(obj,201 if self.path=='/api/agents' else 200)
         except (ValueError,KeyError,sqlite3.Error,json.JSONDecodeError) as ex:self.result({'error':str(ex)},400)

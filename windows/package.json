@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.29-local.1",
+  "version": "2.1.0-preview.30-local.1",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -108,7 +108,9 @@
         "to": "mcpgo-runtime/messaging",
         "filter": [
           "hub.py",
-          "work_queue.py"
+          "work_queue.py",
+          "delegated_auth.py",
+          "autosend_bridge.py"
         ]
       },
       {

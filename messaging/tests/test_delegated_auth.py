@@ -20,27 +20,27 @@ class DelegatedAuthTest(unittest.TestCase):
         self.key = bytes.fromhex('a1' * 32)
         auth.grant(self.db, 'agentA', 'projectA', self.key)
 
-    def signed(self, *, agent='agentA', project='projectA', method='GET', path='/api/inbox?agent=agentA', timestamp=1000, nonce='nonce-0001', key=None):
+    def signed(self, *, agent='agentA', project='projectA', method='GET', path='/api/work/pending?project=projectA', timestamp=1000, nonce='nonce-0001', key=None):
         return auth.sign(key or self.key, agent, project, method, path, timestamp, nonce)
 
     def test_valid_signature_consumed_once(self):
         signature = self.signed()
-        self.assertTrue(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', signature, now=1001))
-        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', signature, now=1001))
+        self.assertTrue(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', signature, now=1001))
+        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', signature, now=1001))
 
     def test_rejects_wrong_scope_path_verb_and_signature(self):
         signature = self.signed()
-        attempts = [('agentB', 'projectA', 'GET', '/api/inbox?agent=agentA'), ('agentA', 'projectB', 'GET', '/api/inbox?agent=agentA'), ('agentA', 'projectA', 'POST', '/api/inbox?agent=agentA'), ('agentA', 'projectA', 'GET', '/api/inbox?agent=agentB')]
+        attempts = [('agentB', 'projectA', 'GET', '/api/work/pending?project=projectA'), ('agentA', 'projectB', 'GET', '/api/work/pending?project=projectA'), ('agentA', 'projectA', 'POST', '/api/work/pending?project=projectA'), ('agentA', 'projectA', 'GET', '/api/work/pending?project=projectB')]
         for agent, project, method, path in attempts:
             self.assertFalse(auth.verify_and_consume(self.db, agent, project, method, path, 1000, 'nonce-0001', signature, now=1001))
-        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', '0'*64, now=1001))
+        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', '0'*64, now=1001))
 
     def test_expired_future_and_revoked(self):
         sig = self.signed()
-        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', sig, now=1200))
-        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', sig, now=900))
+        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', sig, now=1200))
+        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', sig, now=900))
         auth.revoke(self.db, 'agentA', 'projectA')
-        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', sig, now=1001))
+        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', sig, now=1001))
 
     def test_replay_survives_database_reopen(self):
         with tempfile.TemporaryDirectory() as d:
@@ -49,20 +49,20 @@ class DelegatedAuthTest(unittest.TestCase):
             auth.initialize(db)
             auth.grant(db, 'agentA', 'projectA', self.key)
             sig = self.signed()
-            self.assertTrue(auth.verify_and_consume(db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', sig, now=1001))
+            self.assertTrue(auth.verify_and_consume(db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', sig, now=1001))
             db.close()
             db = sqlite3.connect(file)
-            self.assertFalse(auth.verify_and_consume(db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', sig, now=1001))
+            self.assertFalse(auth.verify_and_consume(db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', sig, now=1001))
             db.close()
 
 
     def test_key_rotation_and_invalid_nonce_fail_closed(self):
         previous = self.signed()
         auth.grant(self.db, 'agentA', 'projectA', bytes.fromhex('b2' * 32))
-        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', previous, now=1001))
+        self.assertFalse(auth.verify_and_consume(self.db, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', previous, now=1001))
         for nonce in ('bad', 'bad\\nnonce', '!' * 10):
             with self.assertRaises(ValueError):
-                auth.sign(self.key, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, nonce)
+                auth.sign(self.key, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, nonce)
 
     def test_concurrent_replay_has_single_winner(self):
         import concurrent.futures
@@ -76,7 +76,7 @@ class DelegatedAuthTest(unittest.TestCase):
             def attempt(_):
                 conn = sqlite3.connect(file, timeout=3)
                 try:
-                    return auth.verify_and_consume(conn, 'agentA', 'projectA', 'GET', '/api/inbox?agent=agentA', 1000, 'nonce-0001', sig, now=1001)
+                    return auth.verify_and_consume(conn, 'agentA', 'projectA', 'GET', '/api/work/pending?project=projectA', 1000, 'nonce-0001', sig, now=1001)
                 finally:
                     conn.close()
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:

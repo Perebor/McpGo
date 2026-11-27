@@ -169,11 +169,16 @@
 | `autosend/tests/work-result.test.mjs` | 171 | `dc1a2c25d082b3d2` |
 | `autosend/transition-journal.mjs` | 109 | `10ebd36b61e32320` |
 | `autosend/work-result.mjs` | 150 | `1fb62b31abdb7185` |
-| `messaging/hub.py` | 478 | `80116e21ca34a89d` |
+| `messaging/autosend_bridge.py` | 92 | `28ce90c50408da2b` |
+| `messaging/delegated_auth.py` | 91 | `4dd36e8cc57f42a0` |
+| `messaging/hub.py` | 612 | `f412987733a4c1ac` |
 | `messaging/start.mjs` | 12 | `ae5feb8b2e914508` |
 | `messaging/tests/run_messaging_tests.py` | 8 | `85220335542e6df5` |
+| `messaging/tests/test_autosend_bridge.py` | 82 | `abd51a36a9c1ddc8` |
 | `messaging/tests/test_bus.py` | 79 | `bb84746c175ef94a` |
+| `messaging/tests/test_delegated_auth.py` | 86 | `7b47a3129ef014cd` |
 | `messaging/tests/test_http.py` | 108 | `6257baad84257d24` |
+| `messaging/tests/test_http_delegation.py` | 168 | `5dcbac9a97d1e98e` |
 | `messaging/tests/test_lifecycle.py` | 100 | `5c4129c953f89b7f` |
 | `messaging/tests/test_work_queue.py` | 111 | `446cdedbc03943f6` |
 | `messaging/tests/test_work_queue_trust.py` | 114 | `7c019cd5b7ca4747` |
@@ -225,8 +230,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `1e9b59072682656e` |
-| `windows/package.json` | 170 | `42b66cdaf40e0fe8` |
+| `windows/package-lock.json` | 3682 | `26807ae25d9e3a4d` |
+| `windows/package.json` | 172 | `3456cff72830cc5b` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -243,8 +248,9 @@
 | `windows/tests/mcp07-transaction.test.cjs` | 102 | `60b6020a062e2898` |
 | `windows/tests/mcp07-upgrade-preflight.test.cjs` | 119 | `3fd6564b31412f8c` |
 | `windows/tests/mcp07-upgrade-ui.test.cjs` | 50 | `fd26d262e93dbdfb` |
+| `windows/tests/mcp08-09-runtime-packaging.test.cjs` | 15 | `19d590f3dce8c2e3` |
 | `windows/tests/mcp08-native-auth.test.cjs` | 60 | `2322cafcb53a7310` |
-| `windows/tests/mcp09-queue-packaging.test.cjs` | 15 | `d0d7cf01802a47f0` |
+| `windows/tests/mcp09-queue-packaging.test.cjs` | 15 | `04f61e6da561a7aa` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -256,8 +262,8 @@
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 156 | `8a6bd601e1b31940` |
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
-| `windows/verify-build.py` | 117 | `be7ad4eacbdbe65b` |
+| `windows/verify-build.py` | 117 | `fa3d3c8b1cb02f25` |
 
-Всего файлов в выбранном source-only срезе: **251**.
+Всего файлов в выбранном source-only срезе: **257**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
