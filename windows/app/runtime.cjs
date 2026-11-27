@@ -7,7 +7,7 @@ const {spawn,spawnSync}=require('node:child_process');
 const {record:diag,register,scrub}=require('./diagnostics.cjs');
 const sourceHealth=path.resolve(__dirname,'../../dashboard/connection-health.cjs');
 const connectionHealth=require(fs.existsSync(sourceHealth)?sourceHealth:path.join(process.resourcesPath,'mcpgo-runtime/dashboard/connection-health.cjs'));
-const {buildHealthContract,planSafeRestart,autoSendStateSafety,readOnlyProbe}=require('./health-contract.cjs');
+const {buildHealthContract,planSafeRestart,autoSendStateSafety,readOnlyProbe,claimRestartAttempt}=require('./health-contract.cjs');
 
 const ENDPOINTS=Object.freeze({terminal:12848,browser:8931,autosendBrowser:8932,proxy:8940,autosend:8972,messaging:8971});
 const CORE_SERVICES=Object.freeze(['terminal','browser','proxy','autosendBrowser','autosend','messaging']);
@@ -437,6 +437,17 @@ class Runtime {
         'RETRY_BUDGET_EXHAUSTED':'NEED_OWNER');
       diag(this.userData,'windows.runtime.retry.blocked',{
         service:name,reason:plan.reason,nextSafeAction:plan.nextSafeAction});
+      this.report();return;
+    }
+    // Persist the claim before scheduling, even if the GUI is restarted.
+    // Unknown/corrupt journal or a competing supervisor requires the owner.
+    const claimed=claimRestartAttempt(
+      path.join(this.userData,'recovery-budget.json'),name,clock);
+    if(!claimed.claimed){
+      record.state='blocked: '+(claimed.reason==='RETRY_BUDGET_EXHAUSTED'?
+        'RETRY_BUDGET_EXHAUSTED':'NEED_OWNER');
+      diag(this.userData,'windows.runtime.retry.blocked',{
+        service:name,reason:claimed.reason,nextSafeAction:claimed.nextSafeAction});
       this.report();return;
     }
     budget.attempts.push(clock);

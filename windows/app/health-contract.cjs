@@ -146,5 +146,59 @@ async function readOnlyProbe(component,{fetchImpl=fetch,token=null,now=Date.now(
    unknownCount,unresolvedCount};
  }catch{return result}
 }
+// Claim a recovery slot BEFORE retrying. Persist it across GUI restarts.
+// Exclusive lock + fail-closed invalid state prevent unbounded crash loops.
+const RESTART_SERVICES=Object.freeze(['terminal','messaging','autosend']);
+function claimRestartAttempt(file,service,now=Date.now()){
+ const blocked=reason=>({claimed:false,reason,nextSafeAction:'NEED_OWNER'});
+ if(typeof file!=='string'||!file||!RESTART_SERVICES.includes(service)||
+    !Number.isSafeInteger(now)||now<=0)return blocked('RESTART_BUDGET_UNAVAILABLE');
+ let lock=null,temporary=null;
+ try{
+  const dir=require('node:path').dirname(file);
+  const dirStat=fs.lstatSync(dir);
+  if(!dirStat.isDirectory()||dirStat.isSymbolicLink())
+   return blocked('RESTART_BUDGET_UNAVAILABLE');
+  lock=fs.openSync(file+'.lock','wx',0o600);
+  let attempts={};
+  let stat=null;
+  try{stat=fs.lstatSync(file)}catch(e){if(e.code!=='ENOENT')return blocked('RESTART_BUDGET_UNAVAILABLE')}
+  if(stat){
+   if(!stat.isFile()||stat.isSymbolicLink()||stat.size>8192)
+    return blocked('RESTART_BUDGET_UNAVAILABLE');
+   const saved=JSON.parse(fs.readFileSync(file,'utf8'));
+   if(!saved||saved.version!==1||!saved.attempts||
+      typeof saved.attempts!=='object'||Array.isArray(saved.attempts)||
+      Object.keys(saved).some(k=>!['version','attempts'].includes(k)))
+    return blocked('RESTART_BUDGET_UNAVAILABLE');
+   for(const [name,values] of Object.entries(saved.attempts)){
+    if(!RESTART_SERVICES.includes(name)||!Array.isArray(values)||
+       values.length>MAX_RESTARTS||!values.every((x,i)=>Number.isSafeInteger(x)&&
+        x>0&&x<=now&&(i===0||x>=values[i-1])))
+     return blocked('RESTART_BUDGET_UNAVAILABLE');
+    attempts[name]=values.filter(x=>now-x<HOUR_MS);
+   }
+  }
+  const old=attempts[service]||[];
+  if(old.length>=MAX_RESTARTS)return blocked('RETRY_BUDGET_EXHAUSTED');
+  attempts[service]=[...old,now];
+  const next=JSON.stringify({version:1,attempts})+'\n';
+  temporary=file+'.'+require('node:crypto').randomUUID()+'.tmp';
+  const descriptor=fs.openSync(temporary,'wx',0o600);
+  try{fs.writeFileSync(descriptor,next);fs.fsyncSync(descriptor)}
+  finally{fs.closeSync(descriptor)}
+  fs.renameSync(temporary,file);
+  temporary=null;
+  return {claimed:true,reason:'PERSISTED_RESTART_SLOT',
+   nextSafeAction:'RESTART_OWNED_SERVICE',attemptRemaining:MAX_RESTARTS-old.length-1};
+ }catch{return blocked('RESTART_BUDGET_UNAVAILABLE')}
+ finally{
+  if(temporary){try{fs.unlinkSync(temporary)}catch{}}
+  if(lock!==null){
+   try{fs.closeSync(lock)}catch{}
+   try{fs.unlinkSync(file+'.lock')}catch{}
+  }
+ }
+}
 module.exports={buildHealthContract,planSafeRestart,autoSendStateSafety,
- readOnlyProbe,FRESH_MS,MAX_RESTARTS};
+ readOnlyProbe,claimRestartAttempt,FRESH_MS,MAX_RESTARTS};
