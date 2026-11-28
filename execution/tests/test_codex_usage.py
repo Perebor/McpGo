@@ -92,6 +92,25 @@ class CodexUsageTests(unittest.TestCase):
         self.assertEqual(again.returncode,0,again.stderr)
         self.assertEqual(json.loads(again.stdout)['event'],'ALREADY_RECORDED')
 
+    def test_public_ledger_rejects_mathematically_impossible_codex_counters(self):
+        # A local user-defined snapshot must not be enough to inflate totals.
+        invalid=[
+            dict(input_tokens=100,cached_input_tokens=101,cache_write_input_tokens=0,
+                 output_tokens=20,reasoning_output_tokens=0,total_tokens=120),
+            dict(input_tokens=100,cached_input_tokens=0,cache_write_input_tokens=0,
+                 output_tokens=20,reasoning_output_tokens=21,total_tokens=120),
+            dict(input_tokens=100,cached_input_tokens=0,cache_write_input_tokens=0,
+                 output_tokens=20,reasoning_output_tokens=0,total_tokens=999999)
+        ]
+        for data in invalid:
+            with self.subTest(data=data):
+                snapshot={'session_id':str(uuid.uuid4()),**data,'token_update_events':1,
+                          'observed_increases':1,'source_digest':'0'*64,
+                          'source_kind':'LOCAL_CODEX_SESSION_NOT_PROVIDER_SIGNED'}
+                with self.assertRaises(UsageDenied):
+                    self.ledger.record_codex_observation('TD','td_coder','codex-run',snapshot)
+        self.assertEqual(self.ledger.summary('TD','td_coder')['codex_observed_sessions'],0)
+
     def test_project_scope_and_local_source_restrictions_fail_closed(self):
         self.write(token(100,0,20))
         wrong=self.root/'other_project';wrong.mkdir()

@@ -648,13 +648,17 @@ async function refreshTasks(){
   for(const t of tasks){
    const evidence=previewResults.get(t.id);
    const checked=evidence&&evidence.targetUrl===t.url?evidence:null;
-   const pending=['sending','checking','verifying'].includes(t.status);
+   const pending=['sending','checking','verifying'].includes(t.status)||
+    !!t.verification||!!t.active_slot_id||!!t.smart_v2_pending_action||
+    t.manual_once===true;
+   const browserDown=status.browserBackendReachable===false||status.extensionConnected===false;
    const buttons=pending?[]:t.handoff_requires_owner_reconfigure===true?[]:t.status==='unknown'?
      [{label:'Перепроверить доставку',run:()=>doTask('recheck_unknown',t.id)},
       {label:'Подтвердить получение',run:()=>{
        if(confirm('Вы лично проверили этот чат и увидели сообщение именно из последней попытки? Подтверждение не отправит сообщение и оставит расписание на паузе.'))doTask('confirm_received',t.id);
       }}]:
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
+     browserDown?[]:
      [{label:t.guided_first_run===true&&!t.first_cycle_started_at?'Запустить':'Включить',
        run:()=>doTask(t.guided_first_run===true&&!t.first_cycle_started_at?'start_first':'start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];

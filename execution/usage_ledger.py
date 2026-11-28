@@ -104,7 +104,7 @@ def _digest(obj):
 
 
 class UsageLedger:
-    """Durable, append-only owner-local run events. No prompts or tokens stored."""
+    """Durable local events and cumulative Codex counters; never stores prompts."""
     def __init__(self,path):
         self.path=Path(path).absolute()
         if self.path.is_symlink() or self.path.parent.is_symlink():
@@ -219,6 +219,13 @@ class UsageLedger:
         if any(type(snapshot[k]) is not int or snapshot[k]<0 or snapshot[k]>10**13
                for k in FIELDS) or not SHA256.fullmatch(snapshot['source_digest']):
             raise UsageDenied('Invalid normalized local Codex token numbers')
+        # Apply the same numeric constraints at the durable SQLite trust boundary;
+        # callers other than the JSONL reader must not inflate impossible totals.
+        if (snapshot['cached_input_tokens']+snapshot['cache_write_input_tokens']>
+            snapshot['input_tokens'] or
+            snapshot['reasoning_output_tokens']>snapshot['output_tokens'] or
+            snapshot['total_tokens']!=snapshot['input_tokens']+snapshot['output_tokens']):
+            raise UsageDenied('Inconsistent Codex cumulative token arithmetic')
         if type(snapshot['token_update_events']) is not int or snapshot['token_update_events']<1 or (
             type(snapshot['observed_increases']) is not int or
             snapshot['observed_increases']<1 or

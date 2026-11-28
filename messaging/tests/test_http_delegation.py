@@ -1,5 +1,6 @@
 """Contract and security regression for owner + actor-scoped Hub HTTP."""
 import hashlib
+import io
 import importlib.util
 import json
 import pathlib
@@ -163,6 +164,28 @@ class HubDelegationHTTPTest(unittest.TestCase):
         self.owner('/api/work/revoke', {'agent': 'workerA', 'project': 'TD'})
         self.assert_forbidden(lambda: self.delegated('/api/work/claim', {'agent': 'workerA', 'project': 'TD'}, nonce='nonce-40002'))
         self.assertEqual(self.owner('/api/work/summary')['QUEUED'], 1)
+
+class DelegatedDeniedHTTPFramingTest(unittest.TestCase):
+    def test_denied_delegated_post_consumes_bounded_request_body_before_403(self):
+        # A Windows TCP connection can be reset on early HTTP response when a
+        # rejected POST body remains unread. The 403 must be unambiguous to clients.
+        body=b'{"project":"TD","agent":"workerA","padding":"' + b'x'*8000 + b'"}'
+        class FakeRequest(hub.Handler):
+            def __init__(self):pass
+            path='/api/work/grant'
+            headers={'X-MCPHub-Client':'delegate','Content-Length':str(len(body))}
+            rfile=io.BytesIO(body)
+            code=None
+            def result(self,obj,code):
+                self.code=code
+                self.remaining=len(body)-self.rfile.tell()
+                self.error=obj.get('error')
+        req=FakeRequest()
+        hub.Handler.do_POST(req)
+        self.assertEqual(req.code,403)
+        self.assertEqual(req.error,'Delegated route forbidden')
+        self.assertEqual(req.remaining,0,'Unread bounded POST body can reset Windows HTTP clients')
+
 
 if __name__ == '__main__':
     unittest.main()

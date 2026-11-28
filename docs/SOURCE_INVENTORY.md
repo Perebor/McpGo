@@ -178,14 +178,14 @@
 | `autosend/work-result.mjs` | 150 | `1fb62b31abdb7185` |
 | `messaging/autosend_bridge.py` | 92 | `28ce90c50408da2b` |
 | `messaging/delegated_auth.py` | 91 | `4dd36e8cc57f42a0` |
-| `messaging/hub.py` | 612 | `f412987733a4c1ac` |
+| `messaging/hub.py` | 636 | `010bd4e9a29eb5dc` |
 | `messaging/start.mjs` | 12 | `ae5feb8b2e914508` |
 | `messaging/tests/run_messaging_tests.py` | 8 | `85220335542e6df5` |
 | `messaging/tests/test_autosend_bridge.py` | 82 | `abd51a36a9c1ddc8` |
 | `messaging/tests/test_bus.py` | 79 | `bb84746c175ef94a` |
 | `messaging/tests/test_delegated_auth.py` | 86 | `7b47a3129ef014cd` |
 | `messaging/tests/test_http.py` | 108 | `6257baad84257d24` |
-| `messaging/tests/test_http_delegation.py` | 168 | `5dcbac9a97d1e98e` |
+| `messaging/tests/test_http_delegation.py` | 191 | `2a72a63ef0433ba4` |
 | `messaging/tests/test_lifecycle.py` | 100 | `5c4129c953f89b7f` |
 | `messaging/tests/test_work_queue.py` | 111 | `446cdedbc03943f6` |
 | `messaging/tests/test_work_queue_trust.py` | 114 | `7c019cd5b7ca4747` |
@@ -194,7 +194,7 @@
 | `execution/hub_role_adapter.py` | 120 | `6b7570686b927160` |
 | `execution/role_engine.py` | 323 | `cc01bf07c982e1d2` |
 | `execution/role_worker.py` | 135 | `0d2f2fd42fd1a3c9` |
-| `execution/tests/test_codex_usage.py` | 138 | `c859bfc21c16e6a1` |
+| `execution/tests/test_codex_usage.py` | 157 | `c45963d843eafe88` |
 | `execution/tests/test_hub_role_adapter.py` | 107 | `8ebcd773b5c73750` |
 | `execution/tests/test_role_engine.py` | 115 | `a5dc9517be46e1fb` |
 | `execution/tests/test_usage_adapter.py` | 78 | `e0b4e6856e222882` |
@@ -202,7 +202,7 @@
 | `execution/tests/test_usage_ledger.py` | 153 | `8a5362414bcbd074` |
 | `execution/usage_adapter.py` | 62 | `362af1be63a188ff` |
 | `execution/usage_cli.py` | 69 | `b2f7f6d6fe04d3a6` |
-| `execution/usage_ledger.py` | 353 | `e02f8968b512ffeb` |
+| `execution/usage_ledger.py` | 360 | `063b9fc12dc759d1` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |
@@ -240,8 +240,8 @@
 | `windows/app/main.cjs` | 250 | `0ea31db4b48cc860` |
 | `windows/app/onboarding.cjs` | 63 | `bc4191e562a54379` |
 | `windows/app/preload.cjs` | 33 | `964342a9f7cef15d` |
-| `windows/app/project-view.js` | 69 | `72733a9ce31f1ec3` |
-| `windows/app/renderer.js` | 833 | `24e5abaa6fa1a1e8` |
+| `windows/app/project-view.js` | 85 | `100506161acda9f1` |
+| `windows/app/renderer.js` | 837 | `63aac9b94dfa02cf` |
 | `windows/app/runtime.cjs` | 574 | `31dbba1599c44273` |
 | `windows/app/settings.cjs` | 129 | `b3872286f24021ff` |
 | `windows/app/skills.cjs` | 21 | `92cadd2cdc79f687` |
@@ -251,8 +251,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `4eaa19e2f6032e65` |
-| `windows/package.json` | 185 | `ea44855f104e6112` |
+| `windows/package-lock.json` | 3682 | `79a138a945cdafb7` |
+| `windows/package.json` | 185 | `291c9296e75fedcb` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -277,7 +277,7 @@
 | `windows/tests/mcp10-execution-packaging.test.cjs` | 17 | `ba18751a9bfed122` |
 | `windows/tests/mcp11-handoff-packaging.test.cjs` | 17 | `681edb8c8687b8b8` |
 | `windows/tests/mcp12-usage-packaging.test.cjs` | 17 | `d5ef9b919f236fe5` |
-| `windows/tests/mcp13-project-view.test.cjs` | 71 | `09a00843859d8420` |
+| `windows/tests/mcp13-project-view.test.cjs` | 127 | `29b44946911066d1` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |

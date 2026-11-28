@@ -39,6 +39,30 @@ test('MCP-13 queued, busy and ambiguous outcomes cannot offer a second Send',()=
   assert.match(busy.next,/ожида|дождитесь|провер/i);
  }
 });
+test('MCP-13 existing AutoSend projects retain legacy smart_v2_project identities',()=>{
+ const td=presentProject(task({project_label:undefined,smart_v2_project:'TD'}));
+ const museum=presentProject(task({project_label:'',smart_v2_project:'Museum'}));
+ assert.equal(td.title,'TD','The live TD schedule must not become unnamed');
+ assert.equal(museum.title,'Museum','The live Museum schedule must not become unnamed');
+ assert.notEqual(td.title,museum.title,'Two legacy project controls must not be indistinguishable');
+ const named=presentProject(task({project_label:'Personal project',smart_v2_project:'TD'}));
+ assert.equal(named.title,'Personal project','Keep explicit user label ahead of legacy tag');
+});
+test('MCP-13 fails closed when paused task still owns a receipt or browser is unreachable',()=>{
+ for(const evidence of [
+  {verification:{status:'checking'}},{active_slot_id:'slot-unknown'},
+  {smart_v2_pending_action:{id:'pending'}},
+  {manual_once:true}
+ ]){
+  const v=presentProject(task(evidence),{browserBackendReachable:true,extensionConnected:true});
+  assert.equal(v.primaryAction,null,'No second Start while previous attempt may be in flight');
+  assert.equal(v.primaryDisabled,true);
+  assert.match(v.reason,/ожида|не заверш|провер/i);
+ }
+ const disconnected=presentProject(task(),{browserBackendReachable:false,extensionConnected:false});
+ assert.equal(disconnected.primaryDisabled,true);
+ assert.match(disconnected.reason,/браузер/i);
+});
 test('MCP-13 handoff remains locked, independent verified work differs from self-report',()=>{
  const locked=presentProject(task({handoff_requires_owner_reconfigure:true}));
  assert.equal(locked.primaryAction,null);
@@ -68,4 +92,36 @@ test('MCP-13 actual Windows renderer keeps emergency deletion always visible and
  assert.match(html,/id="task-project"/);
  assert.match(html,/id="task-url"/);
  assert.match(html,/id="task-advanced"/);
+});
+
+test('MCP-13 renderer does not expose a hidden Start action in diagnostics when receipt exists',async()=>{
+ const vm=require('node:vm');
+ const js=read('windows/app/renderer.js');
+ const begin=js.indexOf('async function refreshTasks(){');
+ const end=js.indexOf("$('refresh-tasks').onclick=refreshTasks;",begin);
+ assert.ok(begin>=0&&end>begin);
+ for(const [why,overrides,serviceStatus] of [
+  ['active slot',{active_slot_id:'pending-previous'},{}],
+  ['receipt',{verification:{state:'checking'}},{}],
+  ['smart pending action',{smart_v2_pending_action:{id:'pending'}},{}],
+  ['queued first send',{manual_once:true},{}],
+  ['known browser offline',{}, {browserBackendReachable:false}],
+  ['known extension offline',{}, {browserBackendReachable:true,extensionConnected:false}]
+ ]){
+  const taskItem=task(overrides), rows=[];
+  const context={
+   $:()=>({replaceChildren(){rows.length=0;},append(x){rows.push(x)}}),
+   window:{mcpgo:{serviceRead:async()=>({tasks:[taskItem],...serviceStatus})}},
+   previewResults:new Map(),taskRefreshRevision:0,
+   item:(title,lines,buttons,offset,view)=>({title,lines,buttons,offset,view}),
+   doTask:()=>{throw Error('Rendering must never send')},confirm:()=>false,
+   autosendTabHealth:()=>''};
+  vm.runInNewContext(js.slice(begin,end)+';globalThis.auditRefresh=refreshTasks;',context);
+  await context.auditRefresh();
+  assert.equal(rows.length,1,why);
+  const names=rows[0].buttons.map(x=>x.label);
+  assert.equal(names.includes('Запустить'),false,why);
+  assert.equal(names.includes('Включить'),false,why);
+  assert.equal(names.includes('Удалить принудительно'),true,why);
+ }
 });

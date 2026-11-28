@@ -444,9 +444,33 @@ class Handler(BaseHTTPRequestHandler):
                 self.result(obj)
         except (ValueError,sqlite3.Error) as ex:self.result({'error':str(ex)},400)
 
+    def _discard_bounded_rejected_post_body(self):
+        """Keep denied local POST responses unambiguous on Windows.
+
+        Closing a socket with an unread small JSON body sometimes resets the
+        client (WinError 10053) instead of returning HTTP 403. Discard only a
+        bounded framed body with a short timeout; do not parse or log it.
+        """
+        try:
+            n=int(self.headers.get('Content-Length','0'))
+            if n<=0 or n>26000:
+                return
+            connection=getattr(self,'connection',None)
+            old_timeout=connection.gettimeout() if connection is not None else None
+            try:
+                if connection is not None:
+                    connection.settimeout(0.75)
+                self.rfile.read(n)
+            finally:
+                if connection is not None:
+                    connection.settimeout(old_timeout)
+        except (OSError,ValueError,TypeError):
+            pass
+
     def do_POST(self):
         if self.headers.get('X-MCPHub-Client') == 'delegate':
             if self.path not in ('/api/work/claim', '/api/work/ack'):
+                self._discard_bounded_rejected_post_body()
                 return self.result({'error': 'Delegated route forbidden'}, 403)
             if not self.headers.get('Content-Type', '').startswith('application/json'):
                 return self.result({'error': 'JSON required'}, 415)
