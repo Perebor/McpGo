@@ -378,28 +378,45 @@ class UsageLedger:
                 and agent=='chatgpt_autosend'):
             _identity(project,agent,'summary','summary')
         with self._db() as con:
-            rows=con.execute('''SELECT kind,COUNT(*)
-                FROM usage_events WHERE project=? AND agent=? GROUP BY kind''',
-                (project,agent)).fetchall()
-            commits=con.execute('''SELECT COUNT(DISTINCT commit_sha) FROM usage_events
-                WHERE project=? AND agent=? AND kind='GIT_VERIFIED' ''',
-                (project,agent)).fetchone()[0]
-            codex=con.execute('''SELECT COUNT(*),SUM(input_tokens),SUM(cached_input_tokens),
-                SUM(output_tokens),SUM(reasoning_output_tokens),SUM(token_updates)
-                FROM codex_session_usage WHERE project=? AND agent=?''',
-                (project,agent)).fetchone()
-            observed=con.execute('''SELECT
-                SUM(CASE WHEN outcome='CHAT_RESPONSE_OBSERVED' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN outcome='OWNER_ATTESTED' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN outcome='DELIVERY_UNKNOWN' THEN 1 ELSE 0 END)
-                FROM autosend_observations WHERE project=? AND agent=?''',
-                (project,agent)).fetchone()
-            # New Node-ledger schema is optional: older deployed databases
-            # remain readable without DDL or a schema migration on query.
-            has_work_links=con.execute('''SELECT 1 FROM sqlite_master
-                WHERE type='table' AND name='verified_work_links' ''').fetchone()
-            linked=con.execute('''SELECT COUNT(*) FROM verified_work_links
-                WHERE project=? AND agent=?''',(project,agent)).fetchone()[0]                 if has_work_links else 0
+            # AutoSend (Node) may create the shared DB *before* Python ever
+            # initializes its optional Git/Codex tables. Read-only inspection
+            # must not create those tables or fail on a valid Node-only DB.
+            present={item[0] for item in con.execute("""
+                SELECT name FROM sqlite_master WHERE type='table'
+                AND name IN ('usage_events','codex_session_usage',
+                             'autosend_observations','verified_work_links')
+            """).fetchall()}
+            if 'usage_events' in present:
+                rows=con.execute('''SELECT kind,COUNT(*)
+                    FROM usage_events WHERE project=? AND agent=? GROUP BY kind''',
+                    (project,agent)).fetchall()
+                commits=con.execute('''SELECT COUNT(DISTINCT commit_sha) FROM usage_events
+                    WHERE project=? AND agent=? AND kind='GIT_VERIFIED' ''',
+                    (project,agent)).fetchone()[0]
+            else:
+                rows=[]
+                commits=0
+            if 'codex_session_usage' in present:
+                codex=con.execute('''SELECT COUNT(*),SUM(input_tokens),SUM(cached_input_tokens),
+                    SUM(output_tokens),SUM(reasoning_output_tokens),SUM(token_updates)
+                    FROM codex_session_usage WHERE project=? AND agent=?''',
+                    (project,agent)).fetchone()
+            else:
+                codex=(0,0,0,0,0,0)
+            if 'autosend_observations' in present:
+                observed=con.execute('''SELECT
+                    SUM(CASE WHEN outcome='CHAT_RESPONSE_OBSERVED' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN outcome='OWNER_ATTESTED' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN outcome='DELIVERY_UNKNOWN' THEN 1 ELSE 0 END)
+                    FROM autosend_observations WHERE project=? AND agent=?''',
+                    (project,agent)).fetchone()
+            else:
+                observed=(0,0,0)
+            if 'verified_work_links' in present:
+                linked=con.execute('''SELECT COUNT(*) FROM verified_work_links
+                    WHERE project=? AND agent=?''',(project,agent)).fetchone()[0]
+            else:
+                linked=0
         counts=dict(rows)
         model=counts.get('MODEL_CLAIMED',0)
         return {'project':project,'agent':agent,

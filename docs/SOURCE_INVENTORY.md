@@ -202,13 +202,14 @@
 | `execution/tests/test_autosend_usage_bridge.py` | 224 | `0e0b9b559b42e8ef` |
 | `execution/tests/test_codex_usage.py` | 157 | `c45963d843eafe88` |
 | `execution/tests/test_hub_role_adapter.py` | 107 | `8ebcd773b5c73750` |
+| `execution/tests/test_node_only_usage_sqlite.py` | 50 | `9be025852f322c89` |
 | `execution/tests/test_role_engine.py` | 115 | `a5dc9517be46e1fb` |
 | `execution/tests/test_usage_adapter.py` | 78 | `e0b4e6856e222882` |
 | `execution/tests/test_usage_cli.py` | 51 | `849e7085cda55924` |
 | `execution/tests/test_usage_ledger.py` | 153 | `8a5362414bcbd074` |
 | `execution/usage_adapter.py` | 62 | `362af1be63a188ff` |
 | `execution/usage_cli.py` | 74 | `fe081eb0d8facb93` |
-| `execution/usage_ledger.py` | 435 | `074094ead2dd8559` |
+| `execution/usage_ledger.py` | 452 | `d684295ce3626d70` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |
@@ -257,8 +258,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `420e6415dbfad2ea` |
-| `windows/package.json` | 185 | `d632555fdb2261be` |
+| `windows/package-lock.json` | 3682 | `70fccebbe3066582` |
+| `windows/package.json` | 185 | `0379cf0423527210` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 104 | `cc97fa368db01d16` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
@@ -300,6 +301,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 118 | `7d88de9161dfedfe` |
 
-Всего файлов в выбранном source-only срезе: **293**.
+Всего файлов в выбранном source-only срезе: **294**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
