@@ -101,6 +101,12 @@ export async function inspectWorkResult(task,outcome,{policy,verify=null,now=Dat
  return Object.freeze({version:1,taskId:task.id,project,
   status:verified?'VERIFIED':reported?'SELF_REPORT':'UNVERIFIED',
   verified,fingerprint,proofFingerprint,
+  // This is independently checked Git/CI adapter data, never from chat.
+  // Keep the legacy UI work_result fingerprint-only; persist Git separately.
+  verifiedGit:verified?Object.freeze({
+   repo:proof.repo,sha:proof.sha,prNumber:proof.prNumber,
+   provenAt:proof.provenAt,proofFingerprint,
+   resultFingerprint:fingerprint}):null,
   reported:Object.freeze(reported||{filesChanged:0,testsPassed:0,testsFailed:0}),
   verifiedCommits:verified?1:0});
 }
@@ -146,5 +152,13 @@ export function commitObservedWorkResult(task,result,now=Date.now()){
   proofFingerprint:result.proofFingerprint,updatedAt:new Date(now).toISOString()};
  task.work_result_metrics={self_report_only:selfReportOnly,verified,
   lastUpdatedAt:new Date(now).toISOString()};
+ // Persist the trusted Git identity in the same durable tasks.json update as
+ // the work verdict; SQLite can recover after interrupted optional mirroring.
+ if(result.status==='VERIFIED'&&result.verified===true&&
+    result.verifiedGit&&SHA.test(result.verifiedGit.sha||'')&&
+    FP.test(result.verifiedGit.proofFingerprint||'')&&
+    result.verifiedGit.resultFingerprint===result.fingerprint){
+  task.work_result_git={...result.verifiedGit};
+ }else delete task.work_result_git;
  return true;
 }

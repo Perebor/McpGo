@@ -129,3 +129,20 @@ python execution/usage_cli.py summary --db "$env:APPDATA\mcpgo-windows\AutoSend\
 Команда только читает и суммирует локальные доказательства, не запускает модель и не подтверждает стоимость. Пользовательские TD и Museum по-прежнему не нуждаются в включении для работы диагностического режима.
 
 **Невыполненная приёмка:** настоящий owner-approved чат, две независимые AutoSend доставки с проверенным ответом, reconnect/reload/sleep и provider-side usage receipts. Не объявлять MCP-03/05/12 полностью `VERIFIED` по синтетическим HTTP-тестам, `tools/list` или локальным счётчикам.
+
+
+## MCP-12 · Связь реальной квитанции ChatGPT и независимо проверенного Git-результата (28.11.2026)
+
+После проверки `WORK_RESULT` через реальный GitHub/CI/test adapter McpGo сохраняет в `tasks.json` отдельно от UI-поля `work_result` только минимальные, *независимо проверенные* `repo`, `git SHA`, `PR number`, fingerprint проверки и timestamp. Самоотчёт агента не создаёт такое доказательство. Полезные для диспетчера защитные правила `UNKNOWN`, `click-committed`, `duplicate conversation` не меняются.
+
+При следующей штатной атомарной записи `tasks.json` уже существующий `model-use-ledger.mjs` сопоставляет вердикт с **последней предшествующей DOM-проверенной квитанцией того же task UUID**. Требуются корректная область проекта, подтверждённые test jobs, fingerprint доказательства, времена и совпадение receipt evidence. Не допускаются ручные `verified_manual`, неизвестные доставки, неподтверждённый Git, устаревшие/подменённые receipts. Для одного `project + repo + Git SHA` запись допускается только один раз; повторное зеркало БД идемпотентно.
+
+Новая SQLite таблица `verified_work_links` хранит `task_id`, `receipt_event_id`, `repo`, `git_sha`, `pr_number`, `proof_fingerprint` и время. Из неё можно получить точную локальную ассоциацию:
+
+```powershell
+python execution/usage_cli.py links --db "$env:APPDATA\mcpgo-windows\AutoSend\usage.sqlite3" --project Museum
+```
+
+Команда открывает существующую SQLite БД только в `mode=ro` и не вызывает GitHub, модель, браузер или Send. `UsageLedger.summary` отдельно выдаёт `observed_chat_responses` и `verified_git_work_links`. Поскольку это **хронологическая ассоциация**, она не доказывает, что конкретный ответ ChatGPT *причинил* изменение Git, и не подтверждает стоимость, provider tokens, API calls или экономию. Источник помечен `LOCAL_GITHUB_CI_ADAPTER_TEMPORAL_LINK`. Записи без проверяемой ассоциации не считаются результатом.
+
+Локальные данные Codex `total_token_usage` по конкретным сессиям остаются счётчиками клиентского JSONL, не подписанными провайдером; ChatGPT consumer usage panel не предоставляет проверенных per-task receipts для этого приложения. До получения подходящего provider-side evidence расход ChatGPT, тарификация и сравнение затрат остаются `UNKNOWN`. `choose_route` остаётся рекомендательной локальной политикой: он **не переключает модель** в реальном ChatGPT и не обходит лимиты.

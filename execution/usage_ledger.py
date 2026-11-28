@@ -346,6 +346,31 @@ class UsageLedger:
         except (OSError,ValueError,RuntimeError,KeyError,sqlite3.Error) as e:
             raise UsageDenied('Local proof unavailable or inconsistent') from e
 
+    def work_links(self,project,agent):
+        """Read exact local Git SHA/PR ↔ receipt associations, not causation.
+
+        These records were mirrored from owner-registered GitHub CI adapter
+        verdicts plus an existing DOM-verified AutoSend receipt. Never infer
+        provider-billed tokens or fabricate a new Git verification.
+        """
+        if project not in ('TD','Museum') or agent!='chatgpt_autosend':
+            raise UsageDenied('Only registered project AutoSend work links are readable')
+        with self._db() as con:
+            exists=con.execute("""SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='verified_work_links'""").fetchone()
+            if not exists:
+                return []
+            rows=con.execute("""SELECT task_id,project,receipt_event_id,repo,
+                git_sha,pr_number,proof_fingerprint,result_observed_at,
+                evidence_source FROM verified_work_links
+                WHERE project=? AND agent=?
+                ORDER BY result_observed_at,receipt_event_id""",
+                (project,agent)).fetchall()
+        names=('task_id','project','receipt_event_id','repo','git_sha',
+               'pr_number','proof_fingerprint','result_observed_at',
+               'evidence_source')
+        return [dict(zip(names,row)) for row in rows]
+
     def summary(self,project,agent):
         # AutoSend records standalone owner-approved test chats as task:UUID.
         # This is read-only scope; all ledger write paths still call _identity.
@@ -369,6 +394,12 @@ class UsageLedger:
                 SUM(CASE WHEN outcome='DELIVERY_UNKNOWN' THEN 1 ELSE 0 END)
                 FROM autosend_observations WHERE project=? AND agent=?''',
                 (project,agent)).fetchone()
+            # New Node-ledger schema is optional: older deployed databases
+            # remain readable without DDL or a schema migration on query.
+            has_work_links=con.execute('''SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='verified_work_links' ''').fetchone()
+            linked=con.execute('''SELECT COUNT(*) FROM verified_work_links
+                WHERE project=? AND agent=?''',(project,agent)).fetchone()[0]                 if has_work_links else 0
         counts=dict(rows)
         model=counts.get('MODEL_CLAIMED',0)
         return {'project':project,'agent':agent,
@@ -381,6 +412,10 @@ class UsageLedger:
                 'observed_chat_responses':observed[0] or 0,
                 'owner_attested_responses':observed[1] or 0,
                 'delivery_unknown':observed[2] or 0,
+                'verified_git_work_links':linked,
+                'work_link_source':'LOCAL_GITHUB_CI_ADAPTER_TEMPORAL_LINK'
+                    if linked else None,
+                'work_link_note':'chronological association, NOT proof of causation',
                 'chat_delivery_source':'LOCAL_AUTOSEND_RECEIPT_NOT_PROVIDER_SIGNED'
                     if any(x for x in observed) else None,
                 'useful_verified_per_model_claim':commits/model if model else None,

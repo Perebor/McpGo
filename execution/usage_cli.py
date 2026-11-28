@@ -19,6 +19,9 @@ def main():
     summary.add_argument('--db',type=Path,required=True)
     summary.add_argument('--project',required=True,help='TD, Museum or exact task:UUID read-only scope')
     summary.add_argument('--agent',required=True)
+    links=sub.add_parser('links',help='Read exact Git/CI result ↔ ChatGPT receipt pairs (no model calls)')
+    links.add_argument('--db',type=Path,required=True)
+    links.add_argument('--project',choices=['TD','Museum'],required=True)
     route=sub.add_parser('route',help='Advisory: no model is dispatched')
     route.add_argument('--local',choices=['VERIFIED','PENDING','EXHAUSTED','BLOCKED'],required=True)
     route.add_argument('--ordinary',choices=['AVAILABLE','UNAVAILABLE','UNKNOWN'],required=True)
@@ -39,6 +42,8 @@ def main():
     try:
         if args.command=='summary':
             result=UsageLedger(args.db,readonly=True).summary(args.project,args.agent)
+        elif args.command=='links':
+            result=UsageLedger(args.db,readonly=True).work_links(args.project,'chatgpt_autosend')
         elif args.command=='route':
             result=choose_route(args.local,args.ordinary,args.limited,args.owner_paid)
         elif args.command=='capture-codex':

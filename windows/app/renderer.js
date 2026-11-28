@@ -653,7 +653,10 @@ async function refreshTasks(){
    if(evidence?.state==='LOCAL_AUTOSEND_RECEIPTS'&&Array.isArray(evidence.rows)){
     const total=evidence.rows.reduce((sum,r)=>sum+Number(r.observed_chat_responses||0),0);
     const unknown=evidence.rows.reduce((sum,r)=>sum+Number(r.delivery_unknown||0),0);
+    const links=evidence.rows.reduce((sum,r)=>sum+Number(r.verified_git_work_links||0),0);
     usageLabel.textContent='Локально подтверждённых ответов: '+total+
+     ' · Git/CI результатов, связанных по времени: '+links+
+     ' (не доказывает причинность)'+
      ' · неопределённых доставок: '+unknown+
      ' · точные вызовы моделей, токены и стоимость: UNKNOWN';
    }else usageLabel.textContent='Локальный журнал учёта недоступен. Данные о вызовах моделей: UNKNOWN';
