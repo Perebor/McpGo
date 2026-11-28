@@ -119,6 +119,17 @@ class UsageLedger:
                 created_utc TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             )''')
             db.execute('CREATE INDEX IF NOT EXISTS usage_project_agent ON usage_events(project,agent)')
+            db.execute('''CREATE TABLE IF NOT EXISTS codex_session_usage(
+                session_id TEXT PRIMARY KEY,
+                project TEXT NOT NULL, agent TEXT NOT NULL, run_id TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL, cached_input_tokens INTEGER NOT NULL,
+                cache_write_input_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL, reasoning_output_tokens INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL, token_updates INTEGER NOT NULL,
+                source_digest TEXT NOT NULL,
+                observed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )''')
+            db.execute('CREATE INDEX IF NOT EXISTS usage_codex_by_actor ON codex_session_usage(project,agent)')
         if os.name!='nt':
             os.chmod(self.path,0o600)
 
@@ -190,6 +201,67 @@ class UsageLedger:
                                  route=route,reason=reason,
                                  commit_sha=None,test_sha=None,audit_sha=None))
 
+    def record_codex_observation(self,project,agent,run_id,snapshot):
+        """One scoped cumulative local Codex source; no self-reported tokens.
+
+        Session IDs are globally unique, so copying a source between actors or
+        projects cannot double-count its totals. Appends update one row.
+        This local evidence is NOT a cryptographic provider/billing receipt.
+        """
+        _identity(project,agent,run_id,'codex-scope')
+        keys={'session_id','input_tokens','cached_input_tokens','cache_write_input_tokens',
+              'output_tokens','reasoning_output_tokens','total_tokens',
+              'token_update_events','observed_increases','source_digest','source_kind'}
+        if not isinstance(snapshot,dict) or set(snapshot)!=keys or (
+            snapshot['source_kind']!='LOCAL_CODEX_SESSION_NOT_PROVIDER_SIGNED'):
+            raise UsageDenied('Untrusted Codex usage shape')
+        from execution.codex_usage import FIELDS
+        if any(type(snapshot[k]) is not int or snapshot[k]<0 or snapshot[k]>10**13
+               for k in FIELDS) or not SHA256.fullmatch(snapshot['source_digest']):
+            raise UsageDenied('Invalid normalized local Codex token numbers')
+        if type(snapshot['token_update_events']) is not int or snapshot['token_update_events']<1 or (
+            type(snapshot['observed_increases']) is not int or
+            snapshot['observed_increases']<1 or
+            snapshot['observed_increases']>snapshot['token_update_events']):
+            raise UsageDenied('Missing normalized Codex usage changes')
+        from execution.codex_usage import SESSION_RE
+        sid=snapshot['session_id']
+        if not isinstance(sid,str) or not SESSION_RE.fullmatch(sid):
+            raise UsageDenied('Invalid Codex session ID')
+        values=(sid,project,agent,run_id,
+                *(snapshot[k] for k in FIELDS),
+                snapshot['token_update_events'],snapshot['source_digest'])
+        with self._db() as con:
+            row=con.execute('''SELECT project,agent,run_id,input_tokens,cached_input_tokens,
+                        cache_write_input_tokens,output_tokens,reasoning_output_tokens,
+                        total_tokens,token_updates,source_digest
+                FROM codex_session_usage WHERE session_id=?''',(sid,)).fetchone()
+            if row is None:
+                con.execute('''INSERT INTO codex_session_usage(
+                    session_id,project,agent,run_id,input_tokens,cached_input_tokens,
+                    cache_write_input_tokens,output_tokens,reasoning_output_tokens,
+                    total_tokens,token_updates,source_digest)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',values)
+                return 'RECORDED'
+            if tuple(row[:3])!=(project,agent,run_id):
+                raise UsageConflict('Codex session already attributed to another scoped run')
+            prior=tuple(row[3:9]);after=tuple(snapshot[k] for k in FIELDS)
+            if any(next_value<old_value for next_value,old_value in zip(after,prior)) or (
+                snapshot['token_update_events']<row[9]):
+                raise UsageDenied('Codex usage regressed; investigate before import')
+            if after==prior and snapshot['source_digest']==row[10]:
+                return 'ALREADY_RECORDED'
+            if after==prior or after[-1]==prior[-1]:
+                raise UsageConflict('Codex telemetry changed without token increase')
+            con.execute('''UPDATE codex_session_usage SET
+                input_tokens=?,cached_input_tokens=?,cache_write_input_tokens=?,
+                output_tokens=?,reasoning_output_tokens=?,total_tokens=?,
+                token_updates=?,source_digest=?,
+                observed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE session_id=?''',(*after,snapshot['token_update_events'],
+                                      snapshot['source_digest'],sid))
+            return 'UPDATED'
+
     def capture_verified_role_run(self,engine,project,agent,run_id,task_id):
         """Recheck the owner-registered repo, RoleEngine SQLite and Git commit.
 
@@ -251,6 +323,10 @@ class UsageLedger:
             commits=con.execute('''SELECT COUNT(DISTINCT commit_sha) FROM usage_events
                 WHERE project=? AND agent=? AND kind='GIT_VERIFIED' ''',
                 (project,agent)).fetchone()[0]
+            codex=con.execute('''SELECT COUNT(*),SUM(input_tokens),SUM(cached_input_tokens),
+                SUM(output_tokens),SUM(reasoning_output_tokens),SUM(token_updates)
+                FROM codex_session_usage WHERE project=? AND agent=?''',
+                (project,agent)).fetchone()
         counts=dict(rows)
         model=counts.get('MODEL_CLAIMED',0)
         return {'project':project,'agent':agent,
@@ -262,6 +338,16 @@ class UsageLedger:
                 'verified_test_runs':counts.get('GIT_VERIFIED',0),
                 'useful_verified_per_model_claim':commits/model if model else None,
                 'input_tokens':None,'output_tokens':None,
-                'token_measurement':'UNKNOWN','cost_measurement':'UNKNOWN',
+                'codex_observed_sessions':codex[0] or 0,
+                'codex_observed_input_tokens':codex[1] or 0,
+                'codex_observed_cached_input_tokens':codex[2] or 0,
+                'codex_observed_output_tokens':codex[3] or 0,
+                'codex_observed_reasoning_output_tokens':codex[4] or 0,
+                'codex_observed_token_updates':codex[5] or 0,
+                'codex_usage_source':'LOCAL_CODEX_SESSION_NOT_PROVIDER_SIGNED'
+                    if codex[0] else None,
+                'token_measurement':'LOCAL_CODEX_TELEMETRY_NOT_PROVIDER_SIGNED'
+                    if codex[0] else 'UNKNOWN',
+                'cost_measurement':'UNKNOWN',
                 'evidence_source':'owner_local_git_role_engine_not_provider',
                 'model_claim_note':'claims are NOT confirmed provider invocations'}

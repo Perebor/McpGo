@@ -26,12 +26,33 @@ def main():
     route.add_argument('--owner-paid',action='store_true',default=False)
     compare=sub.add_parser('compare',help='Hypothetical same-fixture claims, never actual token savings')
     compare.add_argument('--fixtures',type=Path,required=True)
+    capture=sub.add_parser('capture-codex',help='Import scoped local Codex telemetry, NOT billed usage')
+    capture.add_argument('--db',type=Path,required=True)
+    capture.add_argument('--session',type=Path,required=True)
+    capture.add_argument('--codex-root',type=Path,required=True)
+    capture.add_argument('--engine-state',type=Path,required=True)
+    capture.add_argument('--engine-worktrees',type=Path,required=True)
+    capture.add_argument('--project',choices=['TD','Museum'],required=True)
+    capture.add_argument('--agent',required=True)
+    capture.add_argument('--run-id',required=True)
     args=parser.parse_args()
     try:
         if args.command=='summary':
             result=UsageLedger(args.db).summary(args.project,args.agent)
         elif args.command=='route':
             result=choose_route(args.local,args.ordinary,args.limited,args.owner_paid)
+        elif args.command=='capture-codex':
+            from execution.role_engine import RoleEngine
+            from execution.codex_usage import capture_codex_usage
+            if (not args.engine_state.is_dir() or
+                not (args.engine_state/'roles.sqlite3').is_file()):
+                raise UsageDenied('Missing existing owner-registered RoleEngine state')
+            engine=RoleEngine(args.engine_state,args.engine_worktrees)
+            repo=engine._repo(args.project)
+            ledger=UsageLedger(args.db)
+            event=capture_codex_usage(ledger,args.session,args.codex_root,repo,
+                         args.project,args.agent,args.run_id,owner_engine=engine)
+            result={'event':event,'summary':ledger.summary(args.project,args.agent)}
         else:
             if args.fixtures.is_symlink() or not args.fixtures.is_file() or args.fixtures.stat().st_size>100_000:
                 raise UsageDenied('Unsafe or too large fixture')

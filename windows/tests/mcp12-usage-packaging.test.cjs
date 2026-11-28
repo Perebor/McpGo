@@ -10,6 +10,7 @@ test('MCP-12 source ledger and local-first adapter are required in installed Win
  assert.ok(execution.filter.includes('usage_ledger.py'),'ledger source must ship');
  assert.ok(execution.filter.includes('usage_adapter.py'),'local-first integration must ship');
  assert.ok(execution.filter.includes('usage_cli.py'),'owner-inspectable usage CLI must ship');
+ assert.ok(execution.filter.includes('codex_usage.py'),'scoped local Codex telemetry reader must ship');
  const verify=fs.readFileSync(path.join(root,'windows/verify-build.py'),'utf8');
  assert.match(verify,/"usage_ledger.py"/);
  assert.match(verify,/"usage_adapter.py"/);

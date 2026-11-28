@@ -47,3 +47,18 @@ python execution/usage_cli.py compare --fixtures execution/mcp12-scenarios.json
 The six **identical synthetic cases** in the fixture compare a hypothetical naive request-per-task baseline (6 claimed requests) against **policy choices** (2 suggested model claims, 2 local-no-model, 2 wait/blocked). They do not measure actual model invocations, saved tokens, money or independently verified Git results. The owner-local Git E2E separately proves a real commit/test/audit with **0 model calls**. Reporting both numbers without conflating them is intentional.
 
 Remaining MCP-12 acceptance work: a provider-confirmed usage-receipt adapter (not inferred from ChatGPT DOM or model text), run identifiers linked to real approved ChatGPT AutoSend sends, and owner acceptance of before/after result quality on live but safe isolated conversations. Until then MCP-12 cannot be marked VERIFIED and all provider usage/quotas remain UNKNOWN.
+
+
+## MCP-12: scoped local Codex telemetry (preview.34 candidate, 28.11.2026)
+
+`execution/codex_usage.py` reads only allowlisted metadata from a local Codex JSONL session: `session_meta.id/cwd/model_provider` and `event_msg: token_count.info.total_token_usage`. The user must supply the **exact session file** under an approved `.codex/sessions` or `.codex/archived_sessions` root and an **existing registered owner RoleEngine project repository**. The session `cwd` must resolve exactly to that repository and the requesting actor must be its registered coder; an arbitrary caller cannot tag a TD session as Museum or McpGo. Symlinked files, malformed/receding token totals, missing metadata, cross-project and unverifiable records fail closed. No payload messages, transcripts, credentials, API keys, chat IDs, or full local paths are persisted.
+
+`UsageLedger.record_codex_observation` stores *one cumulative row per Codex session UUID globally*, with monotonic update and idempotent restart/replay; an identical log in another project/agent is rejected. Aggregates expose `codex_observed_input_tokens`, `codex_observed_cached_input_tokens`, `codex_observed_output_tokens`, `codex_observed_reasoning_output_tokens`, and `codex_observed_token_updates` separately. These are **local client-recorded counters**, `LOCAL_CODEX_SESSION_NOT_PROVIDER_SIGNED`, not provider-signed API usage/billing receipts or measured account cost. Model claim/call confirmation stays separate, and price, subscription allowance and saved money remain `UNKNOWN`.
+
+Explicit owner-only example, with registered fixture paths substituted:
+
+```powershell
+python execution/usage_cli.py capture-codex --db C:\Temp\mcpgo12-usage.sqlite3 --session C:\Users\User\.codex\sessions\2026\11\28\rollout-UUID.jsonl --codex-root C:\Users\User\.codex --engine-state C:\Temp\mcpgo-fixture-state --engine-worktrees C:\Temp\mcpgo-fixture-worktrees --project TD --agent td_coder --run-id fixture-run
+```
+
+This command is **never run automatically by AutoSend** and must not be used to attribute unrelated work. Existing local Codex logs found on 28.11.2026 (23 sessions, 3308 `token_count` events) are primarily TD sessions: 13 sessions/3203 events had TD directory metadata, 10 sessions/105 were other or unknown. None established source project McpGo. They were **read-only inspected and never imported into this ledger**. Real ChatGPT UI exposes aggregate remaining limits, not per-turn token receipts; the observed 5-hour/weekly quota percentage does not establish model call, tokens or cost. Completing MCP-12 requires authorized, attributable live model calls and provider-side/account receipts where available, plus matched real-work-cycle before/after evidence without ambiguous sends. Until then SOURCE_VERIFIED, not VERIFIED.
