@@ -60,7 +60,7 @@ jobs:
           node --check playwright/tool-profiles.mjs
           node --check launchers/browser.mjs
           node --check windows/app/runtime.cjs
-          node --test windows/tests
+          node --test windows/tests/*.test.cjs
       - name: Isolated Chrome browser smoke on pull requests (informational)
         if: github.event_name == 'pull_request'
         continue-on-error: true

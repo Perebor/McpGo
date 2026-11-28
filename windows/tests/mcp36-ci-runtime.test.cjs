@@ -10,4 +10,5 @@ test('MCP-36 Linux verify CI runs same Node 24 SQLite-capable runtime as Windows
  assert.match(yml,/node-version:\s*["']24["']/);
  assert.match(windows,/node-version:\s*["']24["']/);
  assert.match(yml,/node -e .*node:sqlite/);
+ assert.match(yml,/node --test windows\/tests\/\*\.test\.cjs/,'CI must run explicit files, not a directory');
 });
