@@ -198,7 +198,7 @@
 | `execution/hub_role_adapter.py` | 120 | `6b7570686b927160` |
 | `execution/role_engine.py` | 323 | `cc01bf07c982e1d2` |
 | `execution/role_worker.py` | 135 | `0d2f2fd42fd1a3c9` |
-| `execution/tests/test_autosend_usage_bridge.py` | 80 | `208b0e2af5e7d492` |
+| `execution/tests/test_autosend_usage_bridge.py` | 128 | `3aaf48621cfe31c5` |
 | `execution/tests/test_codex_usage.py` | 157 | `c45963d843eafe88` |
 | `execution/tests/test_hub_role_adapter.py` | 107 | `8ebcd773b5c73750` |
 | `execution/tests/test_role_engine.py` | 115 | `a5dc9517be46e1fb` |
@@ -206,8 +206,8 @@
 | `execution/tests/test_usage_cli.py` | 51 | `849e7085cda55924` |
 | `execution/tests/test_usage_ledger.py` | 153 | `8a5362414bcbd074` |
 | `execution/usage_adapter.py` | 62 | `362af1be63a188ff` |
-| `execution/usage_cli.py` | 69 | `b2f7f6d6fe04d3a6` |
-| `execution/usage_ledger.py` | 379 | `02c72c80f288173d` |
+| `execution/usage_cli.py` | 69 | `fae84cd7d72618dd` |
+| `execution/usage_ledger.py` | 400 | `c31e7bffc01bbb8c` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |

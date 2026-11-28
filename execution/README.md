@@ -73,3 +73,27 @@ AutoSend теперь записывает **новые** подтверждён
 python execution/usage_cli.py summary --db "$env:APPDATA\mcpgo-windows\AutoSend\usage.sqlite3" --project Museum --agent chatgpt_autosend
 ```
 `observed_chat_responses` — это локально проверенные новые ответы, `owner_attested_responses` и `delivery_unknown` — самостоятельные категории. `confirmed_model_calls=0` по отношению к независимым provider receipts, точные токены/стоимость `UNKNOWN`. Этот учёт **не** является провайдерской платёжной квитанцией, не оценивает стоимость и не запускает ChatGPT. `choose_route` остаётся локальной рекомендательной функцией, не перехватывает live AutoSend dispatcher. Для реальной экономии нужны источник provider-side usage и сопоставимые проверенные циклы.
+
+
+## MCP-12: read-only per-chat AutoSend receipt inspection (2026-11-28)
+
+An owner-approved standalone ChatGPT test task is recorded automatically in the shared
+`AutoSend/usage.sqlite3` as `project=task:<canonical UUID>`, `agent=chatgpt_autosend`.
+`UsageLedger.summary` and `usage_cli.py summary` now accept that exact task scope
+**only for that observer actor**, keeping TD/Museum authorizations unchanged and
+forbidding attempts to create a claimed model event under a task scope. The CLI
+opens an **existing database in SQLite `mode=ro`**, never initializes tables or
+uses `BEGIN IMMEDIATE`. An unavailable file is an error, not a newly created
+empty source.
+
+Example (substitute the actual owner-approved task UUID):
+
+```powershell
+python execution/usage_cli.py summary --db "$env:APPDATA\mcpgo-windows\AutoSend\usage.sqlite3" --project "task:00000000-0000-4000-8000-000000000001" --agent chatgpt_autosend
+```
+
+An observed DOM reply means only `CHAT_RESPONSE_OBSERVED`, not provider-signed
+model-call, usage, verified Git change or saved money. Such quantities stay
+`UNKNOWN` or zero as appropriate. The source branch adds read-only inspection;
+it does not alter model selection/AutoSend send scheduling and requires the next
+versioned installer to include the new CLI behavior.

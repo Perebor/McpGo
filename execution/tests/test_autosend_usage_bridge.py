@@ -71,6 +71,54 @@ class AutoSendUsageBridgeTests(unittest.TestCase):
         self.assertEqual(td['confirmed_model_calls'],0)
         self.assertEqual(td['cost_measurement'],'UNKNOWN')
 
+    def test_readonly_inspector_never_creates_missing_database_or_writes_events(self):
+        from execution.usage_ledger import UsageDenied
+        missing=Path(self.temp.name)/'nonexistent.sqlite3'
+        self.assertFalse(missing.exists())
+        with self.assertRaises(UsageDenied):
+            UsageLedger(missing,readonly=True)
+        self.assertFalse(missing.exists())
+        scope='task:'+str(uuid.uuid4())
+        self.insert(scope,'chatgpt_autosend','CHAT_RESPONSE_OBSERVED')
+        reader=UsageLedger(self.ledger.path,readonly=True)
+        self.assertEqual(reader.summary(scope,'chatgpt_autosend')['observed_chat_responses'],1)
+        with self.assertRaises(UsageDenied):
+            reader.record_event(event_id='readonly-event',project='TD',
+                agent='td_coder',run_id='readonly-run',task_id='test-task',
+                kind='MODEL_CLAIMED',route='NORMAL_CHAT',reason='REQUEST_PENDING')
+
+    def test_isolated_chat_task_scope_readonly_summary_and_cli(self):
+        chat_id=str(uuid.uuid4())
+        scope='task:'+chat_id
+        self.insert(scope,'chatgpt_autosend','CHAT_RESPONSE_OBSERVED',task_id=chat_id)
+        row=self.ledger.summary(scope,'chatgpt_autosend')
+        self.assertEqual(row['observed_chat_responses'],1)
+        self.assertEqual(row['confirmed_model_calls'],0)
+        self.assertEqual(row['cost_measurement'],'UNKNOWN')
+        self.assertEqual(row['verified_commits'],0)
+        cli=Path(__file__).resolve().parents[1]/'usage_cli.py'
+        result=subprocess.run([sys.executable,str(cli),'summary','--db',str(self.ledger.path),
+                               '--project',scope,'--agent','chatgpt_autosend'],
+                              capture_output=True,text=True,encoding='utf-8')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout)['observed_chat_responses'],1)
+
+    def test_task_scope_never_grants_new_write_permissions_or_cross_project_read(self):
+        from execution.usage_ledger import UsageDenied
+        task_id=str(uuid.uuid4())
+        scope='task:'+task_id
+        self.insert(scope,'chatgpt_autosend','CHAT_RESPONSE_OBSERVED',task_id=task_id)
+        for project,agent in [('task:invalid','chatgpt_autosend'),
+                              (scope,'td_coder'),(scope,'mcpgo_lead'),
+                              ('TD','unknown_actor')]:
+            with self.subTest(project=project,agent=agent):
+                with self.assertRaises(UsageDenied):
+                    self.ledger.summary(project,agent)
+        with self.assertRaises(UsageDenied):
+            self.ledger.record_event(event_id='unsafe-attempt',project=scope,
+              agent='chatgpt_autosend',run_id='unsafe-run',task_id='scope-test',
+              kind='MODEL_CLAIMED',route='NORMAL_CHAT',reason='REQUEST_PENDING')
+
     def test_empty_new_ledger_reports_zero_and_unknown_provider(self):
         row=self.ledger.summary('Museum','chatgpt_autosend')
         self.assertEqual(row['observed_chat_responses'],0)

@@ -19,6 +19,7 @@ PROJECT_ACTORS = {
 IDENT = re.compile(r'[a-zA-Z][a-zA-Z0-9_.:-]{2,99}\Z')
 TASK = re.compile(r'[a-z][a-z0-9_-]{1,39}\Z')
 SHA256 = re.compile(r'[a-f0-9]{64}\Z')
+TASK_SCOPE = re.compile(r'task:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z',re.I)
 GIT_SHA = re.compile(r'[a-f0-9]{40}\Z')
 STATES = frozenset(('AVAILABLE','UNAVAILABLE','UNKNOWN'))
 LOCAL = frozenset(('VERIFIED','PENDING','EXHAUSTED','BLOCKED'))
@@ -105,10 +106,15 @@ def _digest(obj):
 
 class UsageLedger:
     """Durable local events and cumulative Codex counters; never stores prompts."""
-    def __init__(self,path):
+    def __init__(self,path,*,readonly=False):
         self.path=Path(path).absolute()
-        if self.path.is_symlink() or self.path.parent.is_symlink():
-            raise UsageDenied('Unsafe ledger path')
+        self.readonly=readonly is True
+        if type(readonly) is not bool or self.path.is_symlink() or self.path.parent.is_symlink():
+            raise UsageDenied('Unsafe ledger path or access mode')
+        if self.readonly:
+            if not self.path.is_file():
+                raise UsageDenied('Read-only ledger unavailable; no database created')
+            return
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         with self._db() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS usage_events(
@@ -143,22 +149,31 @@ class UsageLedger:
 
     def _db(self):
         class Connection:
-            def __init__(inner,filepath):
+            def __init__(inner,filepath,readonly):
                 inner.filepath=filepath
+                inner.readonly=readonly
             def __enter__(inner):
-                inner.con=sqlite3.connect(str(inner.filepath),timeout=10)
-                inner.con.execute('PRAGMA busy_timeout=10000')
-                inner.con.execute('PRAGMA journal_mode=WAL')
-                inner.con.execute('BEGIN IMMEDIATE')
+                if inner.readonly:
+                    inner.con=sqlite3.connect(inner.filepath.as_uri()+'?mode=ro',
+                                             timeout=10,uri=True)
+                    inner.con.execute('PRAGMA busy_timeout=10000')
+                else:
+                    inner.con=sqlite3.connect(str(inner.filepath),timeout=10)
+                    inner.con.execute('PRAGMA busy_timeout=10000')
+                    inner.con.execute('PRAGMA journal_mode=WAL')
+                    inner.con.execute('BEGIN IMMEDIATE')
                 return inner.con
             def __exit__(inner,exc_type,exc,tb):
                 try:
-                    if exc_type is None: inner.con.commit()
-                    else: inner.con.rollback()
+                    if not inner.readonly:
+                        if exc_type is None: inner.con.commit()
+                        else: inner.con.rollback()
                 finally: inner.con.close()
-        return Connection(self.path)
+        return Connection(self.path,self.readonly)
 
     def _insert(self,event,allow_verification=False):
+        if self.readonly:
+            raise UsageDenied('Read-only usage inspector cannot record events')
         ident=event['event_id']
         if not isinstance(ident,str) or not IDENT.fullmatch(ident):
             raise UsageDenied('Invalid stable event identity')
@@ -216,6 +231,8 @@ class UsageLedger:
         projects cannot double-count its totals. Appends update one row.
         This local evidence is NOT a cryptographic provider/billing receipt.
         """
+        if self.readonly:
+            raise UsageDenied('Read-only usage inspector cannot record events')
         _identity(project,agent,run_id,'codex-scope')
         keys={'session_id','input_tokens','cached_input_tokens','cache_write_input_tokens',
               'output_tokens','reasoning_output_tokens','total_tokens',
@@ -330,7 +347,11 @@ class UsageLedger:
             raise UsageDenied('Local proof unavailable or inconsistent') from e
 
     def summary(self,project,agent):
-        _identity(project,agent,'summary','summary')
+        # AutoSend records standalone owner-approved test chats as task:UUID.
+        # This is read-only scope; all ledger write paths still call _identity.
+        if not (isinstance(project,str) and TASK_SCOPE.fullmatch(project)
+                and agent=='chatgpt_autosend'):
+            _identity(project,agent,'summary','summary')
         with self._db() as con:
             rows=con.execute('''SELECT kind,COUNT(*)
                 FROM usage_events WHERE project=? AND agent=? GROUP BY kind''',

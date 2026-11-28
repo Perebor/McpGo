@@ -17,7 +17,7 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     summary=sub.add_parser('summary',help='Show durable project/agent claims and verified local results')
     summary.add_argument('--db',type=Path,required=True)
-    summary.add_argument('--project',choices=['TD','Museum'],required=True)
+    summary.add_argument('--project',required=True,help='TD, Museum or exact task:UUID read-only scope')
     summary.add_argument('--agent',required=True)
     route=sub.add_parser('route',help='Advisory: no model is dispatched')
     route.add_argument('--local',choices=['VERIFIED','PENDING','EXHAUSTED','BLOCKED'],required=True)
@@ -38,7 +38,7 @@ def main():
     args=parser.parse_args()
     try:
         if args.command=='summary':
-            result=UsageLedger(args.db).summary(args.project,args.agent)
+            result=UsageLedger(args.db,readonly=True).summary(args.project,args.agent)
         elif args.command=='route':
             result=choose_route(args.local,args.ordinary,args.limited,args.owner_paid)
         elif args.command=='capture-codex':
