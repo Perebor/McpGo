@@ -6,12 +6,26 @@ on:
       - 'windows/**'
       - 'terminal/**'
       - 'playwright/**'
+      - 'autosend/**'
+      - 'messaging/**'
+      - 'execution/**'
+      - 'dashboard/**'
+      - 'onboarding/**'
+      - 'skills/**'
+      - 'native/**'
       - '.github/workflows/windows-preview.yml'
   pull_request:
     paths:
       - 'windows/**'
       - 'terminal/**'
       - 'playwright/**'
+      - 'autosend/**'
+      - 'messaging/**'
+      - 'execution/**'
+      - 'dashboard/**'
+      - 'onboarding/**'
+      - 'skills/**'
+      - 'native/**'
       - '.github/workflows/windows-preview.yml'
 permissions:
   contents: read

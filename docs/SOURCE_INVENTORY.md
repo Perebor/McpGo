@@ -129,7 +129,7 @@
 | `autosend/busy-retry.mjs` | 35 | `4cb664f5eae4ebfe` |
 | `autosend/chat-handoff.mjs` | 148 | `58b8233388e8cd56` |
 | `autosend/chat-state.mjs` | 115 | `5ebff06a80cad2c4` |
-| `autosend/conversation-fsm.mjs` | 80 | `3aab7d5b8ab870b9` |
+| `autosend/conversation-fsm.mjs` | 87 | `d5fda61b6cf3d7fb` |
 | `autosend/core.mjs` | 309 | `fd9374af31e2fcbb` |
 | `autosend/delivery.mjs` | 546 | `fc473176531e955b` |
 | `autosend/extension-diagnostic.mjs` | 18 | `02bb6b18401b7f62` |
@@ -154,7 +154,7 @@
 | `autosend/tests/browser-client.test.mjs` | 88 | `8cef8efd7612d2ae` |
 | `autosend/tests/browser-health.test.mjs` | 22 | `f54e3247a314b24f` |
 | `autosend/tests/chat-handoff.test.mjs` | 140 | `824e3e7a9b2faaf0` |
-| `autosend/tests/conversation-fsm.test.mjs` | 116 | `29e8acb1a354b51b` |
+| `autosend/tests/conversation-fsm.test.mjs` | 140 | `812c635750883fe8` |
 | `autosend/tests/core.test.mjs` | 105 | `799e8258f4989deb` |
 | `autosend/tests/extension-delivery.test.mjs` | 367 | `37596365e2f764dd` |
 | `autosend/tests/extension-diagnostic.test.mjs` | 33 | `3dae2cc9b981c125` |
@@ -287,7 +287,7 @@
 | `windows/tests/mcp12-verified-work-ui.test.cjs` | 16 | `88a4a632a0ec2e6f` |
 | `windows/tests/mcp13-project-view.test.cjs` | 149 | `6d04578d9cb83192` |
 | `windows/tests/mcp36-browser-ledger-packaging.test.cjs` | 34 | `db0096167a907673` |
-| `windows/tests/mcp36-ci-runtime.test.cjs` | 14 | `e3b72caec9bfbd6f` |
+| `windows/tests/mcp36-ci-runtime.test.cjs` | 25 | `fb6d339c4b6d7259` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
