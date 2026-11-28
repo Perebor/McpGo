@@ -258,8 +258,8 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `70fccebbe3066582` |
-| `windows/package.json` | 185 | `0379cf0423527210` |
+| `windows/package-lock.json` | 3682 | `32f9a2051e2a6d37` |
+| `windows/package.json` | 185 | `c18e06c44cbd6e68` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
 | `windows/tests/autosend-browser-tristate.test.cjs` | 104 | `cc97fa368db01d16` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
