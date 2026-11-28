@@ -132,16 +132,18 @@
 | `autosend/conversation-fsm.mjs` | 80 | `3aab7d5b8ab870b9` |
 | `autosend/core.mjs` | 309 | `fd9374af31e2fcbb` |
 | `autosend/delivery.mjs` | 546 | `fc473176531e955b` |
+| `autosend/extension-diagnostic.mjs` | 18 | `02bb6b18401b7f62` |
 | `autosend/force-remove.mjs` | 60 | `634160d46589fcb8` |
 | `autosend/github-ci-evidence.mjs` | 137 | `d48f96bd93609337` |
 | `autosend/github-work-adapter.mjs` | 152 | `48db0038c4c64409` |
 | `autosend/guarded-send.mjs` | 123 | `752111ef90ae8dc7` |
 | `autosend/handoff-coordinator.mjs` | 223 | `d2f0d093ff6f0bd6` |
+| `autosend/model-use-ledger.mjs` | 140 | `670c5ff5de27ed59` |
 | `autosend/persistent-tabs.mjs` | 119 | `46892a26b2ea6551` |
 | `autosend/preview-check.mjs` | 80 | `d0181e58cf7ef9e4` |
 | `autosend/reconciliation.mjs` | 166 | `0476f93271a06880` |
 | `autosend/schedule.mjs` | 146 | `04445c15bf9cea3d` |
-| `autosend/server.mjs` | 739 | `8056d544080cb38d` |
+| `autosend/server.mjs` | 779 | `b4e7b57c368aa976` |
 | `autosend/simulated-browser.mjs` | 172 | `de94c11634d4d9c0` |
 | `autosend/smart-continuation.mjs` | 35 | `4bc9841d3367a1df` |
 | `autosend/smart-v2-browser.mjs` | 82 | `3701df89aa1b5d19` |
@@ -155,6 +157,7 @@
 | `autosend/tests/conversation-fsm.test.mjs` | 116 | `29e8acb1a354b51b` |
 | `autosend/tests/core.test.mjs` | 105 | `799e8258f4989deb` |
 | `autosend/tests/extension-delivery.test.mjs` | 367 | `37596365e2f764dd` |
+| `autosend/tests/extension-diagnostic.test.mjs` | 33 | `3dae2cc9b981c125` |
 | `autosend/tests/github-work-adapter.test.mjs` | 165 | `12a66d6956d49d33` |
 | `autosend/tests/handoff-coordinator.test.mjs` | 176 | `c5c895ce20990336` |
 | `autosend/tests/handoff-real-hub-e2e.test.mjs` | 166 | `6d7bce74c677af42` |
@@ -163,13 +166,14 @@
 | `autosend/tests/local-security.test.mjs` | 63 | `fc6ba1f736a713ac` |
 | `autosend/tests/mcp03-browser-generation.test.mjs` | 50 | `bc4eb5556bde1765` |
 | `autosend/tests/mcp03-recovery.test.mjs` | 89 | `cd1cf43fe20749eb` |
+| `autosend/tests/model-use-ledger.test.mjs` | 96 | `93af96468d863f3c` |
 | `autosend/tests/mutation-guard.test.mjs` | 62 | `01f940841ac5132f` |
 | `autosend/tests/no-tab-creation.test.mjs` | 18 | `96c1c6773034c1f4` |
 | `autosend/tests/preview-check.test.mjs` | 71 | `9303b2d1fe909246` |
 | `autosend/tests/reconciliation.test.mjs` | 245 | `b57ff6f7eb74987d` |
 | `autosend/tests/schedule-modes.test.mjs` | 149 | `a0d7187385e8116a` |
 | `autosend/tests/server-handoff.test.mjs` | 139 | `fd036f8ede25bd9c` |
-| `autosend/tests/server-http.test.mjs` | 382 | `2ea0b3b4c573b54a` |
+| `autosend/tests/server-http.test.mjs` | 405 | `a1e521960c5e578a` |
 | `autosend/tests/simulator.test.mjs` | 246 | `5a291fd7b5cd6b07` |
 | `autosend/tests/stream-monitor.test.mjs` | 110 | `7ad1d8b006a19785` |
 | `autosend/tests/transition-journal.test.mjs` | 106 | `56ad90f80c747d30` |
@@ -194,6 +198,7 @@
 | `execution/hub_role_adapter.py` | 120 | `6b7570686b927160` |
 | `execution/role_engine.py` | 323 | `cc01bf07c982e1d2` |
 | `execution/role_worker.py` | 135 | `0d2f2fd42fd1a3c9` |
+| `execution/tests/test_autosend_usage_bridge.py` | 80 | `208b0e2af5e7d492` |
 | `execution/tests/test_codex_usage.py` | 157 | `c45963d843eafe88` |
 | `execution/tests/test_hub_role_adapter.py` | 107 | `8ebcd773b5c73750` |
 | `execution/tests/test_role_engine.py` | 115 | `a5dc9517be46e1fb` |
@@ -202,7 +207,7 @@
 | `execution/tests/test_usage_ledger.py` | 153 | `8a5362414bcbd074` |
 | `execution/usage_adapter.py` | 62 | `362af1be63a188ff` |
 | `execution/usage_cli.py` | 69 | `b2f7f6d6fe04d3a6` |
-| `execution/usage_ledger.py` | 360 | `063b9fc12dc759d1` |
+| `execution/usage_ledger.py` | 379 | `02c72c80f288173d` |
 | `launchers/browser.mjs` | 118 | `4001e252d300a63a` |
 | `launchers/tunnel.mjs` | 48 | `3c474de2e55d4ab6` |
 | `launchagents/com.chatterminalhub.oneshot.plist` | 23 | `8acc4462df168bc5` |
@@ -235,13 +240,13 @@
 | `windows/README.md` | 201 | `201d803ed0127919` |
 | `windows/app/diagnostics.cjs` | 62 | `ec98a56cb0c099c8` |
 | `windows/app/health-contract.cjs` | 204 | `d0900646ecd47af4` |
-| `windows/app/index.html` | 116 | `9128110d4e3bad6c` |
+| `windows/app/index.html` | 118 | `cf9438227f95906f` |
 | `windows/app/local-api.cjs` | 55 | `9a6dc55b1d117c5e` |
 | `windows/app/main.cjs` | 250 | `0ea31db4b48cc860` |
 | `windows/app/onboarding.cjs` | 63 | `bc4191e562a54379` |
 | `windows/app/preload.cjs` | 33 | `964342a9f7cef15d` |
-| `windows/app/project-view.js` | 85 | `100506161acda9f1` |
-| `windows/app/renderer.js` | 837 | `63aac9b94dfa02cf` |
+| `windows/app/project-view.js` | 92 | `6579c8aca1ad5df8` |
+| `windows/app/renderer.js` | 879 | `f9ef37708068eb21` |
 | `windows/app/runtime.cjs` | 574 | `31dbba1599c44273` |
 | `windows/app/settings.cjs` | 129 | `b3872286f24021ff` |
 | `windows/app/skills.cjs` | 21 | `92cadd2cdc79f687` |
@@ -251,10 +256,10 @@
 | `windows/app/upgrade-transaction.cjs` | 138 | `ed6c5fa5ae71784b` |
 | `windows/app/wizard-doctor.cjs` | 15 | `614b75f2736e97d0` |
 | `windows/onboarding_cli.py` | 141 | `3e79b6fab9296723` |
-| `windows/package-lock.json` | 3682 | `79a138a945cdafb7` |
-| `windows/package.json` | 185 | `291c9296e75fedcb` |
+| `windows/package-lock.json` | 3682 | `92369b1df6188d88` |
+| `windows/package.json` | 185 | `24c38bf2b8b084fb` |
 | `windows/prepare-runtime.py` | 106 | `2a4f75319f0ddac8` |
-| `windows/tests/autosend-browser-tristate.test.cjs` | 103 | `9f00db1c2299d17c` |
+| `windows/tests/autosend-browser-tristate.test.cjs` | 104 | `cc97fa368db01d16` |
 | `windows/tests/autosend-hotfix-regression.test.cjs` | 75 | `e88b019755fa8d78` |
 | `windows/tests/browser-agent-parity.test.cjs` | 43 | `70fa9359ce43c8fa` |
 | `windows/tests/browser-compat.test.cjs` | 23 | `1b55c2f4f5cb86b0` |
@@ -277,7 +282,8 @@
 | `windows/tests/mcp10-execution-packaging.test.cjs` | 17 | `ba18751a9bfed122` |
 | `windows/tests/mcp11-handoff-packaging.test.cjs` | 17 | `681edb8c8687b8b8` |
 | `windows/tests/mcp12-usage-packaging.test.cjs` | 17 | `d5ef9b919f236fe5` |
-| `windows/tests/mcp13-project-view.test.cjs` | 127 | `29b44946911066d1` |
+| `windows/tests/mcp13-project-view.test.cjs` | 149 | `6d04578d9cb83192` |
+| `windows/tests/mcp36-browser-ledger-packaging.test.cjs` | 34 | `db0096167a907673` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -289,8 +295,8 @@
 | `windows/tests/supervisor.test.cjs` | 91 | `23b086a9d6ad48c2` |
 | `windows/tests/ui-parity.test.cjs` | 156 | `8a6bd601e1b31940` |
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
-| `windows/verify-build.py` | 118 | `6f92b6a0f04e21d7` |
+| `windows/verify-build.py` | 118 | `7d88de9161dfedfe` |
 
-Всего файлов в выбранном source-only срезе: **284**.
+Всего файлов в выбранном source-only срезе: **290**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

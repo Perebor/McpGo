@@ -639,6 +639,25 @@ async function refreshTasks(){
   const status=await window.mcpgo.serviceRead('autosend','/api/status');
   const {tasks=[]}=status;
   if(revision!==taskRefreshRevision)return;
+  const transportLabel=$('extension-probe-status');
+  if(transportLabel){
+   const connected=status.extensionTransportConnected;
+   transportLabel.textContent=connected===true?
+    'Расширение Chrome доступно. Подтверждённых вкладок: '+Number(status.chatTabApprovedCount||0)+'. Для каждого чата нужна отдельная проверка без отправки.':
+    connected===false?'Соединение с расширением не подтверждено; отправка запрещена.':
+    'Подключение расширения не проверено. Проверка не разрешает отправку сообщений.';
+  }
+  const usageLabel=$('model-usage-status');
+  if(usageLabel){
+   const evidence=status.modelUsage;
+   if(evidence?.state==='LOCAL_AUTOSEND_RECEIPTS'&&Array.isArray(evidence.rows)){
+    const total=evidence.rows.reduce((sum,r)=>sum+Number(r.observed_chat_responses||0),0);
+    const unknown=evidence.rows.reduce((sum,r)=>sum+Number(r.delivery_unknown||0),0);
+    usageLabel.textContent='Локально подтверждённых ответов: '+total+
+     ' · неопределённых доставок: '+unknown+
+     ' · точные вызовы моделей, токены и стоимость: UNKNOWN';
+   }else usageLabel.textContent='Локальный журнал учёта недоступен. Данные о вызовах моделей: UNKNOWN';
+  }
   const expanded=new Set();
   if(typeof list.querySelectorAll==='function')
    for(const node of list.querySelectorAll('details.project-diagnostics[open]'))expanded.add(node.dataset.taskId);
@@ -651,7 +670,10 @@ async function refreshTasks(){
    const pending=['sending','checking','verifying'].includes(t.status)||
     !!t.verification||!!t.active_slot_id||!!t.smart_v2_pending_action||
     t.manual_once===true;
-   const browserDown=status.browserBackendReachable===false||status.extensionConnected===false;
+   const browserDown=status.browserBackendReachable===false||
+    (Object.hasOwn(status,'extensionTransportConnected')?
+      status.extensionTransportConnected!==true:status.extensionConnected===false)||
+    t.browserConfirmed===false;
    const buttons=pending?[]:t.handoff_requires_owner_reconfigure===true?[]:t.status==='unknown'?
      [{label:'Перепроверить доставку',run:()=>doTask('recheck_unknown',t.id)},
       {label:'Подтвердить получение',run:()=>{
@@ -714,6 +736,26 @@ async function refreshTasks(){
  }catch(e){if(revision===taskRefreshRevision){list.replaceChildren();list.append(item('Планировщик недоступен',[e.message]))}}
 }
 $('refresh-tasks').onclick=refreshTasks;
+let extensionProbeBusy=false;
+$('extension-probe').onclick=async()=>{
+ if(extensionProbeBusy)return;
+ extensionProbeBusy=true;
+ const control=$('extension-probe');
+ control.disabled=true;
+ $('extension-probe-status').textContent='Проверяем только MCP-соединение; вкладки не разрешаем и сообщения не отправляем.';
+ try{
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{action:'probe_extension'});
+  $('extension-probe-status').textContent=result.connected===true?
+   'Соединение с Chrome подтверждено. Теперь проверьте точную вкладку проекта без отправки.':
+   'Соединение не подтверждено ('+String(result.reason||'UNKNOWN').slice(0,80)+').';
+  await refreshTasks();
+ }catch{
+  $('extension-probe-status').textContent='Ошибка диагностики. Соединение неизвестно; отправка запрещена.';
+ }finally{
+  extensionProbeBusy=false;
+  control.disabled=false;
+ }
+};
 function showTaskScheduleOptions(){
  $('task-timing').hidden=$('task-mode').value!=='interval';
 }

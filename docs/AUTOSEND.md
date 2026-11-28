@@ -106,3 +106,26 @@ An identical POST after lost HTTP response/restart returns `ALREADY_STAGED`, not
 The successor is initially `handoff_requires_owner_reconfigure=true`. `arm`, `send_once` and `dueTasks` all reject this pending state (including an incorrectly re-enabled disk record); `start` cannot bypass the restriction. After the coordinator confirms **COMPLETE** and the owner has independently inspected the **specific new ChatGPT tab** through the read-only `preview` action, the native owner can call `POST /api/tasks` with `action="unlock_handoff"`, exact `id`, `owner_confirmed_target`, `checkpoint_sha256`, `owner_confirmed_hub=true`, and `owner_confirmed_browser=true`. The backend also requires a live approved tab lease for the successor; owner assertions alone cannot bypass this check. Unlock merely clears the gate **and leaves the new schedule paused**. A separate explicit Start is still required. Without connected Chrome, unlocking cannot pass, by design.
 
 The full fixture E2E now uses **real Python Messaging Hub HTTP + real Node AutoSend HTTP** in isolated temporary databases, verifying that one previously read message is *not* copied while two unread messages reach the new agent exactly once, old agent gets archived, and the new schedule remains paused. In contrast, the independent coordinator fault-injection fixtures use a simulated Hub to test ambiguous replies, lost receipts, cross-service recovery, and owner/URL mismatch refusal. **Real production/browser migration still NOT_RUN**; MCP-11 cannot be fully closed without an owner-approved test pair and working Chrome extension.
+
+
+## Preview.36 · Разделение состояния Chrome и автоматический журнал ответов (28.11.2026)
+
+Owner-only кнопка «Проверить подключение Chrome без отправки» вызывает локальный `POST /api/tasks`, `{"action":"probe_extension"}`: только `Playwright MCP initialize` и `tools/list` на выделенном `127.0.0.1:8932/mcp`. Проверка **не создаёт/выбирает вкладку, не нажимает Send и не предоставляет разрешения на отправку**. Результат с меткой времени хранится только в памяти сервера; после перезапуска или смены browser generation он вновь `UNKNOWN`. Поле `extensionTransportConnected` относится только к MCP-каналу. Поле `chatTabApprovedCount` и `tasks[].browserConfirmed` относятся к **точному разрешённому ChatGPT URL**. Историческое `extensionConnected` сохранено для старых клиентов как индикатор наличия хотя бы одной подтверждённой вкладки, **не как доказательство работы транспорта**. Для запуска текущего проекта требуются успешная проверка расширения и отдельная кнопка «Проверить без отправки» именно у его чата; `UNKNOWN` или отсутствие разрешения на вкладку блокируют Start. Не пытаться переиграть неизвестную отправку.
+
+Новый `autosend/model-use-ledger.mjs` после атомарной фиксации `tasks.json` **автоматически** синхронизирует специально помеченные новые квитанции в файл `AutoSend/usage.sqlite3` (SQLite WAL). Сверка глобального UUID квитанции делает restart и повторную обработку идемпотентными. При недоступной БД исходная квитанция остаётся на диске для повторной безопасной синхронизации, а поле `modelUsage.state` становится `UNKNOWN` — отказ учёта **никогда не запускает Send заново**. Старые попытки до preview.36 не импортируются задним числом; история не переосмысливается. После удаления задания сохраняется неизменяемая минимальная квитанция, но сообщения и URL в журнал не попадают.
+
+`modelUsage.rows` на `GET /api/status` группируются по `project` и техническому `agent=chatgpt_autosend`:
+- `CHAT_RESPONSE_OBSERVED` — локально проверено появление ответа ChatGPT после AutoSend, **не заверенная провайдером модельная транзакция**.
+- `OWNER_ATTESTED` — владелец вручную подтвердил доставку, отдельно от независимых DOM-доказательств.
+- `DELIVERY_UNKNOWN` — неизвестный исход, **не разрешает повтор**.
+Для Smart V2 используется область TD или Museum. Для остальных заданий область `task:<immutable UUID>`, независимо от меняемого названия карточки. `provider_confirmed_model_calls=null`, `input_tokens=null`, `output_tokens=null`, `cost_measurement=UNKNOWN`. Это отдельный источник локальных delivery-данных и не подменяет `WORK_RESULT` Git/CI/тестов или локальную Codex-телеметрию.
+
+Python `execution/usage_ledger.py` теперь читает **ту же SQLite таблицу** для TD/Museum `agent=chatgpt_autosend` — отдельного импорта/копирования не требуется. Например после реальных проверенных ответов:
+
+```powershell
+python execution/usage_cli.py summary --db "$env:APPDATA\mcpgo-windows\AutoSend\usage.sqlite3" --project TD --agent chatgpt_autosend
+```
+
+Команда только читает и суммирует локальные доказательства, не запускает модель и не подтверждает стоимость. Пользовательские TD и Museum по-прежнему не нуждаются в включении для работы диагностического режима.
+
+**Невыполненная приёмка:** настоящий owner-approved чат, две независимые AutoSend доставки с проверенным ответом, reconnect/reload/sleep и provider-side usage receipts. Не объявлять MCP-03/05/12 полностью `VERIFIED` по синтетическим HTTP-тестам, `tools/list` или локальным счётчикам.

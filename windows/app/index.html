@@ -90,6 +90,8 @@
 </form></section>
 <section class="panel project-workspace" data-section="autosend"><div class="heading"><h3>Проекты и чаты</h3><button class="minor" id="refresh-tasks" type="button">Обновить</button></div>
 <p class="hint">Создайте проект и укажите чат ChatGPT. Он появится на экране на паузе: отправка начнётся только после отдельного запуска и проверки вкладки.</p>
+<div class="row"><button id="extension-probe" type="button" class="minor">Проверить подключение Chrome без отправки</button><span id="extension-probe-status" class="hint" role="status">Подключение расширения ещё не проверено. Проверка не разрешает отправку сообщений.</span></div>
+<p id="model-usage-status" class="hint" role="status">Учёт ответов: проверяем локальный журнал. Количество вызовов провайдера и стоимость неизвестны.</p>
 <h4 class="project-create-title">Новый проект</h4><form id="task-create">
 <div class="group"><label for="task-project">Проект (название для карточки)</label><input id="task-project" placeholder="Например, мой проект" maxlength="64" required autocomplete="off"></div>
 <div class="group"><label for="task-url">Ссылка на чат ChatGPT</label><input id="task-url" placeholder="https://chatgpt.com/c/..." required autocomplete="off"></div>

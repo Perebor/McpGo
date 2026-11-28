@@ -1,10 +1,11 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import {deliverViaPlaywright,reconcileViaPlaywright,observeExistingChat} from './delivery.mjs';
 import {probeBrowserHealth} from './browser-health.mjs';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
 import {verificationReceipt,canReconcile,expired,scheduleNextCheck,finishUnknown,finishVerified,recheckUnknown,restoreAttemptEvidence} from './reconciliation.mjs';
-import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset,hasUnresolvedTask,assertTaskMutable} from './core.mjs';
+import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset,hasUnresolvedTask,assertTaskMutable,stateFile} from './core.mjs';
 import {nextTransitionJournal} from './transition-journal.mjs';
 import {stableSlotId,recordSlot,safeSlotStatus} from './schedule.mjs';
 import {trackSmartContinuation} from './smart-continuation.mjs';
@@ -23,14 +24,17 @@ import {TabApproval,mayAutoObserve,mayAutoDispatch} from './tab-approval.mjs';
 import {BrowserGenerationGuard} from './browser-generation.mjs';
 import {PersistentTabRecovery,loadTabConsent,allowedTarget} from './persistent-tabs.mjs';
 import {autosendMcp} from './browser-client.mjs';
+import {inspectExtensionConnection} from './extension-diagnostic.mjs';
+import {modelUsageEventForAttempt,syncModelUsageLedger,readModelUsageSummary} from './model-use-ledger.mjs';
 
 const PORT=Number(process.env.MCPHUB_AUTOSEND_PORT || 8972);
 let backendOnline=false;let backendLastError='';let browserOnline=false;let browserLastError='';let browserLastSeen=null;let workerBusy=false;
+let extensionProtocolReady=null,extensionProbeAt=null;
 const approvedTabs=new TabApproval();
 const browserGenerationGuard=new BrowserGenerationGuard();
 function invalidateForBrowserGeneration(){
  const changed=browserGenerationGuard.sync(approvedTabs);
- if(changed)browserOnline=false;
+ if(changed){browserOnline=false;extensionProtocolReady=null;extensionProbeAt=null;}
  return changed;
 }
 const githubCI=new GitHubCIObserver();
@@ -48,6 +52,16 @@ let lastPersistedTasks=db.tasks.map(t=>({...t}));
 markUnknownOnBoot(db);
 finalizeForcedRemovals(db);
 const MAX_IN_FLIGHT=240000;
+const usageLedgerPath=path.join(path.dirname(stateFile),'usage.sqlite3');
+let usageLedgerFault=null;
+function modelUsageStatus(){
+ try{
+  if(usageLedgerFault)return {state:'UNKNOWN',reason:usageLedgerFault,rows:[]};
+  return {state:'LOCAL_AUTOSEND_RECEIPTS',rows:readModelUsageSummary(usageLedgerPath)};
+ }catch{
+  return {state:'UNKNOWN',reason:'LEDGER_READ_UNAVAILABLE',rows:[]};
+ }
+}
 function persist(){
  const update=nextTransitionJournal({before:lastPersistedTasks,after:db.tasks,
   journal:db.transition_log,sequence:db.transition_sequence});
@@ -56,6 +70,11 @@ function persist(){
  writeState({...db,transition_log:update.log,transition_sequence:update.sequence});
  db.transition_log=update.log;db.transition_sequence=update.sequence;
  lastPersistedTasks=db.tasks.map(t=>({...t}));
+ // Mirror committed, explicitly tagged receipts to local SQLite automatically.
+ // If unavailable, never interrupt/redo a ChatGPT Send; retry idempotently at
+ // the next persisted transition and mark metrics UNKNOWN until reconciled.
+ try{syncModelUsageLedger(db,usageLedgerPath);usageLedgerFault=null;}
+ catch{usageLedgerFault='LEDGER_SYNC_UNAVAILABLE';}
 }
 persist();
 function now(){return new Date().toISOString()}
@@ -85,15 +104,31 @@ function historySummary(){
 }
 function view(){invalidateForBrowserGeneration();return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_efficiency:workEfficiency(t),browserConfirmed:approvedTabs.has(t.id)})),attempts:db.attempts.slice(-100).reverse(),
  historySummary:historySummary(),
+ modelUsage:modelUsageStatus(),
  conversations:conversationStates(visibleTasks(db)),
  deliverySupported:true,deliveryReason:!backendOnline?'Ожидание Playwright Extension AutoSend: '+(backendLastError||'проверяем подключение'):
   browserOnline?'Выделенная группа AutoSend доступна; проверьте выбранный чат.':
   'Выделенный Playwright backend запущен; выберите чат через расширение.',
  browserBackendReachable:backendOnline,
- extensionConnected:backendOnline&&browserOnline,extensionTransport:'Playwright MCP · расширение Chrome',
+ // Legacy extensionConnected expresses a confirmed *chat tab*, not a wire probe.
+ extensionConnected:backendOnline&&browserOnline,
+ extensionTransportConnected:backendOnline?extensionProtocolReady:false,
+ extensionProbeAt,chatTabApprovedCount:approvedTabs.size,
+ extensionTransport:'Playwright MCP · расширение Chrome',
  // Native client decodes this as a structured ChromePageDiagnostic, not a string.
  extensionDiagnostic:null,extensionLastSeen:browserLastSeen,
  extensionVersion:'Playwright Extension',requiredExtensionVersion:'Playwright Extension',busyTask:db.tasks.find(t=>['checking','sending','verifying'].includes(t.status))?.id||'',serverTime:now()};}
+async function probeExtensionReadOnly(){
+ if(workerBusy)return {connected:false,reason:'AUTOSEND_BUSY',sendBlocked:true};
+ if(!backendOnline)return {connected:false,reason:'PLAYWRIGHT_BACKEND_UNAVAILABLE',sendBlocked:true};
+ workerBusy=true;
+ try{
+  const result=await inspectExtensionConnection(autosendMcp());
+  extensionProtocolReady=result.connected;
+  extensionProbeAt=now();
+  return {...result,chatTabApprovedCount:approvedTabs.size,sendBlocked:true};
+ }finally{workerBusy=false;}
+}
 async function previewTask(id){
  invalidateForBrowserGeneration();
  if(workerBusy)return {ready:false,reason:'Браузер занят текущей операцией.',sendBlocked:true};
@@ -422,13 +457,16 @@ function recordAttempt(t,result,error='',evidence=null){
  const proof=evidence||t.verification?.lastEvidence||null;
  const finished=Date.now();
  const started=Date.parse(t.last_attempt_at||'');
- db.attempts.push({id:crypto.randomUUID(),task_id:t.id,time:new Date(finished).toISOString(),
+ const attempt={id:crypto.randomUUID(),task_id:t.id,time:new Date(finished).toISOString(),
    result,error,stage:t.delivery_stage||null,
    slot_id:t.active_slot_id||t.last_slot_id||null,
    scheduled_at:t.active_scheduled_at||t.last_scheduled_at||null,
    started_at:t.last_attempt_at||null,
    duration_ms:Number.isFinite(started)?Math.max(0,finished-started):null,
-   diagnostic:proof?safeEvidence(proof):null});
+   diagnostic:proof?safeEvidence(proof):null};
+ const observation=modelUsageEventForAttempt(t,attempt);
+ if(observation)attempt.model_usage_observation=observation;
+ db.attempts.push(attempt);
  db.attempts=db.attempts.slice(-500);
 }
 async function reconcilePending(){
@@ -478,8 +516,8 @@ async function checkExtensionBackend(){
   const health=await probeBrowserHealth();
   backendOnline=health.connected;
   backendLastError=health.reason;
-  if(!backendOnline){approvedTabs.reset();browserOnline=false;}
- }catch(e){backendOnline=false;browserOnline=false;approvedTabs.reset();backendLastError='Не удалось проверить локальный backend';}
+  if(!backendOnline){approvedTabs.reset();browserOnline=false;extensionProtocolReady=false;}
+ }catch(e){backendOnline=false;browserOnline=false;extensionProtocolReady=false;approvedTabs.reset();backendLastError='Не удалось проверить локальный backend';}
 }
 let lastScheduledTaskId=null;
 let currentScheduledTaskId=null;
@@ -691,6 +729,8 @@ const server=http.createServer(async(req,res)=>{
    chunks.push(chunk);
   }
   const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if(body.action==='probe_extension')
+   return reply(res,200,{ok:true,...await probeExtensionReadOnly()});
   if(body.action==='preview')return reply(res,200,{ok:true,...await previewTask(body.id)});
   if(body.action==='start_first'){
    const t=find(body.id);

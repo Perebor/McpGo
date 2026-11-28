@@ -62,3 +62,14 @@ python execution/usage_cli.py capture-codex --db C:\Temp\mcpgo12-usage.sqlite3 -
 ```
 
 This command is **never run automatically by AutoSend** and must not be used to attribute unrelated work. Existing local Codex logs found on 28.11.2026 (23 sessions, 3308 `token_count` events) are primarily TD sessions: 13 sessions/3203 events had TD directory metadata, 10 sessions/105 were other or unknown. None established source project McpGo. They were **read-only inspected and never imported into this ledger**. Real ChatGPT UI exposes aggregate remaining limits, not per-turn token receipts; the observed 5-hour/weekly quota percentage does not establish model call, tokens or cost. Completing MCP-12 requires authorized, attributable live model calls and provider-side/account receipts where available, plus matched real-work-cycle before/after evidence without ambiguous sends. Until then SOURCE_VERIFIED, not VERIFIED.
+
+
+## Preview.36 · Автоматический учёт локальных ChatGPT-ответов
+
+AutoSend теперь записывает **новые** подтверждённые или неизвестные результаты доставки в `AutoSend/usage.sqlite3` автоматически, по одному событию на неизменяемый ID квитанции. Это тот же SQLite-файл, с которым работает `UsageLedger`; импорт Python больше не требуется для учёта DOM-квитанций. Actor `chatgpt_autosend` отделён от coder/tester/auditor. TD и Museum читаются `UsageLedger.summary(project,'chatgpt_autosend')`; остальные проекты получают отдельную область `task:<UUID>` в Node `modelUsage.rows`.
+
+Пример только чтения:
+```powershell
+python execution/usage_cli.py summary --db "$env:APPDATA\mcpgo-windows\AutoSend\usage.sqlite3" --project Museum --agent chatgpt_autosend
+```
+`observed_chat_responses` — это локально проверенные новые ответы, `owner_attested_responses` и `delivery_unknown` — самостоятельные категории. `confirmed_model_calls=0` по отношению к независимым provider receipts, точные токены/стоимость `UNKNOWN`. Этот учёт **не** является провайдерской платёжной квитанцией, не оценивает стоимость и не запускает ChatGPT. `choose_route` остаётся локальной рекомендательной функцией, не перехватывает live AutoSend dispatcher. Для реальной экономии нужны источник provider-side usage и сопоставимые проверенные циклы.

@@ -13,8 +13,8 @@ import re
 import sqlite3
 
 PROJECT_ACTORS = {
-    'TD': frozenset(('td_coder','td_tester','td_auditor','mcpgo_lead')),
-    'Museum': frozenset(('museum_coder','museum_tester','museum_auditor','mcpgo_lead')),
+    'TD': frozenset(('td_coder','td_tester','td_auditor','mcpgo_lead','chatgpt_autosend')),
+    'Museum': frozenset(('museum_coder','museum_tester','museum_auditor','mcpgo_lead','chatgpt_autosend')),
 }
 IDENT = re.compile(r'[a-zA-Z][a-zA-Z0-9_.:-]{2,99}\Z')
 TASK = re.compile(r'[a-z][a-z0-9_-]{1,39}\Z')
@@ -130,6 +130,14 @@ class UsageLedger:
                 observed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             )''')
             db.execute('CREATE INDEX IF NOT EXISTS usage_codex_by_actor ON codex_session_usage(project,agent)')
+            # Same SQLite file as the Node AutoSend process: owner-local,
+            # idempotent and source-scoped. Not signed provider billing data.
+            db.execute('''CREATE TABLE IF NOT EXISTS autosend_observations(
+                event_id TEXT PRIMARY KEY,project TEXT NOT NULL,agent TEXT NOT NULL,
+                task_id TEXT NOT NULL,outcome TEXT NOT NULL,observed_at TEXT NOT NULL,
+                source_kind TEXT NOT NULL,event_fingerprint TEXT NOT NULL
+            )''')
+            db.execute('CREATE INDEX IF NOT EXISTS autosend_usage_by_actor ON autosend_observations(project,agent)')
         if os.name!='nt':
             os.chmod(self.path,0o600)
 
@@ -334,6 +342,12 @@ class UsageLedger:
                 SUM(output_tokens),SUM(reasoning_output_tokens),SUM(token_updates)
                 FROM codex_session_usage WHERE project=? AND agent=?''',
                 (project,agent)).fetchone()
+            observed=con.execute('''SELECT
+                SUM(CASE WHEN outcome='CHAT_RESPONSE_OBSERVED' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN outcome='OWNER_ATTESTED' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN outcome='DELIVERY_UNKNOWN' THEN 1 ELSE 0 END)
+                FROM autosend_observations WHERE project=? AND agent=?''',
+                (project,agent)).fetchone()
         counts=dict(rows)
         model=counts.get('MODEL_CLAIMED',0)
         return {'project':project,'agent':agent,
@@ -343,6 +357,11 @@ class UsageLedger:
                 'preclick_retries':counts.get('RETRY_PRECLICK',0),
                 'verified_commits':commits,
                 'verified_test_runs':counts.get('GIT_VERIFIED',0),
+                'observed_chat_responses':observed[0] or 0,
+                'owner_attested_responses':observed[1] or 0,
+                'delivery_unknown':observed[2] or 0,
+                'chat_delivery_source':'LOCAL_AUTOSEND_RECEIPT_NOT_PROVIDER_SIGNED'
+                    if any(x for x in observed) else None,
                 'useful_verified_per_model_claim':commits/model if model else None,
                 'input_tokens':None,'output_tokens':None,
                 'codex_observed_sessions':codex[0] or 0,

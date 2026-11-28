@@ -23,8 +23,9 @@ function viewWith({backendOnline=false,browserOnline=false,approved=false}={}){
  const task=makeTask();
  const context={
   backendOnline,browserOnline,backendLastError:backendOnline?'':'port unavailable',
-  browserLastSeen:null,
-  approvedTabs:{has:id=>id===task.id&&approved},
+  browserLastSeen:null,extensionProtocolReady:null,extensionProbeAt:null,
+  approvedTabs:{has:id=>id===task.id&&approved,size:approved?1:0},
+  modelUsageStatus:()=>({state:'LOCAL_AUTOSEND_RECEIPTS',rows:[]}),
   invalidateForBrowserGeneration:()=>false,
   db:{tasks:[task],attempts:[]},
   visibleTasks:state=>state.tasks,

@@ -57,11 +57,18 @@
    reason='Ожидание результата работы';
   }else if(task.status==='paused'&&task.enabled!==true){
    const browserDown=serviceStatus.browserBackendReachable===false;
-   const extensionDown=serviceStatus.extensionConnected===false;
-   if(browserDown||extensionDown){
-    next='Восстановите соединение с браузером и затем выполните проверку вкладки';
+   const freshProbe=Object.hasOwn(serviceStatus,'extensionTransportConnected');
+   const extensionDown=freshProbe?
+    serviceStatus.extensionTransportConnected!==true:
+    serviceStatus.extensionConnected===false;
+   const missingApprovedTab=task.browserConfirmed===false;
+   if(browserDown||extensionDown||missingApprovedTab){
+    next=browserDown?'Восстановите подключение локального браузера':
+      extensionDown?'Проверьте подключение расширения кнопкой выше':
+      'Подтвердите точную вкладку кнопкой «Проверить без отправки»';
     reason=browserDown?'Браузер недоступен, отправка невозможна':
-      'Расширение браузера не подключено; отправка невозможна';
+      extensionDown?'Не получено подтверждение соединения AutoSend с расширением Chrome':
+      'Вкладка этого чата ещё не подтверждена; отправка запрещена';
    }else{
     primaryAction=task.guided_first_run===true&&!task.first_cycle_started_at?'start_first':'start';
     primaryLabel='Запустить';primaryDisabled=false;

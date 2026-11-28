@@ -380,3 +380,26 @@ test('MCP-05 isolated HTTP end-to-end: TD and Museum independently verified resu
   assert.equal(disk.transition_log.length,2);
  }finally{await shutdown(instance)}
 });
+
+test('MCP-03 HTTP transport check is owner-only, read-only and never approves a chat',async()=>{
+ const s=await startIsolated({version:1,tasks:[],attempts:[]});
+ try{
+  const denied=await fetch(s.base+'/api/tasks',{method:'POST',
+   headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'probe_extension'})});
+  assert.equal(denied.status,403);
+  const result=await fetch(s.base+'/api/tasks',{method:'POST',headers:s.headers,
+   body:JSON.stringify({action:'probe_extension'})});
+  assert.equal(result.status,200);
+  const probe=await result.json();
+  assert.equal(probe.connected,false,'A missing dedicated backend is not a healthy extension');
+  assert.equal(probe.sendBlocked,true);
+  const status=await (await fetch(s.base+'/api/status',{headers:s.headers})).json();
+  assert.equal(status.extensionTransportConnected,false);
+  assert.equal(status.extensionConnected,false);
+  assert.equal(status.chatTabApprovedCount,0);
+  assert.deepEqual(status.tasks,[]);
+  assert.deepEqual(status.attempts,[]);
+  assert.equal(status.modelUsage.state,'LOCAL_AUTOSEND_RECEIPTS');
+  assert.deepEqual(status.modelUsage.rows,[]);
+ }finally{await shutdown(s)}
+});

@@ -63,6 +63,28 @@ test('MCP-13 fails closed when paused task still owns a receipt or browser is un
  assert.equal(disconnected.primaryDisabled,true);
  assert.match(disconnected.reason,/браузер/i);
 });
+test('MCP-03 transport must not be confused with exact chat tab approval',()=>{
+ const transportOnly=presentProject(task({browserConfirmed:false}),{
+  browserBackendReachable:true,extensionTransportConnected:true,extensionConnected:false});
+ assert.equal(transportOnly.primaryAction,null);
+ assert.equal(transportOnly.primaryDisabled,true);
+ assert.match(transportOnly.reason,/вкладк|чат/i);
+ const approved=presentProject(task({browserConfirmed:true}),{
+  browserBackendReachable:true,extensionTransportConnected:true,extensionConnected:true});
+ assert.equal(approved.primaryAction,'start_first');
+ const disconnected=presentProject(task({browserConfirmed:true}),{
+  browserBackendReachable:true,extensionTransportConnected:false});
+ assert.equal(disconnected.primaryAction,null);
+ assert.match(disconnected.reason,/расширен|подключ/i);
+ const unknown=presentProject(task({browserConfirmed:true}),{
+  browserBackendReachable:true,extensionTransportConnected:null});
+ assert.equal(unknown.primaryAction,null,'No Start without a successful transport probe');
+ const html=read('windows/app/index.html');
+ const js=read('windows/app/renderer.js');
+ assert.match(html,/id="extension-probe"/);
+ assert.match(js,/probe_extension/);
+ assert.match(js,/extensionTransportConnected/);
+});
 test('MCP-13 handoff remains locked, independent verified work differs from self-report',()=>{
  const locked=presentProject(task({handoff_requires_owner_reconfigure:true}));
  assert.equal(locked.primaryAction,null);
