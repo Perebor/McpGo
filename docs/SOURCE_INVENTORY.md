@@ -143,7 +143,7 @@
 | `autosend/preview-check.mjs` | 80 | `d0181e58cf7ef9e4` |
 | `autosend/reconciliation.mjs` | 166 | `0476f93271a06880` |
 | `autosend/schedule.mjs` | 146 | `04445c15bf9cea3d` |
-| `autosend/server.mjs` | 779 | `b4e7b57c368aa976` |
+| `autosend/server.mjs` | 789 | `5578681a8884c70b` |
 | `autosend/simulated-browser.mjs` | 172 | `de94c11634d4d9c0` |
 | `autosend/smart-continuation.mjs` | 35 | `4bc9841d3367a1df` |
 | `autosend/smart-v2-browser.mjs` | 82 | `3701df89aa1b5d19` |
@@ -165,6 +165,7 @@
 | `autosend/tests/live-work-evidence.manual.mjs` | 44 | `dccbabae3fa1f897` |
 | `autosend/tests/local-security.test.mjs` | 63 | `fc6ba1f736a713ac` |
 | `autosend/tests/mcp03-browser-generation.test.mjs` | 50 | `bc4eb5556bde1765` |
+| `autosend/tests/mcp03-generation-race.test.mjs` | 115 | `a880b7a2bab21a65` |
 | `autosend/tests/mcp03-recovery.test.mjs` | 89 | `cd1cf43fe20749eb` |
 | `autosend/tests/model-use-ledger.test.mjs` | 96 | `93af96468d863f3c` |
 | `autosend/tests/mutation-guard.test.mjs` | 62 | `01f940841ac5132f` |
@@ -301,6 +302,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 118 | `7d88de9161dfedfe` |
 
-Всего файлов в выбранном source-only срезе: **294**.
+Всего файлов в выбранном source-only срезе: **295**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.

@@ -29,12 +29,16 @@ import {modelUsageEventForAttempt,syncModelUsageLedger,readModelUsageSummary} fr
 
 const PORT=Number(process.env.MCPHUB_AUTOSEND_PORT || 8972);
 let backendOnline=false;let backendLastError='';let browserOnline=false;let browserLastError='';let browserLastSeen=null;let workerBusy=false;
-let extensionProtocolReady=null,extensionProbeAt=null;
+let extensionProtocolReady=null,extensionProbeAt=null,extensionProbeEpoch=0;
+function resetExtensionProbe(status=null){
+ extensionProbeEpoch++;
+ extensionProtocolReady=status;extensionProbeAt=null;
+}
 const approvedTabs=new TabApproval();
 const browserGenerationGuard=new BrowserGenerationGuard();
 function invalidateForBrowserGeneration(){
  const changed=browserGenerationGuard.sync(approvedTabs);
- if(changed){browserOnline=false;extensionProtocolReady=null;extensionProbeAt=null;}
+ if(changed){browserOnline=false;resetExtensionProbe();}
  return changed;
 }
 const githubCI=new GitHubCIObserver();
@@ -119,11 +123,17 @@ function view(){invalidateForBrowserGeneration();return {ok:true,tasks:visibleTa
  extensionDiagnostic:null,extensionLastSeen:browserLastSeen,
  extensionVersion:'Playwright Extension',requiredExtensionVersion:'Playwright Extension',busyTask:db.tasks.find(t=>['checking','sending','verifying'].includes(t.status))?.id||'',serverTime:now()};}
 async function probeExtensionReadOnly(){
+ invalidateForBrowserGeneration();
  if(workerBusy)return {connected:false,reason:'AUTOSEND_BUSY',sendBlocked:true};
  if(!backendOnline)return {connected:false,reason:'PLAYWRIGHT_BACKEND_UNAVAILABLE',sendBlocked:true};
  workerBusy=true;
  try{
+  const epoch=extensionProbeEpoch;
   const result=await inspectExtensionConnection(autosendMcp());
+  // An old tools/list response is not evidence about the new backend.
+  invalidateForBrowserGeneration();
+  if(epoch!==extensionProbeEpoch||!backendOnline)
+   return {connected:false,reason:'PLAYWRIGHT_MCP_PROBE_STALE',chatTabApprovedCount:approvedTabs.size,sendBlocked:true};
   extensionProtocolReady=result.connected;
   extensionProbeAt=now();
   return {...result,chatTabApprovedCount:approvedTabs.size,sendBlocked:true};
@@ -516,8 +526,8 @@ async function checkExtensionBackend(){
   const health=await probeBrowserHealth();
   backendOnline=health.connected;
   backendLastError=health.reason;
-  if(!backendOnline){approvedTabs.reset();browserOnline=false;extensionProtocolReady=false;}
- }catch(e){backendOnline=false;browserOnline=false;extensionProtocolReady=false;approvedTabs.reset();backendLastError='Не удалось проверить локальный backend';}
+  if(!backendOnline){approvedTabs.reset();browserOnline=false;resetExtensionProbe(false);}
+ }catch(e){backendOnline=false;browserOnline=false;resetExtensionProbe(false);approvedTabs.reset();backendLastError='Не удалось проверить локальный backend';}
 }
 let lastScheduledTaskId=null;
 let currentScheduledTaskId=null;
