@@ -284,6 +284,7 @@
 | `windows/tests/mcp12-usage-packaging.test.cjs` | 17 | `d5ef9b919f236fe5` |
 | `windows/tests/mcp13-project-view.test.cjs` | 149 | `6d04578d9cb83192` |
 | `windows/tests/mcp36-browser-ledger-packaging.test.cjs` | 34 | `db0096167a907673` |
+| `windows/tests/mcp36-ci-runtime.test.cjs` | 13 | `29ad463b0c74c39d` |
 | `windows/tests/native-integration.test.cjs` | 101 | `729ca71e70d621c5` |
 | `windows/tests/onboarding-parity.test.cjs` | 62 | `40968cb49db46e2f` |
 | `windows/tests/onboarding-ui.test.cjs` | 77 | `3ef17920e476bfb0` |
@@ -297,6 +298,6 @@
 | `windows/tests/updates.test.cjs` | 73 | `5944c567cb741ed7` |
 | `windows/verify-build.py` | 118 | `7d88de9161dfedfe` |
 
-Всего файлов в выбранном source-only срезе: **290**.
+Всего файлов в выбранном source-only срезе: **291**.
 
 Важно: отсутствие файла в этом инвентаре не доказывает отсутствие выполняемого кода где-либо на диске. Исторические или генерируемые компоненты намеренно исключены; для публичного исходного архива требуется отдельный полный аудит tree.
