@@ -6,12 +6,26 @@ on:
       - 'windows/**'
       - 'terminal/**'
       - 'playwright/**'
+      - 'autosend/**'
+      - 'messaging/**'
+      - 'execution/**'
+      - 'dashboard/**'
+      - 'onboarding/**'
+      - 'skills/**'
+      - 'native/**'
       - '.github/workflows/windows-preview.yml'
   pull_request:
     paths:
       - 'windows/**'
       - 'terminal/**'
       - 'playwright/**'
+      - 'autosend/**'
+      - 'messaging/**'
+      - 'execution/**'
+      - 'dashboard/**'
+      - 'onboarding/**'
+      - 'skills/**'
+      - 'native/**'
       - '.github/workflows/windows-preview.yml'
 permissions:
   contents: read
@@ -43,7 +57,10 @@ jobs:
       - name: Windows regressions
         shell: pwsh
         run: |
-          node --test windows/tests terminal/tests/platform.test.cjs
+          $tests = @(Get-ChildItem -LiteralPath windows/tests -File -Filter '*.test.cjs' | Select-Object -ExpandProperty FullName)
+          $tests += (Resolve-Path terminal/tests/platform.test.cjs).Path
+          node --test $tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check windows/app/main.cjs
           node --check windows/app/runtime.cjs
           node --check windows/app/preload.cjs

@@ -15,6 +15,7 @@ class APITest(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         hub.DATA=Path(self.temp.name)/'messages.sqlite3'
+        self.owner_token=hub.ensure_owner_token()
         self.server=ThreadingHTTPServer(('127.0.0.1',0),hub.Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()
@@ -28,6 +29,7 @@ class APITest(unittest.TestCase):
         d=None if payload is None else json.dumps(payload).encode()
         request=urllib.request.Request(f'http://127.0.0.1:{self.server.server_port}'+path,data=d,
                                         headers={'Host':'127.0.0.1:8971','X-MCPHub-Client':'native',
+                                                 'X-MCPHub-Token':self.owner_token,
                                                  **({'Content-Type':'application/json'} if d else {}),**(headers or {})})
         with urllib.request.urlopen(request,timeout=3) as res:
             return res.status,json.load(res)
@@ -91,3 +93,16 @@ class LifecycleHTTPTest(APITest):
         _,restored=self.request('/api/agents/restore',{'id':'QA2'})
         self.assertEqual(restored['archived_at'],'')
         self.assertEqual(restored['role'],'agent')
+
+class NativeOwnerAuthorizationTest(APITest):
+    def test_native_header_alone_must_not_read_private_hub_status(self):
+        url=f'http://127.0.0.1:{self.server.server_port}/api/status'
+        req=urllib.request.Request(url,headers={'Host':'127.0.0.1:8971','X-MCPHub-Client':'native'})
+        with self.assertRaises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(req,timeout=3)
+        self.assertEqual(err.exception.code,403)
+
+    def test_spoofed_owner_token_must_not_create_an_agent(self):
+        with self.assertRaises(urllib.error.HTTPError) as err:
+            self.request('/api/agents',{'id':'FAKE','label':'Fake'},headers={'X-MCPHub-Token':'0'*64})
+        self.assertEqual(err.exception.code,403)

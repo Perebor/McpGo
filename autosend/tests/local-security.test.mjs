@@ -20,7 +20,10 @@ test('private JSON store encrypts message content and detects tampering',()=>{
   stored.tasks[0].sealed_message.ciphertext='AA==';
   fs.writeFileSync(file,JSON.stringify(stored));
   assert.throws(()=>readState(file));
-  assert.equal(fs.statSync(path.join(folder,'message-key')).mode&0o777,0o600);
+  // POSIX mode bits do not represent NTFS ACLs on Windows; encryption and tamper checks still run.
+  const keyStat=fs.statSync(path.join(folder,'message-key'));
+  if(process.platform==='win32')assert.equal(keyStat.isFile(),true);
+  else assert.equal(keyStat.mode&0o777,0o600);
  }finally{fs.rmSync(folder,{recursive:true,force:true});}
 });
 test('legacy v1 plaintext tasks migrate to ciphertext on the next write',()=>{
@@ -35,15 +38,26 @@ test('legacy v1 plaintext tasks migrate to ciphertext on the next write',()=>{
   assert.equal(readState(file).tasks[0].message,'legacy unsealed');
  }finally{fs.rmSync(folder,{recursive:true,force:true});}
 });
-test('local control token is stable and rejects unsafe symlinks',()=>{
+test('local control token is stable and rejects unsafe symlinks',t=>{
  const folder=fs.mkdtempSync(path.join(os.tmpdir(),'autosend-token-'));
  try{
   const filename=path.join(folder,'token');
   const token=getOrCreateControlToken(filename);
   assert.match(token,/^[a-f0-9]{64}$/);
   assert.equal(getOrCreateControlToken(filename),token);
-  assert.equal(fs.statSync(filename).mode&0o777,0o600);
-  const link=path.join(folder,'symlink');fs.symlinkSync(filename,link);
+  const tokenStat=fs.statSync(filename);
+  if(process.platform==='win32')assert.equal(tokenStat.isFile(),true);
+  else assert.equal(tokenStat.mode&0o777,0o600);
+  const link=path.join(folder,'symlink');
+  try{fs.symlinkSync(filename,link)}catch(e){
+   // Windows can deny symlink creation without developer mode / privilege.
+   // Still check the token above; Linux CI exercises the rejection itself.
+   if(process.platform==='win32'&&e.code==='EPERM'){
+    t.diagnostic('Symlink creation unavailable on Windows; rejection checked on Linux CI');
+    return;
+   }
+   throw e;
+  }
   assert.throws(()=>getOrCreateControlToken(link));
  }finally{fs.rmSync(folder,{recursive:true,force:true});}
 });

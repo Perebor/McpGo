@@ -31,7 +31,9 @@ function fake(initial={}){
  return {client,calls,state,commit:()=>{committed=true;return 'autosend:00000000-0000-4000-8000-000000000001';}};
 }
 test('readiness fails closed for busy agent, draft, wrong conversation and ambiguous page',()=>{
- for (const p of [{stop:true},{busyText:true},{editorText:'human draft'}])assert.equal(classifyAgent({...page,...p},url).kind,'busy');
+ for (const p of [{stop:true},{busyText:true}])assert.equal(classifyAgent({...page,...p},url).kind,'busy');
+ // Stable drafts may be replaced only after the guarded preflight; active generation never is.
+ assert.equal(classifyAgent({...page,editorText:'stable human draft'},url).kind,'ready');
  for (const p of [{url:'https://chatgpt.com/'},{editorCount:0},{mainLength:5,turnCount:0},{genericTitle:true},{login:true}])assert.equal(classifyAgent({...page,...p},url).kind,'deferred');
  assert.equal(classifyAgent(page,url).kind,'ready');
 });
@@ -129,6 +131,20 @@ test('successful send persists before click and verifies new user message',async
  assert.equal(f.calls.filter(x=>x.name==='browser_type').length,1);
  assert.ok(!f.calls.some(x=>x.name==='browser_tabs' && x.args.action==='new'),'reuse opened personal Chrome tab');
 });
+test('already composed exact message with normalized whitespace reuses AutoSend draft without retyping',async()=>{
+ const f=fake({editorText:' Test scheduler\n \nCDP ',sendEnabled:true});
+ const result=await deliverViaPlaywright(task,async()=>f.commit(),{client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'verified');
+ assert.equal(f.calls.filter(x=>x.name==='browser_type').length,0,'long pre-filled draft must not be retyped');
+ assert.equal(f.calls.filter(x=>x.name==='browser_evaluate'&&x.args.function.includes('function guardedClickInPage')).length,1);
+});
+test('unrelated stable draft must be replaced with exact AutoSend message and guarded before click',async()=>{
+ const f=fake({editorText:'different unrelated draft',sendEnabled:true});
+ const result=await deliverViaPlaywright(task,async()=>f.commit(),{client:f.client,wait:async()=>{}});
+ assert.equal(result.status,'verified');
+ assert.equal(f.calls.filter(x=>x.name==='browser_type').length,1);
+});
+
 test('failure before click does not send or commit, and clears own draft',async()=>{
  const f=fake();const original=f.client.tool;
  f.client.tool=async(name,args)=>{

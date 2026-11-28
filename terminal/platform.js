@@ -7,12 +7,12 @@ const {spawnSync} = require('node:child_process');
 function isWindows(platform=process.platform) { return platform === 'win32'; }
 function dataRoot(platform=process.platform, env=process.env, home=os.homedir()) {
   if(isWindows(platform)) return path.win32.join(env.LOCALAPPDATA || path.win32.join(home,'AppData','Local'),'McpGo');
-  return path.join(home,'Library','Application Support','McpGo');
+  return path.posix.join(home,'Library','Application Support','McpGo');
 }
 function jobRoot(platform=process.platform, env=process.env, home=os.homedir()) {
   if(env.MCPGO_JOB_ROOT) return env.MCPGO_JOB_ROOT;
   if(isWindows(platform)) return path.win32.join(dataRoot(platform,env,home),'OneShotJobs');
-  return path.join(home,'Library','Application Support','ChatTerminalHub','OneShotJobs');
+  return path.posix.join(home,'Library','Application Support','ChatTerminalHub','OneShotJobs');
 }
 function commandSpec(command, platform=process.platform) {
   if(!isWindows(platform)) return {file:'/bin/zsh',args:['-lc',command]};

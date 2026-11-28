@@ -1,10 +1,12 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import {deliverViaPlaywright,reconcileViaPlaywright,observeExistingChat} from './delivery.mjs';
 import {probeBrowserHealth} from './browser-health.mjs';
 import {safeEvidence,explainEvidence} from './chat-state.mjs';
 import {verificationReceipt,canReconcile,expired,scheduleNextCheck,finishUnknown,finishVerified,recheckUnknown,restoreAttemptEvidence} from './reconciliation.mjs';
-import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset,hasUnresolvedTask,assertTaskMutable} from './core.mjs';
+import {readState,writeState,newTask,arm,pause,dueTasks,markUnknownOnBoot,validateInput,rescheduleAfterAttempt,getOrCreateControlToken,setIntervalOffset,hasUnresolvedTask,assertTaskMutable,stateFile} from './core.mjs';
+import {nextTransitionJournal} from './transition-journal.mjs';
 import {stableSlotId,recordSlot,safeSlotStatus} from './schedule.mjs';
 import {trackSmartContinuation} from './smart-continuation.mjs';
 import {conversationState,conversationStates,eligibleToSend,nextDue,canObserveTask,competingScheduleForChat} from './conversation-fsm.mjs';
@@ -13,14 +15,33 @@ import {deferBusyIntervalRetry,confirmedBusyRetryReason} from './busy-retry.mjs'
 import {chooseSmartAction,smartTaskMessage,promoteSmartReceipt,validateSmartConfiguration,resumeSmartTaskFromOwnerPause} from './smart-v2.mjs';
 import {readSmartBrowserOutcome} from './smart-v2-browser.mjs';
 import {requestForceRemove,finalizeForcedRemovals,visibleTasks} from './force-remove.mjs';
-import {assessWorkReadiness,commitWorkReadiness,workEfficiency} from './smart-work-ready.mjs';
+import {planChatHandoff} from './chat-handoff.mjs';
+import {assessWorkReadiness,commitWorkReadiness,workEfficiency,shouldRetryExternalVerification,rearmVerifiedExternalWork} from './smart-work-ready.mjs';
+import {KNOWN_WORK_POLICIES,inspectWorkResult,commitObservedWorkResult} from './work-result.mjs';
+import {verifyGitHubWork} from './github-work-adapter.mjs';
+import {GitHubCIObserver} from './github-ci-evidence.mjs';
 import {TabApproval,mayAutoObserve,mayAutoDispatch} from './tab-approval.mjs';
+import {BrowserGenerationGuard} from './browser-generation.mjs';
 import {PersistentTabRecovery,loadTabConsent,allowedTarget} from './persistent-tabs.mjs';
 import {autosendMcp} from './browser-client.mjs';
+import {inspectExtensionConnection} from './extension-diagnostic.mjs';
+import {modelUsageEventForAttempt,syncModelUsageLedger,readModelUsageSummary} from './model-use-ledger.mjs';
 
 const PORT=Number(process.env.MCPHUB_AUTOSEND_PORT || 8972);
 let backendOnline=false;let backendLastError='';let browserOnline=false;let browserLastError='';let browserLastSeen=null;let workerBusy=false;
+let extensionProtocolReady=null,extensionProbeAt=null,extensionProbeEpoch=0;
+function resetExtensionProbe(status=null){
+ extensionProbeEpoch++;
+ extensionProtocolReady=status;extensionProbeAt=null;
+}
 const approvedTabs=new TabApproval();
+const browserGenerationGuard=new BrowserGenerationGuard();
+function invalidateForBrowserGeneration(){
+ const changed=browserGenerationGuard.sync(approvedTabs);
+ if(changed){browserOnline=false;resetExtensionProbe();}
+ return changed;
+}
+const githubCI=new GitHubCIObserver();
 const tabRecovery=new PersistentTabRecovery({
  client:autosendMcp(),config:null,approval:approvedTabs,
  verify:t=>checkPreview(t,(task,options)=>observeExistingChat(task,{...options,client:autosendMcp()}))
@@ -29,13 +50,40 @@ let lastTabRecoveryCheck=0;
 const CHECK_MS=Number(process.env.MCPHUB_AUTOSEND_CHECK_MS||10000);
 const CONTROL_TOKEN=getOrCreateControlToken();
 const db=readState();
+// Capture the last durable state BEFORE startup recovery: both migration and
+// recovery transitions must be recorded, never silently rewritten.
+let lastPersistedTasks=db.tasks.map(t=>({...t}));
 markUnknownOnBoot(db);
 finalizeForcedRemovals(db);
-writeState(db);
 const MAX_IN_FLIGHT=240000;
-function persist(){writeState(db)}
+const usageLedgerPath=path.join(path.dirname(stateFile),'usage.sqlite3');
+let usageLedgerFault=null;
+function modelUsageStatus(){
+ try{
+  if(usageLedgerFault)return {state:'UNKNOWN',reason:usageLedgerFault,rows:[]};
+  return {state:'LOCAL_AUTOSEND_RECEIPTS',rows:readModelUsageSummary(usageLedgerPath)};
+ }catch{
+  return {state:'UNKNOWN',reason:'LEDGER_READ_UNAVAILABLE',rows:[]};
+ }
+}
+function persist(){
+ const update=nextTransitionJournal({before:lastPersistedTasks,after:db.tasks,
+  journal:db.transition_log,sequence:db.transition_sequence});
+ // Commit the journal and task mutation in ONE atomic tasks.json rename.
+ // Do not advance the checkpoint until the encrypted state write succeeds.
+ writeState({...db,transition_log:update.log,transition_sequence:update.sequence});
+ db.transition_log=update.log;db.transition_sequence=update.sequence;
+ lastPersistedTasks=db.tasks.map(t=>({...t}));
+ // Mirror committed, explicitly tagged receipts to local SQLite automatically.
+ // If unavailable, never interrupt/redo a ChatGPT Send; retry idempotently at
+ // the next persisted transition and mark metrics UNKNOWN until reconciled.
+ try{syncModelUsageLedger(db,usageLedgerPath);usageLedgerFault=null;}
+ catch{usageLedgerFault='LEDGER_SYNC_UNAVAILABLE';}
+}
+persist();
 function now(){return new Date().toISOString()}
-function find(id){const t=db.tasks.find(t=>t.id===id);if(!t)throw Error('Расписание не найдено.');return t}
+function find(id){const t=db.tasks.find(t=>t.id===id);if(!t)throw Error('Расписание не найдено.');
+ if(t.handoff_archived_at)throw Error('Чат архивирован при передаче контекста: повторный запуск запрещён.');return t}
 function authenticated(req){
  const provided=req.headers['x-mcphub-token'];
  return req.headers['x-mcphub-client']==='native' && !req.headers.origin &&
@@ -58,26 +106,50 @@ function historySummary(){
  }
  return counts;
 }
-function view(){return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_efficiency:workEfficiency(t),browserConfirmed:approvedTabs.has(t.id)})),attempts:db.attempts.slice(-100).reverse(),
+function view(){invalidateForBrowserGeneration();return {ok:true,tasks:visibleTasks(db).map(t=>({...t,work_efficiency:workEfficiency(t),browserConfirmed:approvedTabs.has(t.id)})),attempts:db.attempts.slice(-100).reverse(),
  historySummary:historySummary(),
+ modelUsage:modelUsageStatus(),
  conversations:conversationStates(visibleTasks(db)),
  deliverySupported:true,deliveryReason:!backendOnline?'Ожидание Playwright Extension AutoSend: '+(backendLastError||'проверяем подключение'):
   browserOnline?'Выделенная группа AutoSend доступна; проверьте выбранный чат.':
   'Выделенный Playwright backend запущен; выберите чат через расширение.',
- extensionConnected:backendOnline&&browserOnline,extensionTransport:'Playwright MCP · расширение Chrome',
+ browserBackendReachable:backendOnline,
+ // Legacy extensionConnected expresses a confirmed *chat tab*, not a wire probe.
+ extensionConnected:backendOnline&&browserOnline,
+ extensionTransportConnected:backendOnline?extensionProtocolReady:false,
+ extensionProbeAt,chatTabApprovedCount:approvedTabs.size,
+ extensionTransport:'Playwright MCP · расширение Chrome',
  // Native client decodes this as a structured ChromePageDiagnostic, not a string.
  extensionDiagnostic:null,extensionLastSeen:browserLastSeen,
  extensionVersion:'Playwright Extension',requiredExtensionVersion:'Playwright Extension',busyTask:db.tasks.find(t=>['checking','sending','verifying'].includes(t.status))?.id||'',serverTime:now()};}
+async function probeExtensionReadOnly(){
+ invalidateForBrowserGeneration();
+ if(workerBusy)return {connected:false,reason:'AUTOSEND_BUSY',sendBlocked:true};
+ if(!backendOnline)return {connected:false,reason:'PLAYWRIGHT_BACKEND_UNAVAILABLE',sendBlocked:true};
+ workerBusy=true;
+ try{
+  const epoch=extensionProbeEpoch;
+  const result=await inspectExtensionConnection(autosendMcp());
+  // An old tools/list response is not evidence about the new backend.
+  invalidateForBrowserGeneration();
+  if(epoch!==extensionProbeEpoch||!backendOnline)
+   return {connected:false,reason:'PLAYWRIGHT_MCP_PROBE_STALE',chatTabApprovedCount:approvedTabs.size,sendBlocked:true};
+  extensionProtocolReady=result.connected;
+  extensionProbeAt=now();
+  return {...result,chatTabApprovedCount:approvedTabs.size,sendBlocked:true};
+ }finally{workerBusy=false;}
+}
 async function previewTask(id){
+ invalidateForBrowserGeneration();
  if(workerBusy)return {ready:false,reason:'Браузер занят текущей операцией.',sendBlocked:true};
  const t=find(id);
  workerBusy=true;
  try{
   let health;
   try{health=await probeBrowserHealth();}
-  catch(e){return {ready:false,chatFound:false,
+  catch(e){approvedTabs.update(t.id,false);browserOnline=approvedTabs.size>0;return {ready:false,chatFound:false,
     reason:'Выделенный Playwright backend недоступен: '+String(e.message||e).slice(0,120),sendBlocked:true};}
-  if(!health.connected)return {ready:false,chatFound:false,reason:health.reason,sendBlocked:true};
+  if(!health.connected){approvedTabs.update(t.id,false);browserOnline=approvedTabs.size>0;return {ready:false,chatFound:false,reason:health.reason,sendBlocked:true};}
   const result=await checkPreview(t,observeExistingChat);
   approvedTabs.update(t.id,result.chatFound===true);
   browserOnline=approvedTabs.size>0;
@@ -104,8 +176,55 @@ async function recoverApprovedTabs(){
 }
 function operation(action,body){
  switch(action){
+  case 'handoff_chat':{
+   const keys=['action','source_id','target_url','owner_confirmed_target','idempotency_key','checkpoint'];
+   if(Object.keys(body).length!==keys.length||Object.keys(body).some(k=>!keys.includes(k)))
+    throw Error('Unsupported chat handoff request fields');
+   const {state:next,receipt}=planChatHandoff(db,{
+    source_id:body.source_id,target_url:body.target_url,
+    owner_confirmed_target:body.owner_confirmed_target,
+    idempotency_key:body.idempotency_key,checkpoint:body.checkpoint
+   },{workerBusy,currentTaskId:currentScheduledTaskId});
+   if(receipt.status==='ALREADY_STAGED')return receipt;
+   // One encrypted atomic snapshot contains BOTH old archive and new paused
+   // task; on persistence error keep the original in-memory store as well.
+   const oldTasks=db.tasks;db.tasks=next.tasks;
+   try{persist()}catch(e){db.tasks=oldTasks;throw e}
+   approvedTabs.update(receipt.source_id,false);
+   browserOnline=approvedTabs.size>0;
+   return receipt;
+  }
+  case 'unlock_handoff':{
+   const keys=['action','id','owner_confirmed_target','checkpoint_sha256',
+    'owner_confirmed_hub','owner_confirmed_browser'];
+   if(Object.keys(body).length!==keys.length||Object.keys(body).some(k=>!keys.includes(k)))
+    throw Error('Unsupported handoff unlock fields');
+   const target=find(body.id);
+   const source=db.tasks.find(x=>x.id===target.handoff_origin_task_id);
+   if(!source?.handoff_archived_at||source.handoff_replaced_by!==target.id||
+      target.handoff_checkpoint_sha256!==source.handoff_checkpoint_sha256)
+    throw Error('Handoff archival chain not verified');
+   if(body.owner_confirmed_target!==target.url||
+      body.checkpoint_sha256!==target.handoff_checkpoint_sha256||
+      body.owner_confirmed_hub!==true||body.owner_confirmed_browser!==true)
+    throw Error('Owner approval missing or does not match the saved handoff');
+   if(workerBusy||target.status!=='paused'||target.enabled||
+      target.manual_once||hasUnresolvedTask(target))
+    throw Error('New chat is busy, not paused, or has an unresolved receipt');
+   if(!approvedTabs.has(target.id))
+    throw Error('New browser tab is not verified; owner must inspect it first');
+   if(target.handoff_requires_owner_reconfigure!==true)
+    return {alreadyUnlocked:true,paused:true,sendBlocked:true};
+   target.handoff_requires_owner_reconfigure=false;
+   target.handoff_owner_confirmed_at=now();
+   persist();
+   return {unlocked:true,paused:true,sendBlocked:true};
+  }
   case 'create':{
-   const t=newTask(body);db.tasks.push(t);persist();return {task:t};
+   const t=newTask(body);
+   if(t.guided_first_run&&db.tasks.some(x=>x.url===t.url))
+    throw Error('Для этого разговора уже есть задание. Используй существующую карточку, чтобы не создавать дубль.');
+   db.tasks.push(t);persist();return {task:t};
   }
   case 'update':{
    const t=find(body.id);assertTaskMutable(t);
@@ -170,6 +289,24 @@ function operation(action,body){
     delete t.smart_v2_pause_reason;
    }else throw Error('Smart V2: enabled должен быть true/false');
    persist();return {task:t,changed:true,sendBlocked:true};
+  }
+  case 'start_first':{
+   const t=find(body.id);
+   if(t.guided_first_run!==true)throw Error('Это действие доступно только для нового упрощённого запуска.');
+   // A persisted first-run token is idempotent even after process restart.
+   if(t.first_cycle_started_at)return {task:t,alreadyStarted:true,sendBlocked:true};
+   assertTaskMutable(t);
+   if(t.enabled||t.status!=='paused'||t.manual_once||t.next_at)
+    throw Error('Для первого запуска задание должно быть выключено, без ожидающей отправки.');
+   if(workerBusy)throw Error('AutoSend занят. Повтори проверку после завершения текущей операции.');
+   if(!approvedTabs.has(t.id))
+    throw Error('Вкладка разговора не подтверждена. Сначала проверь нужный чат без отправки.');
+   const competing=competingScheduleForChat(db.tasks,t);
+   if(competing)throw Error('В разговоре уже есть другое действующее или неопределённое расписание. Повторный Send запрещён.');
+   delete t.watchdog;
+   arm(t);t.manual_once=true;t.next_at=now();
+   t.first_cycle_started_at=t.next_at;
+   t.safe_retry_count=0;persist();return {task:t,queued:true};
   }
   case 'start':{
    const t=find(body.id);assertTaskMutable(t);
@@ -240,6 +377,8 @@ function operation(action,body){
   }
   case 'send_once':{
    const t=find(body.id);assertTaskMutable(t);
+   if(t.handoff_requires_owner_reconfigure)
+    throw Error('New chat handoff requires verified owner approval before any Send.');
    if(t.manual_once && t.status==='scheduled')throw Error('Однократная отправка уже ожидает выполнения.');
    const competing=competingScheduleForChat(db.tasks,t);
    if(competing)throw Error('В том же чате уже есть другое действующее или неопределённое задание (ID '+
@@ -293,14 +432,28 @@ async function monitorContinuations(){
     pause(t);t.last_error='В разговоре сообщение владельца; событийный AutoSend остановлен.';
     persist();return true;
    }
-   const decision=assessWorkReadiness(t,observed);
+   const externalEvidence=await githubCI.check(t,observed);
+   // MCP-05 read-only result accounting. Only a trusted verifier can
+   // produce a VERIFIED outcome; TD CI workflow policy is not assumed.
+   const policy=KNOWN_WORK_POLICIES[t.smart_v2_project];
+   const workProof=policy?await verifyGitHubWork(t,observed,{policy}):null;
+   const workResult=policy?await inspectWorkResult(t,observed,{policy,
+    verify:workProof?async()=>workProof:null}):null;
+   if(commitObservedWorkResult(t,workResult))persist();
+   const decision=assessWorkReadiness(t,observed,{externalEvidence});
    if(decision.pause){
     pause(t);t.smart_v2_pause_reason=decision.reason;
     t.last_error='Smart V2: работа заблокирована или требуется решение владельца.';
     persist();return true;
    }
    if(decision.ready&&commitWorkReadiness(t,decision)){
-    t.last_error='Готовность по отчёту задачи (self-report); следующий Send ожидает повторной read-only проверки.';
+    t.last_error=decision.evidence.source==='github_ci_verified'
+     ?'GitHub PR и CI подтверждены независимо; ждём контрольную проверку перед Send.'
+     :'Готовность по отчёту задачи (self-report); следующий Send ожидает повторной read-only проверки.';
+    persist();return true;
+   }
+   if(rearmVerifiedExternalWork(t,observed,externalEvidence)){
+    t.last_error='GitHub PR/CI повторно подтверждены; восстановлена очередь без нового Send.';
     persist();return true;
    }
    return false;
@@ -314,13 +467,16 @@ function recordAttempt(t,result,error='',evidence=null){
  const proof=evidence||t.verification?.lastEvidence||null;
  const finished=Date.now();
  const started=Date.parse(t.last_attempt_at||'');
- db.attempts.push({id:crypto.randomUUID(),task_id:t.id,time:new Date(finished).toISOString(),
+ const attempt={id:crypto.randomUUID(),task_id:t.id,time:new Date(finished).toISOString(),
    result,error,stage:t.delivery_stage||null,
    slot_id:t.active_slot_id||t.last_slot_id||null,
    scheduled_at:t.active_scheduled_at||t.last_scheduled_at||null,
    started_at:t.last_attempt_at||null,
    duration_ms:Number.isFinite(started)?Math.max(0,finished-started):null,
-   diagnostic:proof?safeEvidence(proof):null});
+   diagnostic:proof?safeEvidence(proof):null};
+ const observation=modelUsageEventForAttempt(t,attempt);
+ if(observation)attempt.model_usage_observation=observation;
+ db.attempts.push(attempt);
  db.attempts=db.attempts.slice(-500);
 }
 async function reconcilePending(){
@@ -364,17 +520,19 @@ async function reconcilePending(){
 // Playwright Extension a 'read-only' browser_tabs(list) can open a fresh
 // chrome-extension://.../connect.html and spawn another group every 30 seconds.
 async function checkExtensionBackend(){
- // Passive port check only; never opens a Chrome tab or extension group.
+ // Passive port check and local backend process epoch: no Chrome browser tools.
+ invalidateForBrowserGeneration();
  try{
   const health=await probeBrowserHealth();
   backendOnline=health.connected;
   backendLastError=health.reason;
-  if(!backendOnline){approvedTabs.reset();browserOnline=false;}
- }catch(e){backendOnline=false;browserOnline=false;backendLastError='Не удалось проверить локальный backend';}
+  if(!backendOnline){approvedTabs.reset();browserOnline=false;resetExtensionProbe(false);}
+ }catch(e){backendOnline=false;browserOnline=false;resetExtensionProbe(false);approvedTabs.reset();backendLastError='Не удалось проверить локальный backend';}
 }
 let lastScheduledTaskId=null;
 let currentScheduledTaskId=null;
 async function runScheduled(){
+ invalidateForBrowserGeneration();
  if(workerBusy)return false;
  workerBusy=true;
  try {
@@ -404,11 +562,15 @@ async function runScheduled(){
    if(t.force_remove_requested_at)return true;
    let decision;
    if(t.smart_result_gate&&t.schedule_mode==='after_response'&&!t.manual_once){
-    const check=assessWorkReadiness(t,observed,{forDispatch:true});
+    const externalEvidence=await githubCI.check(t,observed,{forDispatch:true});
+    const check=assessWorkReadiness(t,observed,{forDispatch:true,externalEvidence});
     if(!check.ready){
      if(check.pause||observed.kind==='foreign_user'){
       pause(t);t.smart_v2_pause_reason=check.reason||'foreign_user';
       t.last_error='Событийный Smart V2 остановлен: '+(check.reason||'вмешательство владельца');
+     }else if(shouldRetryExternalVerification(t,observed)){
+      t.next_at=new Date(Date.now()+60000).toISOString();
+      t.last_error='GitHub CI: временно нет повторной проверки; retry через 60 секунд без Send.';
      }else if(['busy','unavailable','unstable'].includes(observed.kind)){
       t.next_at=new Date(Date.now()+60000).toISOString();
       t.last_error='Событийный Smart V2: временно занято, повторная проверка через минуту без Send.';
@@ -577,7 +739,21 @@ const server=http.createServer(async(req,res)=>{
    chunks.push(chunk);
   }
   const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if(body.action==='probe_extension')
+   return reply(res,200,{ok:true,...await probeExtensionReadOnly()});
   if(body.action==='preview')return reply(res,200,{ok:true,...await previewTask(body.id)});
+  if(body.action==='start_first'){
+   const t=find(body.id);
+   if(t.guided_first_run!==true)throw Error('Новый запуск недоступен для этого задания.');
+   if(t.first_cycle_started_at)return reply(res,200,{ok:true,...operation(body.action,body)});
+   assertTaskMutable(t);
+   if(t.enabled||t.status!=='paused'||t.manual_once||t.next_at)
+    throw Error('Для первого запуска задание должно быть выключено.');
+   const result=await previewTask(body.id);
+   if(result.chatFound!==true||result.ready!==true)
+    throw Error('Вкладка ещё не готова: '+String(result.reason||'проверь нужный чат').slice(0,200));
+   return reply(res,200,{ok:true,...operation(body.action,body)});
+  }
   return reply(res,200,{ok:true,...operation(body.action,body)});
  } catch(e) {
   return reply(res,400,{error:String(e.message||e).slice(0,500)});

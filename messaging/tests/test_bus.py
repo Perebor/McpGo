@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,6 +56,24 @@ class BusTest(unittest.TestCase):
         with self.assertRaises(ValueError):hub.mark_read(self.db,'AG1',[100])
 
     def test_db_file_is_private(self):
-        self.assertEqual(hub.DATA.stat().st_mode & 0o777,0o600)
+        if os.name!='nt':
+            self.assertEqual(hub.DATA.stat().st_mode & 0o777,0o600)
+            return
+        # Windows stat() reports synthetic POSIX bits, not the NTFS DACL.
+        # Require a restrictive ACL instead of dropping the privacy test.
+        file=str(hub.DATA).replace("'", "''")
+        script=(
+            "$ErrorActionPreference='Stop';"
+            f"$acl=Get-Acl -LiteralPath '{file}';"
+            "$user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;"
+            "$allowed=@($user,'S-1-5-18','S-1-5-32-544','S-1-3-4');"
+            "foreach($entry in $acl.Access){"
+            "$sid=$entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;"
+            "if($entry.AccessControlType -eq 'Allow' -and $sid -notin $allowed){exit 7}"
+            "}"
+        )
+        result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive',
+                               '-Command',script],capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,'Messaging SQLite DACL admits an untrusted principal')
 
 if __name__=='__main__':unittest.main()

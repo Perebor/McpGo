@@ -1,3 +1,4 @@
+import {validateTransitionJournal} from './transition-journal.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -39,7 +40,16 @@ export function validateInput(body){
   const seconds=Number(body.interval_seconds??60);
   if(!Number.isInteger(seconds) || seconds<MIN_INTERVAL || seconds>MAX_INTERVAL) throw Error('Интервал должен быть от 1 минуты до 7 дней.');
   const phase=validateIntervalOffset(body.interval_offset_seconds,seconds,schedule.schedule_mode);
-  return {url,message:body.message,interval_seconds:seconds,...schedule,interval_offset_seconds:phase};
+  if(body.guided_first_run!=null&&typeof body.guided_first_run!=='boolean')
+    throw Error('Неверный тип упрощённого запуска.');
+  const guided=body.guided_first_run===true;
+  if(body.project_label!=null&&typeof body.project_label!=='string')
+    throw Error('Название проекта должно быть текстом.');
+  const projectLabel=String(body.project_label||'').trim();
+  if(projectLabel.length>64||(guided&&!projectLabel))
+    throw Error('Укажи название проекта до 64 символов.');
+  return {url,message:body.message,interval_seconds:seconds,...schedule,
+    interval_offset_seconds:phase,project_label:projectLabel||null,guided_first_run:guided};
 }
 // Optional phase in seconds on the UTC interval grid; null preserves legacy cadence.
 export function validateIntervalOffset(value,interval,mode='interval'){
@@ -55,6 +65,7 @@ export function hasUnresolvedTask(task){
   !!task.verification||!!task.active_slot_id;
 }
 export function assertTaskMutable(task){
+ if(task.handoff_archived_at)throw Error('Разговор архивирован после handoff: повторный Send запрещён.');
  if(hasUnresolvedTask(task))throw Error('Незавершённая или неизвестная доставка. Сначала завершите проверку исходной попытки; повтор Send запрещён.');
 }
 export function setIntervalOffset(task,value){
@@ -120,12 +131,24 @@ function unseal(entry,id,key){
  dec.setAAD(Buffer.from(id,'utf8'));dec.setAuthTag(Buffer.from(entry.tag,'base64'));
  return Buffer.concat([dec.update(Buffer.from(entry.ciphertext,'base64')),dec.final()]).toString('utf8');
 }
+// Duplicate IDs make owner lookups and receipts ambiguous: refuse the
+// entire store rather than risking a Send against the wrong task record.
+function assertDistinctTaskIds(tasks){
+ const ids=new Set();
+ for(const t of tasks){
+  if(typeof t?.id!=='string'||!t.id||ids.has(t.id))
+   throw Error('Duplicate or invalid AutoSend task ID');
+  ids.add(t.id);
+ }
+}
 export function readState(file=stateFile){
   ensurePrivateDir(path.dirname(file));
   if(!fs.existsSync(file)) return {version:1,tasks:[],attempts:[]};
   if(fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const obj=JSON.parse(fs.readFileSync(file,'utf8'));
   if(obj.version!==1 || !Array.isArray(obj.tasks) || !Array.isArray(obj.attempts)) throw Error('Unexpected task store format');
+  validateTransitionJournal(obj.transition_log,obj.transition_sequence);
+ assertDistinctTaskIds(obj.tasks);
   if(obj.tasks.some(t=>t.sealed_message)){
     const key=messageKey(file,false);
     for(const t of obj.tasks){
@@ -139,6 +162,8 @@ export function readState(file=stateFile){
   return obj;
 }
 export function writeState(state,file=stateFile){
+  validateTransitionJournal(state.transition_log,state.transition_sequence);
+  assertDistinctTaskIds(state.tasks);
   const dir=path.dirname(file);ensurePrivateDir(dir);
   if(fs.existsSync(file)&&fs.lstatSync(file).isSymbolicLink()) throw Error('Refusing symlink task store');
   const tmp=path.join(dir,'.tasks-'+crypto.randomUUID()+'.tmp');
@@ -180,6 +205,8 @@ export function getOrCreateControlToken(file=path.join(path.dirname(stateFile),'
   return token;
 }
 export function arm(task,now=Date.now()) {
+  assertTaskMutable(task);
+  if(task.handoff_requires_owner_reconfigure)throw Error('Chat handoff awaits owner approval and browser verification.');
   // Enabling an interval schedule arms the first attempt immediately.
   // Subsequent attempts still use the configured cadence and safety checks.
   const next=(task.schedule_mode||'interval')==='interval'
@@ -278,5 +305,5 @@ export function markUnknownOnBoot(state){
 }
 
 export function dueTasks(state,now=Date.now()) {
-  return state.tasks.filter(t=>t.enabled && t.status==='scheduled' && t.next_at && Date.parse(t.next_at)<=now);
+  return state.tasks.filter(t=>!t.handoff_archived_at && !t.handoff_requires_owner_reconfigure && t.enabled && t.status==='scheduled' && t.next_at && Date.parse(t.next_at)<=now);
 }

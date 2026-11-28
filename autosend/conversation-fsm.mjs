@@ -9,10 +9,11 @@ import {sameChatGPTConversation} from '../playwright/chatgpt-url.mjs';
  */
 export const STATES=Object.freeze({
  READY:'READY',VERIFYING_SEND:'VERIFYING_SEND',UNKNOWN:'UNKNOWN',
- PAUSED:'PAUSED'
+ PAUSED:'PAUSED',CONFLICT:'CONFLICT'
 });
 const UNCERTAIN=new Set(['unknown']);
 const IN_FLIGHT=new Set(['checking','sending','verifying']);
+const hasUnresolvedOperation=task=>!!(task.verification||task.active_slot_id);
 
 export function conversationState(tasks,url,now=Date.now()) {
  const group=tasks.filter(t=>sameChatGPTConversation(t.url,url));
@@ -24,6 +25,17 @@ export function conversationState(tasks,url,now=Date.now()) {
  const ongoing=group.find(t=>IN_FLIGHT.has(t.status));
  if(ongoing)return {state:STATES.VERIFYING_SEND,blocked:true,
    task_ids:ids,owner_task_id:ongoing.id,reason:'SEND_OR_VERIFY_IN_PROGRESS'};
+ // The task's OWN durable receipt/slot must block it too; sibling-only
+ // checks cannot protect an isolated stale task after a partial restart.
+ const unresolved=group.find(hasUnresolvedOperation);
+ if(unresolved)return {state:STATES.UNKNOWN,blocked:true,
+   task_ids:ids,owner_task_id:unresolved.id,reason:'UNRESOLVED_RECEIPT_OR_SLOT'};
+ // A restored store may already contain duplicate enabled schedules or
+ // dormant receipts despite the create/start-time guards.
+ const conflict=group.find(t=>(t.enabled||t.manual_once)&&
+   competingScheduleForChat(group,t));
+ if(conflict)return {state:STATES.CONFLICT,blocked:true,task_ids:ids,
+   owner_task_id:conflict.id,reason:'COMPETING_SCHEDULE_OR_RECEIPT'};
  const active=group.some(t=>t.enabled||t.manual_once);
  return {state:active?STATES.READY:STATES.PAUSED,
   blocked:false,task_ids:ids,reason:active?'CHECK_BEFORE_SEND':'DISABLED'};
@@ -34,12 +46,14 @@ export function conversationStates(tasks,now=Date.now()){
 }
 export function eligibleToSend(task,tasks,now=Date.now()) {
  if(task.status!=='scheduled'||!(task.enabled||task.manual_once)||
+    hasUnresolvedOperation(task)||
     !Number.isFinite(Date.parse(task.next_at))||Date.parse(task.next_at)>now)
    return false;
  // This task is scheduled; a conflict must arise from a DIFFERENT task in
  // the same conversation. No global lock on unrelated chats.
- const other=tasks.filter(t=>t.id!==task.id&&sameChatGPTConversation(t.url,task.url));
- return !other.some(t=>UNCERTAIN.has(t.status)||IN_FLIGHT.has(t.status));
+ // Recheck the same create/start guard at dispatch, including durable
+ // receipts and old duplicate enabled tasks. Never trust just task.status.
+ return !competingScheduleForChat(tasks,task);
 }
 export function nextDue(tasks,now=Date.now(),lastId=null,allowed=()=>true){
  // Keep the full task set for same-conversation conflict checks, then
@@ -56,9 +70,8 @@ export function nextDue(tasks,now=Date.now(),lastId=null,allowed=()=>true){
  return eligible[0]||null;
 }
 export function canObserveTask(task,tasks) {
- if(!task.enabled||task.status!=='scheduled')return false;
- return !tasks.some(t=>t.id!==task.id&&sameChatGPTConversation(t.url,task.url)&&
-   (UNCERTAIN.has(t.status)||IN_FLIGHT.has(t.status)));
+ if(!task.enabled||task.status!=='scheduled'||hasUnresolvedOperation(task))return false;
+ return !competingScheduleForChat(tasks,task);
 }
 
 /** Prevent two independently armed AutoSend schedules targeting one ChatGPT conversation.
@@ -66,7 +79,7 @@ export function canObserveTask(task,tasks) {
  * Unlike conversationState(...).blocked, a currently enabled schedule MUST block.
  */
 export function competingScheduleForChat(tasks,proposed) {
- return (tasks||[]).find(t=>t.id!==proposed?.id&&
+ return (tasks||[]).find(t=>t!==proposed&&
    sameChatGPTConversation(t.url,proposed?.url)&&
    (t.enabled===true||t.manual_once===true||
     ['unknown','checking','sending','verifying'].includes(t.status)||

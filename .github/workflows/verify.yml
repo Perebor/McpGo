@@ -18,9 +18,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: playwright/package-lock.json
+      - name: Confirm SQLite-enabled Node 24 runtime
+        run: |
+          node -e "const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(':memory:'); db.exec('SELECT 1'); db.close(); console.log('Node SQLite OK',process.version)"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -36,6 +39,7 @@ jobs:
           python3 -m unittest discover -s tests -v
           python3 -m unittest discover -s onboarding/tests -v
           python3 -m unittest discover -s messaging/tests -v
+          python3 -m unittest discover -s execution/tests -v
           python3 tools/generate_source_inventory.py --check
       - name: Node MCP regression
         run: |
@@ -56,7 +60,7 @@ jobs:
           node --check playwright/tool-profiles.mjs
           node --check launchers/browser.mjs
           node --check windows/app/runtime.cjs
-          node --test windows/tests
+          node --test windows/tests/*.test.cjs
       - name: Isolated Chrome browser smoke on pull requests (informational)
         if: github.event_name == 'pull_request'
         continue-on-error: true

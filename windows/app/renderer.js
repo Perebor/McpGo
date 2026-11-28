@@ -6,10 +6,10 @@ const sectionInfo=Object.freeze({
  messages:['AGENT MESSAGING','Связь агентов','Локальный обмен сообщениями между агентами'],
  settings:['TUNNEL SETTINGS','Настройки туннелей','Ключи, браузер и автозапуск Windows'],
  skills:['AGENT SKILLS','Навыки инструментов','Готовые инструкции для инструментов и агентов McpGo'],
- autosend:['SCHEDULED MESSAGES','Сообщения по таймеру','Расписания для продолжения работы в ChatGPT'],
+ autosend:['PROJECT WORKSPACE','Проекты и чаты','Текущая работа, результат и следующий безопасный шаг'],
  updates:['RELEASES','Обновления','Версии McpGo и проверка новых выпусков']
 });
-let activeSection='overview';
+let activeSection='autosend';
 function navigate(section,focus=false){
  const page=sectionInfo[section];
  if(!page)return;
@@ -36,7 +36,7 @@ for(const button of document.querySelectorAll('[data-nav]'))
 for(const button of document.querySelectorAll('[data-open]'))
  button.addEventListener('click',()=>window.mcpgo.openLocation(button.dataset.open)
   .catch(error=>message(error.message,true)));
-navigate('overview');
+navigate('autosend');
 // Keep selected skill local; the main process accepts only four fixed resource IDs.
 let selectedSkill='terminalhub-operations',skillRequest=0;
 async function loadSkill(id){
@@ -114,6 +114,21 @@ let lastOverview=null;
 const healthLabels={ready:'Готов',down:'Недоступен',starting:'Ожидание',auth:'Ошибка авторизации',throttled:'Ограничение запросов',unmonitored:'Не проверяется',unknown:'Не подтверждён',failed:'Ошибка'};
 const reasonLabels={SERVICE_STOPPED:'Служба остановлена',HEALTH_STALE:'Данные устарели',LOCAL_MCP_UNAVAILABLE:'MCP не отвечает',TUNNEL_AUTH:'Ошибка авторизации',TUNNEL_DOWN:'Туннель не отвечает',TUNNEL_STARTING:'Туннель не готов',TUNNEL_UNMONITORED:'Нет проверки туннеля',TUNNEL_THROTTLED:'Ограничение запросов',BROWSER_CONNECTION_FAILED:'Нет связи с расширением',BROWSER_NOT_RECENTLY_VERIFIED:'Браузер давно не проверялся',BROWSER_TELEMETRY_UNAVAILABLE:'Нет данных браузера'};
 function renderConnection(data){
+ const contract=data.readiness?.healthContract;
+ const healthTarget=$('health-contract-list');
+ if(healthTarget){
+  const actions={NONE:'действий не требуется',RECHECK:'повторная проверка',
+   NEED_OWNER:'нужен владелец',WAIT_RECEIPT:'ожидание квитанции',
+   KEEP_PAUSED:'сохранить паузу',RESTART_OWNED_SERVICE:'безопасный перезапуск'};
+  const names=[['terminal','Terminal'],['chrome','Chrome'],['hub','Hub'],['autosend','AutoSend']];
+  healthTarget.textContent=names.map(([key,name])=>{
+   const c=contract?.components?.[key],status=['PASS','FAIL','UNKNOWN'].includes(c?.status)?c.status:'UNKNOWN';
+   const next=actions[c?.nextSafeAction]||'нужна проверка';
+   const stamp=c?.lastAttempt&&!Number.isNaN(Date.parse(c.lastAttempt))?
+    new Date(c.lastAttempt).toLocaleTimeString('ru-RU'):'не проверялся';
+   return name+': '+status+' · '+next+' · '+stamp;
+  }).join('\n');
+ }
  const h=data.readiness?.connectionHealth||{};
  for(const [id,c] of [['terminal-health-detail',h.terminal],['browser-health-detail',h.browser]]){
   const el=$(id);if(!el)continue;
@@ -489,7 +504,8 @@ $('recover-runtime').onclick=async()=>{
 function element(tag,text){
  const node=document.createElement(tag);node.textContent=String(text);return node;
 }
-function item(title,lines,buttons=[],offsetEditor=null){
+function item(title,lines,buttons=[],offsetEditor=null,view=null){
+ if(view?.kind==='project')return projectCard(title,lines,buttons,offsetEditor,view);
  const box=element('div','');box.className='item';box.append(element('strong',title));
  for(const line of lines)box.append(element('small',line));
  if(buttons.length){
@@ -512,7 +528,71 @@ function item(title,lines,buttons=[],offsetEditor=null){
  }
  return box;
 }
+function projectCard(title,lines,buttons,offsetEditor,view){
+ const task=view.task;
+ const summary=window.McpGoProjectView.presentProject(task,view.status);
+ const card=element('article','');
+ card.className='item project-card';
+ card.setAttribute('aria-label','Проект: '+summary.title);
+ const head=element('div','');head.className='project-head';
+ const titleNode=element('h3',summary.title);
+ const state=element('span',summary.state);state.className='project-state';
+ if(task.status==='unknown'||task.handoff_requires_owner_reconfigure)
+  state.classList.add('project-state-uncertain');
+ else if(task.enabled===true)state.classList.add('project-state-active');
+ head.append(titleNode,state);card.append(head);
+ const facts=element('dl','');facts.className='project-facts';
+ for(const [name,value] of [
+  ['Чат',summary.chat],['Последний результат',summary.result],
+  ['Что дальше',summary.next],['Причина ожидания',summary.reason]
+ ]){
+  const row=element('div','');row.className='project-fact';
+  row.append(element('dt',name),element('dd',value||'Не указано'));facts.append(row);
+ }
+ card.append(facts);
+ const actions=element('div','');actions.className='actions project-main-actions';
+ const createButton=entry=>{
+  const button=element('button',entry.label);
+  button.type='button';
+  button.className=entry.danger?'minor project-remove':'minor';
+  if(entry.danger)button.setAttribute('aria-label','Удалить принудительно: '+summary.title);
+  button.onclick=entry.run;
+  return button;
+ };
+ const findButton=label=>buttons.find(button=>button.label===label);
+ const primary=summary.primaryAction?findButton(
+  summary.primaryAction==='pause'?'Пауза':
+  summary.primaryAction==='recheck_unknown'?'Перепроверить доставку':
+  summary.primaryAction==='start_first'?'Запустить':'Включить'):null;
+ if(primary&&!summary.primaryDisabled){
+  const btn=createButton({...primary,label:summary.primaryLabel});
+  btn.className='primary';btn.dataset.primaryAction=summary.primaryAction;
+  actions.append(btn);
+ }else{
+  const blocked=element('button',summary.primaryLabel);
+  blocked.type='button';blocked.disabled=true;blocked.className='minor';
+  blocked.setAttribute('aria-label','Запуск недоступен: '+summary.reason);
+  actions.append(blocked);
+ }
+ const preview=findButton('Проверить без отправки');
+ if(preview)actions.append(createButton(preview));
+ // Emergency control is ALWAYS present, including UNKNOWN and in-flight.
+ const force=findButton('Удалить принудительно');
+ if(force)actions.append(createButton(force));
+ card.append(actions);
+ const excluded=new Set([primary,preview,force].filter(Boolean));
+ const extra=buttons.filter(button=>!excluded.has(button));
+ const details=element('details','');
+ details.className='project-diagnostics';
+ details.dataset.taskId=task.id;
+ details.open=view.open===true;
+ details.append(element('summary','Диагностика и настройки'));
+ details.append(item('Технические сведения',lines,extra,offsetEditor));
+ card.append(details);
+ return card;
+}
 const previewResults=new Map();
+const pendingFirstStarts=new Set();
 let taskRefreshRevision=0;
 async function doTask(action,id,extra={}){
  if(action==='preview'){
@@ -527,35 +607,85 @@ async function doTask(action,id,extra={}){
   }finally{await refreshTasks()}
   return;
  }
+ if(action==='start_first'){
+  if(pendingFirstStarts.has(id))return;
+  pendingFirstStarts.add(id);
+ }
  previewResults.delete(id);
  try{
-   const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
-   await refreshTasks();
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{...extra,action,id});
+  await refreshTasks();
   $('autosend-feedback').textContent=
-    action==='force_remove'?(result.pending?'Задание скрыто; удаление завершится после текущей проверки. Возможная отправка не отменяется.':'Расписание принудительно удалено. Диагностика сохранена. Возможная отправка не отменяется.'): 
+    action==='start_first'?(result.alreadyStarted?'Первый запуск уже запрошен. Повторная Send не ставится.':'Первый запуск поставлен в очередь после проверки вкладки. Это ещё не квитанция доставки.'):
+    action==='force_remove'?(result.pending?'Задание скрыто; удаление завершится после текущей проверки. Возможная отправка не отменяется.':'Расписание принудительно удалено. Диагностика сохранена. Возможная отправка не отменяется.'):
     action==='confirm_received'?'Получение подтверждено. Расписание на паузе.':
-   action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
+    action==='set_interval_offset'?'Смещение сохранено; расписание осталось на паузе.':'';
  }catch(e){$('autosend-feedback').textContent=e.message;message(e.message,true)}
+ finally{if(action==='start_first')pendingFirstStarts.delete(id)}
+}
+function autosendTabHealth(status,task){
+ // A listening local MCP endpoint is not proof of an approved Chrome tab.
+ if(status.browserBackendReachable===false)
+  return 'AutoSend: локальный Playwright backend недоступен. Отправка без проверки вкладки запрещена.';
+ if(status.browserBackendReachable!==true)
+  return 'AutoSend: статус транспорта не подтверждён. Доступность Chrome не установлена.';
+ if(task.browserConfirmed===true)
+  return 'AutoSend: вкладка подтверждена в текущей сессии. Готовность ответа проверяется отдельно.';
+ return 'AutoSend: локальный backend доступен; вкладка не подтверждена. Используйте «Проверить без отправки» для нужного чата.';
 }
 async function refreshTasks(){
  const list=$('tasks-list'),revision=++taskRefreshRevision;
  try{
-  const {tasks=[]}=await window.mcpgo.serviceRead('autosend','/api/status');
+  const status=await window.mcpgo.serviceRead('autosend','/api/status');
+  const {tasks=[]}=status;
   if(revision!==taskRefreshRevision)return;
+  const transportLabel=$('extension-probe-status');
+  if(transportLabel){
+   const connected=status.extensionTransportConnected;
+   transportLabel.textContent=connected===true?
+    'Расширение Chrome доступно. Подтверждённых вкладок: '+Number(status.chatTabApprovedCount||0)+'. Для каждого чата нужна отдельная проверка без отправки.':
+    connected===false?'Соединение с расширением не подтверждено; отправка запрещена.':
+    'Подключение расширения не проверено. Проверка не разрешает отправку сообщений.';
+  }
+  const usageLabel=$('model-usage-status');
+  if(usageLabel){
+   const evidence=status.modelUsage;
+   if(evidence?.state==='LOCAL_AUTOSEND_RECEIPTS'&&Array.isArray(evidence.rows)){
+    const total=evidence.rows.reduce((sum,r)=>sum+Number(r.observed_chat_responses||0),0);
+    const unknown=evidence.rows.reduce((sum,r)=>sum+Number(r.delivery_unknown||0),0);
+    const links=evidence.rows.reduce((sum,r)=>sum+Number(r.verified_git_work_links||0),0);
+    usageLabel.textContent='Локально подтверждённых ответов: '+total+
+     ' · Git/CI результатов, связанных по времени: '+links+
+     ' (не доказывает причинность)'+
+     ' · неопределённых доставок: '+unknown+
+     ' · точные вызовы моделей, токены и стоимость: UNKNOWN';
+   }else usageLabel.textContent='Локальный журнал учёта недоступен. Данные о вызовах моделей: UNKNOWN';
+  }
+  const expanded=new Set();
+  if(typeof list.querySelectorAll==='function')
+   for(const node of list.querySelectorAll('details.project-diagnostics[open]'))expanded.add(node.dataset.taskId);
   list.replaceChildren();
   const ids=new Set(tasks.map(t=>t.id));
   for(const id of previewResults.keys())if(!ids.has(id))previewResults.delete(id);
   for(const t of tasks){
    const evidence=previewResults.get(t.id);
    const checked=evidence&&evidence.targetUrl===t.url?evidence:null;
-   const pending=['sending','checking','verifying'].includes(t.status);
-   const buttons=pending?[]:t.status==='unknown'?
+   const pending=['sending','checking','verifying'].includes(t.status)||
+    !!t.verification||!!t.active_slot_id||!!t.smart_v2_pending_action||
+    t.manual_once===true;
+   const browserDown=status.browserBackendReachable===false||
+    (Object.hasOwn(status,'extensionTransportConnected')?
+      status.extensionTransportConnected!==true:status.extensionConnected===false)||
+    t.browserConfirmed===false;
+   const buttons=pending?[]:t.handoff_requires_owner_reconfigure===true?[]:t.status==='unknown'?
      [{label:'Перепроверить доставку',run:()=>doTask('recheck_unknown',t.id)},
       {label:'Подтвердить получение',run:()=>{
        if(confirm('Вы лично проверили этот чат и увидели сообщение именно из последней попытки? Подтверждение не отправит сообщение и оставит расписание на паузе.'))doTask('confirm_received',t.id);
       }}]:
      t.enabled?[{label:'Пауза',run:()=>doTask('pause',t.id)}]:
-     [{label:'Включить',run:()=>doTask('start',t.id)},
+     browserDown?[]:
+     [{label:t.guided_first_run===true&&!t.first_cycle_started_at?'Запустить':'Включить',
+       run:()=>doTask(t.guided_first_run===true&&!t.first_cycle_started_at?'start_first':'start',t.id)},
       {label:'Удалить',run:()=>{if(confirm('Удалить расписание?'))doTask('remove',t.id)}}];
     if(!pending&&!checked?.pending)buttons.push({label:'Проверить без отправки',run:()=>doTask('preview',t.id,{targetUrl:t.url})});
     // A first event-gated task cannot have a result before the first prompt.
@@ -572,8 +702,20 @@ async function refreshTasks(){
    const offsetEditor=t.status==='paused'&&!t.enabled&&!t.manual_once&&!t.verification&&!t.active_slot_id&&(t.schedule_mode||'interval')==='interval'?
     {interval:t.interval_seconds,value:t.interval_offset_seconds==null?'':String(t.interval_offset_seconds/60),
      save:value=>doTask('set_interval_offset',t.id,{interval_offset_seconds:value})}:null;
-   list.append(item(t.url,[
+   const wm=t.work_efficiency;
+   const workKnown=wm&&['VERIFIED','SELF_REPORT','UNVERIFIED'].includes(wm.last_work_result_status);
+   const verified=workKnown&&Number.isSafeInteger(wm.verified_work_results)&&wm.verified_work_results>=0?
+    wm.verified_work_results:0;
+   const selfReport=workKnown&&Number.isSafeInteger(wm.self_report_only_results)&&wm.self_report_only_results>=0?
+    wm.self_report_only_results:0;
+   const workSummary=workKnown?'Подтверждено Git/CI/тестами: '+verified+
+    '; самоотчёты без проверки: '+selfReport+
+    '. Последний результат: '+(wm.last_work_result_status==='VERIFIED'?'проверен':
+     wm.last_work_result_status==='SELF_REPORT'?'самоотчёт':'нет внешнего подтверждения'):'';
+   list.append(item(t.project_label||t.url,[
+    ...(t.project_label?['Чат: '+t.url]:[]),
     'Статус: '+t.status+'; '+(t.enabled?'Включено':'Выключено'),
+    autosendTabHealth(status,t),
     String(t.message||'').slice(0,150),
     (t.schedule_mode==='after_response'?
      'Режим: по результату; '+(t.manual_once?'начальный запуск поставлен в очередь':
@@ -583,27 +725,67 @@ async function refreshTasks(){
     (t.schedule_mode==='after_response'?'':
      'Смещение: '+(t.interval_offset_seconds==null?'нет':t.interval_offset_seconds+' сек.')),
     'Последняя успешная доставка: '+(t.last_success_at?new Date(t.last_success_at).toLocaleString('ru-RU')+' (время подтверждения)':'нет'),
+    workSummary,
     t.last_error?'Причина остановки / последнее событие: '+t.last_error:'',
     checked?.pending?'Проверяем этот чат без отправки…':checked?
      'Последняя проверка ('+new Date(checked.checkedAt).toLocaleString('ru-RU')+'): '+
      (checked.ready?'готовность наблюдалась; ':'готовность не подтверждена; ')+String(checked.reason||'нет результата')+
      ' Это не разрешение на Send.':'',
     t.status==='unknown'?'Повторная отправка заблокирована. Подтвердите получение только после личной проверки чата.':'',
-   ].filter(Boolean),buttons,offsetEditor));
+   ].filter(Boolean),buttons,offsetEditor,
+    {kind:'project',task:t,status,checked,open:expanded.has(t.id)}));
   }
   if(!tasks.length)list.append(item('Расписания отсутствуют',[]));
  }catch(e){if(revision===taskRefreshRevision){list.replaceChildren();list.append(item('Планировщик недоступен',[e.message]))}}
 }
 $('refresh-tasks').onclick=refreshTasks;
-$('task-create').onsubmit=async event=>{
- event.preventDefault();const btn=event.submitter;btn.disabled=true;
+let extensionProbeBusy=false;
+$('extension-probe').onclick=async()=>{
+ if(extensionProbeBusy)return;
+ extensionProbeBusy=true;
+ const control=$('extension-probe');
+ control.disabled=true;
+ $('extension-probe-status').textContent='Проверяем только MCP-соединение; вкладки не разрешаем и сообщения не отправляем.';
  try{
-  await window.mcpgo.serviceAction('autosend','/api/tasks',{
-   action:'create',url:$('task-url').value.trim(),message:$('task-message').value,
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{action:'probe_extension'});
+  $('extension-probe-status').textContent=result.connected===true?
+   'Соединение с Chrome подтверждено. Теперь проверьте точную вкладку проекта без отправки.':
+   'Соединение не подтверждено ('+String(result.reason||'UNKNOWN').slice(0,80)+').';
+  await refreshTasks();
+ }catch{
+  $('extension-probe-status').textContent='Ошибка диагностики. Соединение неизвестно; отправка запрещена.';
+ }finally{
+  extensionProbeBusy=false;
+  control.disabled=false;
+ }
+};
+function showTaskScheduleOptions(){
+ $('task-timing').hidden=$('task-mode').value!=='interval';
+}
+$('task-mode').onchange=showTaskScheduleOptions;
+showTaskScheduleOptions();
+let guidedCreatePending=false;
+$('task-create').onsubmit=async event=>{
+ event.preventDefault();
+ if(guidedCreatePending)return;
+ const btn=event.submitter;
+ guidedCreatePending=true;
+ if(btn)btn.disabled=true;
+ try{
+  const mode=$('task-mode').value;
+  const result=await window.mcpgo.serviceAction('autosend','/api/tasks',{
+   action:'create',
+   project_label:$('task-project').value.trim(),guided_first_run:true,
+   url:$('task-url').value.trim(),message:$('task-message').value,
+   schedule_mode:mode,delay_seconds:30,max_continuations:20,
    interval_seconds:Number($('task-interval').value)*60,
-   interval_offset_seconds:$('task-offset').value===''?null:Number($('task-offset').value)*60});
-  $('task-create').reset();message('Расписание создано выключенным');await refreshTasks();
- }catch(e){message(e.message,true)}finally{btn.disabled=false}
+   interval_offset_seconds:mode==='interval'&&$('task-offset').value!==''?Number($('task-offset').value)*60:null
+  });
+  $('task-create').reset();showTaskScheduleOptions();
+  $('autosend-feedback').textContent='Задание создано выключенным. Нажми «Запустить» в новой карточке: McpGo сначала проверит вкладку.';
+  await refreshTasks();
+ }catch(e){message(e.message,true)}
+ finally{guidedCreatePending=false;if(btn)btn.disabled=false}
 };
 async function refreshAgents(){
  const list=$('agents-list');list.replaceChildren();
@@ -624,7 +806,7 @@ $('agent-create').onsubmit=async event=>{
  }catch(e){message(e.message,true)}finally{btn.disabled=false}
 };
 void refreshTasks();void refreshAgents();
-setInterval(()=>{if(!document.hidden){if(!document.activeElement?.closest('[data-offset-editor]'))void refreshTasks();void refreshAgents()}},15000);
+setInterval(()=>{if(!document.hidden){if(!document.activeElement?.closest('[data-offset-editor],.project-diagnostics'))void refreshTasks();void refreshAgents()}},15000);
 
 
 async function refreshHistory(){
@@ -652,6 +834,24 @@ $('agent-message').onsubmit=async event=>{
 void refreshHistory();
 
 const updatesStatus=$('updates-status');
+const upgradePreflightButton=$('upgrade-preflight');
+upgradePreflightButton.onclick=async()=>{
+ upgradePreflightButton.disabled=true;
+ const target=$('upgrade-preflight-result');
+ target.textContent='Проверяем квитанции и занятость сервисов без изменения задач...';
+ try{
+  const result=await window.mcpgo.upgradePreflight();
+  if(result.status==='READY_FOR_BACKUP')
+   target.textContent='Задания выключены и локальные операции завершены. Можно делать резервную копию. Установка не запускается автоматически.';
+  else if(result.status==='BLOCKED')
+   target.textContent=result.reason==='ACTIVE_LOCAL_OPERATION'?
+    'Есть активная локальная операция. Дождитесь её завершения и повторите проверку.':
+    'Есть активная или неопределённая отправка. Нужен владелец: проверьте квитанции и паузу.';
+  else
+   target.textContent='Проверка неполная: нет подтверждённого простоя служб или актуального состояния. Повторите после проверки соединения.';
+ }catch(error){target.textContent='Проверка неполная: '+error.message}
+ finally{upgradePreflightButton.disabled=false}
+};
 $('open-releases').onclick=()=>window.mcpgo.openReleases().catch(e=>message(e.message,true));
 $('check-updates').onclick=async()=>{
  const button=$('check-updates');button.disabled=true;

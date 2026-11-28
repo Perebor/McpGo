@@ -64,9 +64,11 @@ test('sidebar tools use fixed allowlisted Electron handlers, not renderer filesy
 
 // Execute the actual renderer task-list function against a synthetic UI and API.
 function extractRefreshTasks(){
- const start=renderer.indexOf('async function refreshTasks(){');
- const end=renderer.indexOf("$('refresh-tasks').onclick=refreshTasks;",start);
- assert.ok(start>=0&&end>start,'task renderer not found');
+ const start=renderer.indexOf('function autosendTabHealth(status,task){');
+ const refresh=renderer.indexOf('async function refreshTasks(){',start);
+ const end=renderer.indexOf("$('refresh-tasks').onclick=refreshTasks;",refresh);
+ assert.ok(start>=0&&refresh>start&&end>refresh,'task renderer and browser status helper not found');
+ // The task renderer's helper is part of production code; VM fixtures must load it too.
  return renderer.slice(start,end);
 }
 // No network, browser automation, or live schedules are touched.

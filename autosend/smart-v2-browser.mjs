@@ -6,6 +6,7 @@ import {autosendMcp} from './browser-client.mjs';
 import {observeExistingChat,locateChatTab,parsePageResult} from './delivery.mjs';
 import {readAutoReport,reportBelongsToLastSmartMessage} from './smart-v2.mjs';
 import {parseWorkEvidence} from './smart-work-ready.mjs';
+import {parseGitHubPrNumber} from './github-ci-evidence.mjs';
 import {createHash} from 'node:crypto';
 import {streamReady} from './stream-monitor.mjs';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -75,6 +76,7 @@ export async function readSmartBrowserOutcome(task,deps={}) {
     second.lastUserText,second.assistantText
   ].join('\0')).digest('hex');
   return {kind:'report',report,fingerprint,
-    workEvidence:parseWorkEvidence(second.assistantText)};
+    workEvidence:parseWorkEvidence(second.assistantText),
+    githubPrNumber:parseGitHubPrNumber(second.assistantText)};
  }catch{return {kind:'unavailable'};}
 }

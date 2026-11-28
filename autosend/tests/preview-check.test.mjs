@@ -35,13 +35,14 @@ test('preview never trusts permanent unknown server status despite an idle DOM',
  assert.match(result.reason,/не предоставил статус генерации/);
  assert.equal(result.readings,3);
 });
-test('typing in ChatGPT composer outranks a transient server failure and is never touched',async()=>{
+test('stable composer draft remains private; transient unknown stream cannot authorize Send',async()=>{
  const {read,calls}=observer([{...base,editorText:'Private unsent draft',streamStatus:'UNKNOWN',streamReason:'HTTP_503'}]);
- const result=await checkPreview({},read,async()=>{throw Error('must not retry')});
+ const result=await checkPreview({},read,async()=>{});
  assert.equal(result.ready,false);
- assert.equal(result.code,'USER_DRAFT_PRESENT');
- assert.equal(result.readings,1);
- assert.equal(calls.length,1);
+ assert.equal(result.code,'STREAM_STATUS_UNKNOWN');
+ assert.equal(result.readings,3);
+ assert.equal(calls.length,3);
+ assert.equal(result.sendBlocked,true);
  assert.ok(!JSON.stringify(result).includes('Private unsent draft'));
 });
 test('stream activity blocks preview even if the server reports COMPLETE',()=>{

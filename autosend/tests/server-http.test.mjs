@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {verificationReceipt} from '../reconciliation.mjs';
 
 const CHAT_URL='https://chatgpt.com/c/00000000-0000-4000-8000-000000000001';
@@ -29,7 +30,7 @@ async function startIsolated(state){
   MCPHUB_AUTOSEND_CHECK_MS:'50',
   NODE_ENV:'test'
  };
- const child=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname],
+ const child=spawn(process.execPath,[fileURLToPath(new URL('../server.mjs',import.meta.url))],
   {env,stdio:['ignore','pipe','pipe']});
  let stdout='',stderr='';
  child.stdout.on('data',v=>stdout+=v.toString().slice(0,1000));
@@ -267,4 +268,138 @@ test('spoofed native header without control token is forbidden',async()=>{
   const forged=await fetch(instance.base+'/api/status',{headers:{...instance.headers,'X-MCPHub-Token':'f'.repeat(64)}});
   assert.equal(forged.status,403);
  }finally{await shutdown(instance);}
+});
+
+test('guided project creation is paused, deduplicated and never bootstraps without browser verification',async()=>{
+ const instance=await startIsolated();
+ try{
+  const args={action:'create',url:CHAT_URL,message:'Продолжай работу',
+   project_label:'Новый проект',guided_first_run:true,schedule_mode:'after_response',interval_seconds:600};
+  const first=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,body:JSON.stringify(args)});
+  assert.equal(first.status,200);
+  const created=(await first.json()).task;
+  assert.equal(created.project_label,'Новый проект');
+  assert.equal(created.guided_first_run,true);
+  assert.equal(created.schedule_mode,'after_response');
+  assert.equal(created.status,'paused');
+  assert.equal(created.enabled,false);
+  const duplicate=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,body:JSON.stringify(args)});
+  assert.equal(duplicate.status,400);
+  const start=await fetch(instance.base+'/api/tasks',{method:'POST',headers:instance.headers,body:JSON.stringify({action:'start_first',id:created.id})});
+  assert.equal(start.status,400,'no verified Chrome tab, no first run');
+  const view=await(await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  assert.equal(view.tasks.length,1);
+  assert.equal(view.tasks[0].enabled,false);
+  assert.equal(view.tasks[0].status,'paused');
+  assert.equal(view.tasks[0].first_cycle_started_at,undefined);
+  assert.equal(view.tasks[0].manual_once,undefined);
+  assert.equal(view.attempts.length,0);
+  assert.equal(JSON.parse(await readFile(instance.stateFile,'utf8')).tasks.length,1);
+ }finally{await shutdown(instance)}
+});
+
+test('MCP-04 HTTP migration journals pre-existing click proof without any new Send',async()=>{
+ const task={id:'legacy-click',url:CHAT_URL,message:'DO_NOT_SEND',interval_seconds:900,
+  enabled:true,status:'sending',manual_once:false,next_at:null,
+  last_attempt_at:new Date().toISOString(),last_error:'',delivery_count:0,
+  delivery_stage:'click-committed',verification:verificationReceipt({userCount:1,lastUserText:'old'})};
+ const s=await startIsolated({version:1,tasks:[task],attempts:[]});
+ try{
+  const response=await (await fetch(s.base+'/api/status',{headers:s.headers})).json();
+  assert.equal(response.tasks[0].status,'verifying');
+  assert.equal(response.tasks[0].delivery_count,0);
+  const disk=JSON.parse(await readFile(s.stateFile,'utf8'));
+  assert.equal(disk.transition_sequence,2);
+  assert.deepEqual(disk.transition_log.map(x=>x.kind),['BASELINE_IMPORTED','STATUS_CHANGED']);
+  assert.equal(disk.transition_log.at(-1).from.status,'sending');
+  assert.equal(disk.transition_log.at(-1).to.status,'verifying');
+  assert.equal(disk.transition_log.at(-1).to.receipt,true);
+  assert.doesNotMatch(JSON.stringify(disk.transition_log),/DO_NOT_SEND|chatgpt.com/);
+ }finally{await shutdown(s)}
+});
+
+test('MCP-05 HTTP status presents independent result counters, not self-reported claims as verified',async()=>{
+ const task={id:'museum-metric',url:CHAT_URL,message:'do not send',interval_seconds:900,
+  enabled:false,status:'paused',manual_once:false,next_at:null,delivery_count:0,
+  smart_v2_project:'Museum',work_result:{version:1,project:'Museum',status:'SELF_REPORT',fingerprint:'a'.repeat(64)},
+  work_result_metrics:{self_report_only:1,verified:0}};
+ const instance=await startIsolated({version:1,tasks:[task],attempts:[]});
+ try{
+  const result=await (await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  const metrics=result.tasks[0].work_efficiency;
+  assert.equal(metrics.last_work_result_status,'SELF_REPORT');
+  assert.equal(metrics.self_report_only_results,1);
+  assert.equal(metrics.verified_work_results,0);
+  assert.equal(result.tasks[0].status,'paused');
+  assert.equal(result.tasks[0].delivery_count,0);
+ }finally{await shutdown(instance)}
+});
+
+test('MCP-05 isolated HTTP end-to-end: TD and Museum independently verified results survive encrypted fixture store without Send',async()=>{
+ const {KNOWN_WORK_PROFILES,KNOWN_WORK_POLICIES,inspectWorkResult,commitObservedWorkResult}=
+  await import('../work-result.mjs');
+ const policies=[KNOWN_WORK_PROFILES.TD_BENCHO_VARIANTS,KNOWN_WORK_POLICIES.Museum];
+ const now=Date.now();
+ const tasks=[];
+ for(let i=0;i<policies.length;i++){
+  const p=policies[i];
+  const task={id:'isolated-'+p.project,url:'https://chatgpt.com/c/00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+   message:'DO_NOT_SEND',interval_seconds:900,enabled:false,status:'paused',
+   manual_once:false,next_at:null,delivery_count:0,smart_v2_project:p.project,
+   last_success_at:new Date(now-60000).toISOString()};
+  const outcome={kind:'report',fingerprint:String(i+1).repeat(64),
+   report:{status:'VERIFIED',task:'EXTERNAL-FIXTURE'},
+   workEvidence:{source:'assistant_self_report',files_changed:1,tests_passed:2,tests_failed:0,commit:'a'.repeat(40)}};
+  const proof={verified:true,testsVerified:true,source:'github_ci_verified',
+   project:p.project,repo:p.repo,fingerprint:outcome.fingerprint,
+   sha:'a'.repeat(40),prNumber:i+10,provenAt:new Date(now).toISOString(),
+   workflows:p.requiredWorkflows.map((name,j)=>({name,runId:100+i*10+j}))};
+  const classified=await inspectWorkResult(task,outcome,{policy:p,now,verify:async()=>proof});
+  assert.equal(classified.status,'VERIFIED');
+  assert.equal(commitObservedWorkResult(task,classified,now),true);
+  tasks.push(task);
+ }
+ const instance=await startIsolated({version:1,tasks,attempts:[]});
+ try{
+  const result=await (await fetch(instance.base+'/api/status',{headers:instance.headers})).json();
+  assert.equal(result.tasks.length,2);
+  assert.deepEqual(result.tasks.map(t=>t.smart_v2_project).sort(),['Museum','TD']);
+  for(const t of result.tasks){
+   assert.equal(t.work_efficiency.verified_work_results,1);
+   assert.equal(t.work_efficiency.self_report_only_results,0);
+   assert.equal(t.work_efficiency.last_work_result_status,'VERIFIED');
+   assert.equal(t.delivery_count,0);
+   assert.equal(t.status,'paused');
+   assert.equal(t.enabled,false);
+  }
+  assert.equal(result.attempts.length,0);
+  const disk=JSON.parse(await readFile(instance.stateFile,'utf8'));
+  assert.equal(disk.tasks.length,2);
+  assert.equal(disk.tasks.every(t=>t.work_result_seen.length===1),true);
+  assert.equal(disk.tasks.every(t=>t.work_result_metrics.verified===1),true);
+  assert.equal(disk.transition_log.length,2);
+ }finally{await shutdown(instance)}
+});
+
+test('MCP-03 HTTP transport check is owner-only, read-only and never approves a chat',async()=>{
+ const s=await startIsolated({version:1,tasks:[],attempts:[]});
+ try{
+  const denied=await fetch(s.base+'/api/tasks',{method:'POST',
+   headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'probe_extension'})});
+  assert.equal(denied.status,403);
+  const result=await fetch(s.base+'/api/tasks',{method:'POST',headers:s.headers,
+   body:JSON.stringify({action:'probe_extension'})});
+  assert.equal(result.status,200);
+  const probe=await result.json();
+  assert.equal(probe.connected,false,'A missing dedicated backend is not a healthy extension');
+  assert.equal(probe.sendBlocked,true);
+  const status=await (await fetch(s.base+'/api/status',{headers:s.headers})).json();
+  assert.equal(status.extensionTransportConnected,false);
+  assert.equal(status.extensionConnected,false);
+  assert.equal(status.chatTabApprovedCount,0);
+  assert.deepEqual(status.tasks,[]);
+  assert.deepEqual(status.attempts,[]);
+  assert.equal(status.modelUsage.state,'LOCAL_AUTOSEND_RECEIPTS');
+  assert.deepEqual(status.modelUsage.rows,[]);
+ }finally{await shutdown(s)}
 });

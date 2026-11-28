@@ -41,12 +41,13 @@ test('interval and text validation',()=>{
  assert.throws(()=>validateInput({url:target,message:'',interval_seconds:60}));
  assert.equal(validateInput({url:target,message:'test',interval_seconds:60}).message,'test');
 });
-test('drafts are always created paused, scheduler low-level clock math unchanged',()=>{
+test('drafts are paused and first owner-enabled interval attempt is immediately due',()=>{
  const t=newTask({url:target,message:'ping',interval_seconds:60},1000);
  assert.equal(t.enabled,false);assert.equal(t.next_at,null);
- arm(t,1000);assert.equal(t.next_at,new Date(61000).toISOString());
  assert.deepEqual(dueTasks({tasks:[t]},60000),[]);
- assert.equal(dueTasks({tasks:[t]},61000).length,1);
+ arm(t,1000);assert.equal(t.next_at,new Date(1000).toISOString());
+ assert.deepEqual(dueTasks({tasks:[t]},999),[]);
+ assert.equal(dueTasks({tasks:[t]},1000).length,1);
  pause(t);assert.equal(dueTasks({tasks:[t]},100000).length,0);
 });
 test('existing normal ChatGPT schedule survives restart; invalid Codex task is blocked',()=>{
@@ -72,7 +73,9 @@ test('atomic local store roundtrip, private file permissions',()=>{
   const file=path.join(folder,'tasks.json');
   const state={version:1,tasks:[],attempts:[]};writeState(state,file);
   assert.deepEqual(readState(file),state);
-  assert.equal(fs.statSync(file).mode&0o777,0o600);
+  // Unix mode bits encode private permissions; NTFS ACLs are different on Windows.
+  if(process.platform!=='win32')assert.equal(fs.statSync(file).mode&0o777,0o600);
+  else assert.equal(fs.statSync(file).isFile(),true);
  } finally {fs.rmSync(folder,{recursive:true,force:true});}
 });
 
@@ -83,4 +86,20 @@ test('pending manual one-shot is not delivered unexpectedly after scheduler rebo
  assert.equal(t.enabled,false);assert.equal(t.status,'paused');assert.equal(t.manual_once,false);
  assert.equal(t.next_at,null);
  assert.match(t.last_error,/отменена при перезапуске/);
+});
+
+test('MCP-04 duplicate task IDs in durable store fail closed before read or write',()=>{
+ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'mcp04-duplicate-id-'));
+ try {
+  const file=path.join(folder,'tasks.json');
+  const state={version:1,tasks:[
+   {id:'same-id',url:target,enabled:true,status:'scheduled'},
+   {id:'same-id',url:project,enabled:true,status:'scheduled'}
+  ],attempts:[]};
+  const original=JSON.stringify(state)+'\n';
+  fs.writeFileSync(file,original);
+  assert.throws(()=>readState(file),/duplicate.*task.*id/i);
+  assert.throws(()=>writeState(state,file),/duplicate.*task.*id/i);
+  assert.equal(fs.readFileSync(file,'utf8'),original);
+ } finally {fs.rmSync(folder,{recursive:true,force:true});}
 });
