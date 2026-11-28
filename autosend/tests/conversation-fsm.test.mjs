@@ -114,3 +114,27 @@ test('MCP-04 duplicated IDs cannot bypass the conversation guard',()=>{
  assert.equal(eligibleToSend(b,[a,b,unrelated],now),false);
  assert.equal(nextDue([a,b,unrelated],now)?.id,unrelated.id);
 });
+
+test('MCP-04 a scheduled task cannot dispatch or auto-observe its OWN unresolved receipt or slot',()=>{
+ const other=task(20);
+ for(const stale of [
+  {...task(21),verification:{baselineUserCount:1}},
+  {...task(22),active_slot_id:'slot-pending'}
+ ]){
+  const tasks=[stale,other];
+  assert.equal(eligibleToSend(stale,tasks,now),false);
+  assert.equal(canObserveTask(stale,tasks),false);
+  assert.equal(nextDue(tasks,now)?.id,other.id);
+  const state=conversationState(tasks,stale.url);
+  assert.equal(state.blocked,true);
+  assert.equal(state.state,STATES.UNKNOWN);
+ }
+});
+
+test('MCP-04 an inactive task with its OWN unresolved receipt remains blocked after reload',()=>{
+ const pending={...task(23,'paused'),enabled:false,
+  verification:{baselineUserCount:1}};
+ const state=conversationState(JSON.parse(JSON.stringify([pending])),pending.url);
+ assert.equal(state.blocked,true);
+ assert.equal(state.state,STATES.UNKNOWN);
+});
