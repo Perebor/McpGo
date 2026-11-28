@@ -6,10 +6,10 @@ const sectionInfo=Object.freeze({
  messages:['AGENT MESSAGING','Связь агентов','Локальный обмен сообщениями между агентами'],
  settings:['TUNNEL SETTINGS','Настройки туннелей','Ключи, браузер и автозапуск Windows'],
  skills:['AGENT SKILLS','Навыки инструментов','Готовые инструкции для инструментов и агентов McpGo'],
- autosend:['PROJECT CONTINUATION','Автопродолжение','Проекты, чаты и безопасные запуски работы в ChatGPT'],
+ autosend:['PROJECT WORKSPACE','Проекты и чаты','Текущая работа, результат и следующий безопасный шаг'],
  updates:['RELEASES','Обновления','Версии McpGo и проверка новых выпусков']
 });
-let activeSection='overview';
+let activeSection='autosend';
 function navigate(section,focus=false){
  const page=sectionInfo[section];
  if(!page)return;
@@ -36,7 +36,7 @@ for(const button of document.querySelectorAll('[data-nav]'))
 for(const button of document.querySelectorAll('[data-open]'))
  button.addEventListener('click',()=>window.mcpgo.openLocation(button.dataset.open)
   .catch(error=>message(error.message,true)));
-navigate('overview');
+navigate('autosend');
 // Keep selected skill local; the main process accepts only four fixed resource IDs.
 let selectedSkill='terminalhub-operations',skillRequest=0;
 async function loadSkill(id){
@@ -504,7 +504,8 @@ $('recover-runtime').onclick=async()=>{
 function element(tag,text){
  const node=document.createElement(tag);node.textContent=String(text);return node;
 }
-function item(title,lines,buttons=[],offsetEditor=null){
+function item(title,lines,buttons=[],offsetEditor=null,view=null){
+ if(view?.kind==='project')return projectCard(title,lines,buttons,offsetEditor,view);
  const box=element('div','');box.className='item';box.append(element('strong',title));
  for(const line of lines)box.append(element('small',line));
  if(buttons.length){
@@ -526,6 +527,69 @@ function item(title,lines,buttons=[],offsetEditor=null){
   group.append(save);box.append(group);
  }
  return box;
+}
+function projectCard(title,lines,buttons,offsetEditor,view){
+ const task=view.task;
+ const summary=window.McpGoProjectView.presentProject(task,view.status);
+ const card=element('article','');
+ card.className='item project-card';
+ card.setAttribute('aria-label','Проект: '+summary.title);
+ const head=element('div','');head.className='project-head';
+ const titleNode=element('h3',summary.title);
+ const state=element('span',summary.state);state.className='project-state';
+ if(task.status==='unknown'||task.handoff_requires_owner_reconfigure)
+  state.classList.add('project-state-uncertain');
+ else if(task.enabled===true)state.classList.add('project-state-active');
+ head.append(titleNode,state);card.append(head);
+ const facts=element('dl','');facts.className='project-facts';
+ for(const [name,value] of [
+  ['Чат',summary.chat],['Последний результат',summary.result],
+  ['Что дальше',summary.next],['Причина ожидания',summary.reason]
+ ]){
+  const row=element('div','');row.className='project-fact';
+  row.append(element('dt',name),element('dd',value||'Не указано'));facts.append(row);
+ }
+ card.append(facts);
+ const actions=element('div','');actions.className='actions project-main-actions';
+ const createButton=entry=>{
+  const button=element('button',entry.label);
+  button.type='button';
+  button.className=entry.danger?'minor project-remove':'minor';
+  if(entry.danger)button.setAttribute('aria-label','Удалить принудительно: '+summary.title);
+  button.onclick=entry.run;
+  return button;
+ };
+ const findButton=label=>buttons.find(button=>button.label===label);
+ const primary=summary.primaryAction?findButton(
+  summary.primaryAction==='pause'?'Пауза':
+  summary.primaryAction==='recheck_unknown'?'Перепроверить доставку':
+  summary.primaryAction==='start_first'?'Запустить':'Включить'):null;
+ if(primary&&!summary.primaryDisabled){
+  const btn=createButton({...primary,label:summary.primaryLabel});
+  btn.className='primary';btn.dataset.primaryAction=summary.primaryAction;
+  actions.append(btn);
+ }else{
+  const blocked=element('button',summary.primaryLabel);
+  blocked.type='button';blocked.disabled=true;blocked.className='minor';
+  blocked.setAttribute('aria-label','Запуск недоступен: '+summary.reason);
+  actions.append(blocked);
+ }
+ const preview=findButton('Проверить без отправки');
+ if(preview)actions.append(createButton(preview));
+ // Emergency control is ALWAYS present, including UNKNOWN and in-flight.
+ const force=findButton('Удалить принудительно');
+ if(force)actions.append(createButton(force));
+ card.append(actions);
+ const excluded=new Set([primary,preview,force].filter(Boolean));
+ const extra=buttons.filter(button=>!excluded.has(button));
+ const details=element('details','');
+ details.className='project-diagnostics';
+ details.dataset.taskId=task.id;
+ details.open=view.open===true;
+ details.append(element('summary','Диагностика и настройки'));
+ details.append(item('Технические сведения',lines,extra,offsetEditor));
+ card.append(details);
+ return card;
 }
 const previewResults=new Map();
 const pendingFirstStarts=new Set();
@@ -575,6 +639,9 @@ async function refreshTasks(){
   const status=await window.mcpgo.serviceRead('autosend','/api/status');
   const {tasks=[]}=status;
   if(revision!==taskRefreshRevision)return;
+  const expanded=new Set();
+  if(typeof list.querySelectorAll==='function')
+   for(const node of list.querySelectorAll('details.project-diagnostics[open]'))expanded.add(node.dataset.taskId);
   list.replaceChildren();
   const ids=new Set(tasks.map(t=>t.id));
   for(const id of previewResults.keys())if(!ids.has(id))previewResults.delete(id);
@@ -582,7 +649,7 @@ async function refreshTasks(){
    const evidence=previewResults.get(t.id);
    const checked=evidence&&evidence.targetUrl===t.url?evidence:null;
    const pending=['sending','checking','verifying'].includes(t.status);
-   const buttons=pending?[]:t.status==='unknown'?
+   const buttons=pending?[]:t.handoff_requires_owner_reconfigure===true?[]:t.status==='unknown'?
      [{label:'Перепроверить доставку',run:()=>doTask('recheck_unknown',t.id)},
       {label:'Подтвердить получение',run:()=>{
        if(confirm('Вы лично проверили этот чат и увидели сообщение именно из последней попытки? Подтверждение не отправит сообщение и оставит расписание на паузе.'))doTask('confirm_received',t.id);
@@ -636,7 +703,8 @@ async function refreshTasks(){
      (checked.ready?'готовность наблюдалась; ':'готовность не подтверждена; ')+String(checked.reason||'нет результата')+
      ' Это не разрешение на Send.':'',
     t.status==='unknown'?'Повторная отправка заблокирована. Подтвердите получение только после личной проверки чата.':'',
-   ].filter(Boolean),buttons,offsetEditor));
+   ].filter(Boolean),buttons,offsetEditor,
+    {kind:'project',task:t,status,checked,open:expanded.has(t.id)}));
   }
   if(!tasks.length)list.append(item('Расписания отсутствуют',[]));
  }catch(e){if(revision===taskRefreshRevision){list.replaceChildren();list.append(item('Планировщик недоступен',[e.message]))}}
@@ -689,7 +757,7 @@ $('agent-create').onsubmit=async event=>{
  }catch(e){message(e.message,true)}finally{btn.disabled=false}
 };
 void refreshTasks();void refreshAgents();
-setInterval(()=>{if(!document.hidden){if(!document.activeElement?.closest('[data-offset-editor]'))void refreshTasks();void refreshAgents()}},15000);
+setInterval(()=>{if(!document.hidden){if(!document.activeElement?.closest('[data-offset-editor],.project-diagnostics'))void refreshTasks();void refreshAgents()}},15000);
 
 
 async function refreshHistory(){

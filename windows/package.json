@@ -1,6 +1,6 @@
 {
   "name": "mcpgo-windows",
-  "version": "2.1.0-preview.33-local.1",
+  "version": "2.1.0-preview.34-local.1",
   "private": true,
   "description": "McpGo Windows desktop agent",
   "main": "app/main.cjs",
@@ -122,7 +122,8 @@
           "hub_role_adapter.py",
           "usage_ledger.py",
           "usage_adapter.py",
-          "usage_cli.py"
+          "usage_cli.py",
+          "codex_usage.py"
         ]
       },
       {
